@@ -11,6 +11,7 @@
 #include "audio_oboe.hpp"
 
 #include <vector>
+#include <memory>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -22,6 +23,16 @@
 #include <android/log.h>
 
 #include <oboe/Oboe.h>
+#include <oboe/LatencyTuner.h>
+
+/* Underruns are the one thing a user is asked to report, so the count has to
+reach the file they can actually send (user/log.txt, via Rack's WARN) as well
+as logcat, which only someone with a cable ever sees. Same both-sinks rule the
+rest of the port layer follows. */
+#define AUDIO_WARN(...) do { \
+	__android_log_print(ANDROID_LOG_WARN, "rackdroid.audio", __VA_ARGS__); \
+	WARN(__VA_ARGS__); \
+} while (0)
 
 #include <audio.hpp>
 #include <system.hpp>
@@ -163,6 +174,18 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	std::vector<float> inputBuffer;
 	/** Guards stream open/close against the data callback. */
 	std::mutex streamMutex;
+	/** Grows the buffer when the device underruns. Oboe opens with the
+	smallest buffer it thinks will hold, which on a phone under a heavy patch
+	is regularly one burst too few -- and nothing here used to notice: the
+	stream just clicked, forever, at whatever size it started with. The tuner
+	trades a burst of latency for stability, and only on the devices that
+	actually need it. Owned by the stream it tunes, so it is rebuilt on every
+	open and dropped before the stream closes. */
+	std::unique_ptr<oboe::LatencyTuner> latencyTuner;
+	/** Last underrun count reported, so a change can be logged once instead of
+	every callback. A user saying "it crackles" and a log saying "xruns 0 -> 37"
+	are not the same bug report. */
+	int32_t lastXRuns = 0;
 
 	OboeDevice() {
 		openStreams();
@@ -210,15 +233,22 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 		inputBuffer.resize(outputStream->getBufferCapacityInFrames() * NUM_INPUTS);
 
+		latencyTuner.reset(new oboe::LatencyTuner(*outputStream));
+		lastXRuns = 0;
+
 		if (inputStream)
 			inputStream->requestStart();
 		outputStream->requestStart();
-		INFO("Oboe: stream started, sampleRate=%g burst=%d", sampleRate, outputStream->getFramesPerBurst());
+		AUDIO_WARN("Oboe: stream started, sampleRate=%g burst=%d buffer=%d capacity=%d",
+			sampleRate, outputStream->getFramesPerBurst(),
+			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames());
 		onStartStream();
 	}
 
 	void closeStreams() {
 		std::lock_guard<std::mutex> lock(streamMutex);
+		// Holds a reference to the stream, so it goes first.
+		latencyTuner.reset();
 		if (outputStream) {
 			outputStream->stop();
 			outputStream->close();
@@ -276,6 +306,18 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 	oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* audioData, int32_t numFrames) override {
 		float* output = (float*) audioData;
+
+		// Non-blocking and callback-safe by design: this is what LatencyTuner
+		// is for. It only acts when the underrun count has moved.
+		if (latencyTuner)
+			latencyTuner->tune();
+		int32_t xruns = stream->getXRunCount().value();
+		if (xruns != lastXRuns) {
+			lastXRuns = xruns;
+			AUDIO_WARN("Oboe: %d underruns, buffer now %d frames of %d",
+				xruns, stream->getBufferSizeInFrames(),
+				stream->getBufferCapacityInFrames());
+		}
 
 		const float* input = NULL;
 		if (inputStream) {

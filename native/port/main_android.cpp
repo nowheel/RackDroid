@@ -169,8 +169,30 @@ struct RackDroidApp {
 			LOGW("Recovery startup: autosave and user plugins disabled");
 		}
 		settings::headless = false;
-		if (settings::sampleRate <= 0.f)
-			settings::sampleRate = 48000.f;
+		// Zero is not "unset", it is Rack's AUTO: the engine then takes the
+		// rate the audio device actually opened (Engine::setSuggestedSampleRate,
+		// fed by core/Audio.cpp). Forcing 48000 here -- which this did -- turned
+		// Auto off on every fresh install, and on a device whose stream is not
+		// 48 kHz the Audio module then resampled the whole time, on the audio
+		// thread. That is a crackle nobody can explain from the outside.
+		//
+		// The migration is safe in a way that is worth stating: on a device that
+		// really runs at 48 kHz, Auto resolves to 48000 and nothing changes at
+		// all. It only differs where the forced value was wrong. Done once, so a
+		// rate the user picks by hand afterwards is never overridden.
+		{
+			std::string marker = asset::user("samplerate-auto-migrated");
+			if (!system::isFile(marker)) {
+				if (settings::sampleRate == 48000.f) {
+					settings::sampleRate = 0.f;
+					LOGI("Engine sample rate moved to Auto: it follows the device now");
+				}
+				if (FILE* f = std::fopen(marker.c_str(), "w")) {
+					std::fputc('\n', f);
+					std::fclose(f);
+				}
+			}
+		}
 		// The welcome tips window is a fixed 550-unit-wide overlay that
 		// cannot fit portrait phones, and its content is desktop-oriented
 		// (right-click, Ctrl+drag, Enter). Never show it on launch.
