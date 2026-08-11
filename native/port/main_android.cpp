@@ -426,6 +426,42 @@ toolbar, palette, tour, every dialog of ours -- comes from Android resources,
 which follow the DEVICE locale and have never heard of Rack's setting, so it
 needs the restart even more. On a phone there is no reason to make the user
 perform it: save, tell Java, and Java comes back up in the new language. */
+/** Spend the cores the device has, once it is clear the patch needs them.
+
+Measured on hardware, 224 modules at 48 kHz, underruns over 30 s: 1 thread
+1522, 2 threads 2298, 4 threads 3217, 8 threads 22. Eight is the core count of
+that phone. The shape is not a gentle curve with a peak in the middle -- the
+fractions of the core count are all bad and the full count is a hundred times
+better -- so the rule is "all of them", never "some of them", and a device with
+four cores gets four rather than the two that would be its bad middle.
+
+This does not run on a hunch: it waits for the audio thread to report that it
+underran with the buffer already at its ceiling, which is the difference
+between a patch that is too heavy and a device that merely jitters. Extra
+threads are not free -- the engine syncs them twice per sample, which costs
+battery and heat -- so a patch that never asks never pays.
+
+Once per session, and the Threads menu keeps the last word afterwards: it is
+written to the setting too, so the menu agrees with the engine and the user can
+put it back. */
+static void checkEngineOverload() {
+	static bool escalated = false;
+	if (escalated || !rackdroid::audioOverloaded())
+		return;
+	escalated = true; // whatever we decide below, decide it only once
+	int cores = system::getLogicalCoreCount();
+	if (cores <= 1 || settings::threadCount >= cores)
+		return;
+	LOGW("Engine: underrunning with the buffer at its ceiling; raising threads "
+		"from %d to %d (Engine > Threads to change it back)",
+		settings::threadCount, cores);
+	// Setting it is all that is needed: Engine::stepBlock relaunches its
+	// workers from settings::threadCount on every block (Engine.cpp:572),
+	// which is also how the Threads menu works -- it writes the setting and
+	// nothing else.
+	settings::threadCount = cores;
+}
+
 static void checkLanguageChanged() {
 	if (g_language.empty() || settings::language == g_language)
 		return;
@@ -485,7 +521,8 @@ void android_main(android_app* app) {
 			try {
 				rackdroid::touchStep();
 				rackdroid::processTourDemo();
-				checkLanguageChanged();
+				checkEngineOverload();
+			checkLanguageChanged();
 				APP->window->step();
 			}
 			catch (std::exception& e) {

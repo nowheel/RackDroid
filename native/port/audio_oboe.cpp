@@ -161,10 +161,28 @@ WavRecorder gRecorder;
 namespace rackdroid {
 
 
+/** Set by the audio thread when it is underrunning with the buffer already at
+its ceiling. Read by the render thread, which is the only one allowed to touch
+the engine. */
+static std::atomic<bool> g_overloaded{false};
+
+bool audioOverloaded() {
+	return g_overloaded.load(std::memory_order_relaxed);
+}
+
+
 static const int NUM_OUTPUTS = 2;
 static const int NUM_INPUTS = 2;
 static const int DEFAULT_SAMPLE_RATE = 48000;
-static const int DEFAULT_BLOCK_SIZE = 256;
+// 256 upstream. Measured on hardware with a 224-module patch at 48 kHz,
+// underruns over 30 s: 96 frames -> 6574, 256 -> 2381, 512 -> 1218,
+// 1024 -> 652. Every doubling roughly halves them, so this is not a knob
+// with a sweet spot, it is a straight trade of latency for headroom, and
+// 256 was picked for a desktop that has the CPU to spare. 512 costs
+// 10.7 ms at 48 kHz and buys back half the dropouts; 1024 would buy half
+// again for 21 ms, which is too much to play through. Users who want that
+// can pick it in the Audio module -- this only moves the starting point.
+static const int DEFAULT_BLOCK_SIZE = 512;
 
 
 struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
@@ -334,6 +352,12 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		int32_t xruns = stream->getXRunCount().value();
 		if (xruns != lastXRuns) {
 			lastXRuns = xruns;
+			// Underruns while the tuner has already grown the buffer as far as
+			// it goes: the device is not jittering, it is short of CPU, and no
+			// buffer will fix that. Publish it so the engine can answer.
+			if (stream->getBufferSizeInFrames() >=
+				stream->getBufferCapacityInFrames() - stream->getFramesPerBurst())
+				g_overloaded.store(true, std::memory_order_relaxed);
 			AUDIO_WARN("Oboe: %d underruns, buffer now %d frames of %d",
 				xruns, stream->getBufferSizeInFrames(),
 				stream->getBufferCapacityInFrames());
