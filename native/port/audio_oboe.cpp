@@ -260,13 +260,23 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// Holds a reference to the stream, so it goes first.
 		latencyTuner.reset();
 		if (outputStream) {
+			// This one keeps its wait: the output stream owns the data
+			// callback, and stop() returning means the callback is no longer
+			// running. It costs about 170 ms and it is worth them.
 			outputStream->stop();
 			outputStream->close();
 			outputStream.reset();
 			onStopStream();
 		}
 		if (inputStream) {
-			inputStream->stop();
+			// requestStop(), not stop(): stop() waits for the stream to report
+			// Stopped and this one never does, so it burned the full 2 s
+			// kDefaultTimeoutNanos on every close -- on the render thread.
+			// Nothing needs the wait. The input stream has no data callback of
+			// its own; its only reader is the output callback, and the output
+			// stream is already stopped and closed above. close() tears the
+			// stream down regardless of whether the state transition landed.
+			inputStream->requestStop();
 			inputStream->close();
 			inputStream.reset();
 		}
