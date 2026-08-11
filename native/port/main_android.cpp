@@ -14,6 +14,9 @@
 #include <android/configuration.h>
 #include <android/log.h>
 #include <sys/system_properties.h>
+#include <sys/resource.h>
+#include <dirent.h>
+#include <cstring>
 
 #include <common.hpp>
 #include <system.hpp>
@@ -426,6 +429,66 @@ toolbar, palette, tour, every dialog of ours -- comes from Android resources,
 which follow the DEVICE locale and have never heard of Rack's setting, so it
 needs the restart even more. On a phone there is no reason to make the user
 perform it: save, tell Java, and Java comes back up in the new language. */
+/** Give the engine's worker threads audio priority.
+
+Rack names them ("Worker 0", "Worker 1", ...) and sets their FPU flags, and
+that is all: they run at ordinary priority. The audio callback thread does
+not -- AAudio raises it -- so on a big.LITTLE phone the workers can sit on a
+slow core while the audio thread, which syncs with them TWICE PER SAMPLE
+through a spin barrier, waits for the slowest of them. Every sample.
+
+Rack creates the threads, so there is nothing to pass a priority to at
+creation; the thread names are the only handle, and /proc/self/task is where
+they are legible. setpriority on a thread of our own process is allowed
+without any permission -- it is what Java's Process.setThreadPriority(
+THREAD_PRIORITY_URGENT_AUDIO) does. Real-time scheduling is not: SCHED_FIFO
+needs CAP_SYS_NICE, which an app does not have. */
+static void applyWorkerPriority() {
+	DIR* dir = opendir("/proc/self/task");
+	if (!dir)
+		return;
+	int raised = 0;
+	while (dirent* e = readdir(dir)) {
+		int tid = atoi(e->d_name);
+		if (tid <= 0)
+			continue;
+		char path[64];
+		std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", tid);
+		FILE* f = std::fopen(path, "r");
+		if (!f)
+			continue;
+		char name[32] = {0};
+		bool worker = std::fgets(name, sizeof(name), f)
+			&& std::strncmp(name, "Worker ", 7) == 0;
+		std::fclose(f);
+		// -19 is URGENT_AUDIO. Not -20: that is reserved for the thread that
+		// must never be late, and these are helpers to it, not it.
+		if (worker && setpriority(PRIO_PROCESS, tid, -19) == 0)
+			raised++;
+	}
+	closedir(dir);
+	if (raised > 0)
+		LOGI("Engine: raised %d worker threads to audio priority", raised);
+}
+
+/** Workers are created by Engine::setThreadCount, which the Threads menu calls
+and tells nobody about, so this watches the setting the same way the language
+check below does. The delay is not decoration: a thread that has just been
+created has not necessarily reached system::setThreadName yet, and until it
+does it has no name to match. */
+static void checkWorkerPriority() {
+	static int lastThreadCount = -1;
+	static double applyAt = 0.0;
+	if (settings::threadCount != lastThreadCount) {
+		lastThreadCount = settings::threadCount;
+		applyAt = system::getTime() + 0.5;
+	}
+	if (applyAt > 0.0 && system::getTime() >= applyAt) {
+		applyAt = 0.0;
+		applyWorkerPriority();
+	}
+}
+
 /** Spend the cores the device has, once it is clear the patch needs them.
 
 Measured on hardware, 224 modules at 48 kHz, underruns over 30 s: 1 thread
@@ -521,7 +584,8 @@ void android_main(android_app* app) {
 			try {
 				rackdroid::touchStep();
 				rackdroid::processTourDemo();
-				checkEngineOverload();
+				checkWorkerPriority();
+			checkEngineOverload();
 			checkLanguageChanged();
 				APP->window->step();
 			}
