@@ -105,8 +105,13 @@ struct RackDroidApp {
 		logger::init();
 		random::init();
 
-		LOGI("%s %s system=%s user=%s", APP_NAME.c_str(), APP_VERSION.c_str(),
-			asset::systemDir.c_str(), asset::userDir.c_str());
+		// APP_VERSION is the RACK ENGINE's version, not the app's, and printing
+		// it right after APP_NAME read as "RackDroid 2.6.4" -- a version string
+		// that does not exist and that no release can be matched to. The app's
+		// own version lives on the Java side (BuildConfig.VERSION_NAME, logged
+		// to user/java-log.txt, which is exported and shown beside this file).
+		LOGI("%s on Rack engine %s, system=%s user=%s", APP_NAME.c_str(),
+			APP_VERSION.c_str(), asset::systemDir.c_str(), asset::userDir.c_str());
 
 		if (!rackdroid::extractSystemAssets(app->activity->assetManager, asset::systemDir))
 			LOGE("asset extraction failed; continuing without system resources");
