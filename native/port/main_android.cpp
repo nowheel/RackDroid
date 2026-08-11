@@ -10,8 +10,10 @@
  *  - touch events are translated to Rack mouse events (touch_input.cpp)
  */
 #include <android_native_app_glue.h>
+#include <android/api-level.h>
 #include <android/configuration.h>
 #include <android/log.h>
+#include <sys/system_properties.h>
 
 #include <common.hpp>
 #include <system.hpp>
@@ -49,9 +51,15 @@
 #include "selection_glow.hpp"
 #include "tour_demo.hpp"
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "rackdroid", __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "rackdroid", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__)
+// Both sinks, always. logcat needs a USB cable and a developer at the other
+// end of it; user/log.txt is the one a user can export and paste into an
+// issue. Startup used to go to logcat only, which meant every bug report
+// arrived without the version, the language, or anything else said here.
+// logger::log is a no-op until logger::init(), so calling these earlier is
+// safe -- it costs the file line, not correctness.
+#define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO, "rackdroid", __VA_ARGS__); INFO(__VA_ARGS__); } while (0)
+#define LOGW(...) do { __android_log_print(ANDROID_LOG_WARN, "rackdroid", __VA_ARGS__); WARN(__VA_ARGS__); } while (0)
+#define LOGE(...) do { __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__); WARN(__VA_ARGS__); } while (0)
 
 using namespace rack;
 
@@ -193,6 +201,35 @@ struct RackDroidApp {
 				}
 			}
 		}
+		// Everything a crackling report needs and could not previously carry.
+		// Rack's getOperatingSystemInfo() goes down its Linux branch here and
+		// answers "Linux <kernel> aarch64": true, and useless -- it does not
+		// say which phone, which chip, or how many cores. The engine settings
+		// are worse off still, because the two we ask users to change first,
+		// sample rate and threads, were logged nowhere at all. Written after
+		// the migration above so these are the values the run really uses.
+		{
+			char manufacturer[PROP_VALUE_MAX] = {0};
+			char model[PROP_VALUE_MAX] = {0};
+			char soc[PROP_VALUE_MAX] = {0};
+			__system_property_get("ro.product.manufacturer", manufacturer);
+			__system_property_get("ro.product.model", model);
+			// ro.soc.model is the documented one (mandatory since Android 12);
+			// ro.board.platform is the older vendor name, kept as a fallback
+			// because it is the one that answers on the earlier devices we
+			// still support.
+			if (!__system_property_get("ro.soc.model", soc))
+				__system_property_get("ro.board.platform", soc);
+			LOGI("Device: %s %s, soc=%s, api=%d, cores=%d",
+				manufacturer, model, soc[0] ? soc : "?",
+				android_get_device_api_level(), system::getLogicalCoreCount());
+		}
+		if (settings::sampleRate <= 0.f)
+			LOGI("Engine: sample rate auto, threads=%d", settings::threadCount);
+		else
+			LOGI("Engine: sample rate %g Hz (fixed), threads=%d",
+				settings::sampleRate, settings::threadCount);
+
 		// The welcome tips window is a fixed 550-unit-wide overlay that
 		// cannot fit portrait phones, and its content is desktop-oriented
 		// (right-click, Ctrl+drag, Enter). Never show it on launch.

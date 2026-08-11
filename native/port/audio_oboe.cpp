@@ -35,6 +35,7 @@ rest of the port layer follows. */
 } while (0)
 
 #include <audio.hpp>
+#include <settings.hpp>
 #include <system.hpp>
 #include <context.hpp>
 #include <engine/Engine.hpp>
@@ -242,6 +243,15 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		AUDIO_WARN("Oboe: stream started, sampleRate=%g burst=%d buffer=%d capacity=%d",
 			sampleRate, outputStream->getFramesPerBurst(),
 			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames());
+		// The single most common cause of unexplained crackling, and until now
+		// the one thing a log could not show: the engine pinned to a rate the
+		// device does not run at. Rack then resamples every block, on the audio
+		// thread, forever, and nothing on screen says so. Zero is AUTO, which by
+		// definition cannot disagree.
+		if (rack::settings::sampleRate > 0.f && rack::settings::sampleRate != sampleRate)
+			AUDIO_WARN("Oboe: engine is fixed at %g Hz but the device opened at %g Hz"
+				" -- Rack resamples continuously; set Engine > Sample rate to Auto",
+				rack::settings::sampleRate, sampleRate);
 		onStartStream();
 	}
 
