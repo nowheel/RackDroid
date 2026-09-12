@@ -50,6 +50,7 @@ not debuggable and `run-as` cannot read the private log. Plain INFO() alone
 already cost one debugging round trip here — the messages existed and were
 invisible. */
 #define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO, "rackdroid.cablepark", __VA_ARGS__); INFO(__VA_ARGS__); } while (0)
+#define TOUCH_WARN(...) do { __android_log_print(ANDROID_LOG_WARN, "rackdroid.touch", __VA_ARGS__); WARN(__VA_ARGS__); } while (0)
 
 
 static const double LONG_PRESS_SECONDS = 0.6;
@@ -59,10 +60,32 @@ static const float LONG_PRESS_SLOP_PX = 16.f; // in scene units
 static const float LONG_PRESS_STILL_PX = 5.f;
 static const float PINCH_DETECT_RATIO = 0.02f;
 static const float PINCH_ZOOM_SPEED = 8.f;
-// Inertia (momentum) for two-finger panning
+// Inertia (momentum) for one- and two-finger panning
 static const float INERTIA_MIN_SPEED = 80.f;   // scene units/s to start coasting
 static const float INERTIA_STOP_SPEED = 20.f;  // stop below this
 static const float INERTIA_DECAY = 4.f;         // exponential decay per second
+// Caps a single velocity sample before it enters the EMA. Scene units track
+// dp (scenePos divides by density, same as Window's pixelRatio), so this is
+// ~20 screen-widths/s on a typical phone -- nothing a real flick reaches. A
+// sample past it is the touch controller misreporting the surviving finger
+// for a frame right as the other one lifts (a known capacitive-sensor
+// artifact), or a processing stall making dt tiny while delta is a real
+// on-screen distance -- either way, dividing by that dt manufactures a
+// velocity no finger produced, and it used to ride the EMA straight into
+// startInertia() with nothing to stop it: the "strange inertia" that
+// suddenly accelerates and flings the rack off screen (issue #4).
+static const float MAX_PAN_SPEED = 8000.f;     // scene units/s
+
+
+static rack::math::Vec clampPanVelocity(rack::math::Vec v) {
+	float n = v.norm();
+	if (n > MAX_PAN_SPEED) {
+		TOUCH_WARN("Touch: pan velocity sample %.0f/s exceeds cap, clamping to %.0f/s "
+			"(lift-off glitch or a processing stall, not a real flick)", n, MAX_PAN_SPEED);
+		return v.mult(MAX_PAN_SPEED / n);
+	}
+	return v;
+}
 
 struct TouchState {
 	bool down = false;
@@ -386,7 +409,7 @@ int touchHandleEvent(AInputEvent* event) {
 				double now = rack::system::getTime();
 				double dt = now - st.lastMoveTime;
 				if (dt > 1e-4) {
-					rack::math::Vec instV = delta.div(dt);
+					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
 					st.panVelocity = st.panVelocity.mult(0.5f).plus(instV.mult(0.5f));
 				}
 				st.lastCentroid = pos;
@@ -425,7 +448,7 @@ int touchHandleEvent(AInputEvent* event) {
 				double now = rack::system::getTime();
 				double dt = now - st.lastMoveTime;
 				if (dt > 1e-4) {
-					rack::math::Vec instV = delta.div(dt);
+					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
 					st.panVelocity = st.panVelocity.mult(0.5f).plus(instV.mult(0.5f));
 				}
 				st.lastMoveTime = now;
