@@ -276,30 +276,52 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			oboe::convertToText(outputStream->getPerformanceMode()),
 			oboe::convertToText(outputStream->getAudioApi()));
 		// Exclusive+LowLatency is what we ask for, not necessarily what gets
-		// granted: Android can silently hand back a Shared stream instead --
-		// typically because another app already holds the device, or the HAL
-		// simply won't offer exclusive here -- and Shared mode goes through
-		// AudioFlinger's mixer, with materially worse and less consistent
-		// latency than the dedicated path we tuned block size and thread
-		// priority around. That downgrade is invisible without logging the
-		// GRANTED mode: underruns that never improve no matter the thread
-		// count look identical to a CPU shortage from inside this process,
-		// but no thread-side fix here can undo a sharing-mode fallback.
+		// granted: Android can silently hand back a Shared stream instead, and
+		// Shared goes through AudioFlinger's mixer, with materially worse and
+		// less consistent latency than the dedicated path block size and thread
+		// priority were tuned around. That downgrade is invisible without
+		// logging the GRANTED mode: underruns that never improve no matter the
+		// thread count look identical to a CPU shortage from inside this
+		// process, but no thread-side fix here can undo a sharing-mode
+		// fallback.
+		//
+		// WHY the downgrade happens is not something this side of the API can
+		// see, and guessing at it cost a full debugging session. On a OnePlus
+		// 8T (SM8250, OxygenOS/Android 15) the system log -- NOT anything this
+		// app can print -- gave the real answer:
+		//
+		//   AAudioServiceExtImpl: isAAudioCompatible call
+		//       getListValueByUid(aaudio-compatible-apps) but return null
+		//   AAudioService: openStream(...): aaudio denied with imcompatible
+		//       policy such as peformance noise
+		//
+		// An Oplus/OnePlus vendor allowlist ("aaudio-compatible-apps"), not
+		// anything in AOSP, gates the low-latency path per app -- and on that
+		// build it resolves to null, i.e. plausibly denies EVERY third-party
+		// app. Confirmed there with the device idle, no other app running, and
+		// audio focus held: focus, thread count, block size and core affinity
+		// all make no difference to it whatsoever. So do not read Shared as
+		// "another app stole the device", and do not spend another session
+		// trying to earn Exclusive from the app side; on a device that refuses
+		// it, coping (bigger blocks -- see checkBlockSizeOverload in
+		// main_android.cpp) is the only lever left.
 		if (outputStream->getSharingMode() != oboe::SharingMode::Exclusive) {
-			AUDIO_WARN("Oboe: asked for Exclusive sharing but got %s -- likely "
-				"another app is also using audio right now; underruns here may "
-				"not be about CPU or thread count at all",
+			AUDIO_WARN("Oboe: asked for Exclusive sharing but got %s -- the "
+				"dedicated low-latency path was denied. Underruns from here on "
+				"may have nothing to do with CPU or thread count; check the "
+				"system log (AAudioService/AudioFlinger) for the reason, which "
+				"is not visible to this app",
 				oboe::convertToText(outputStream->getSharingMode()));
-			// Distinguishes two very different explanations for the same
-			// symptom: another app can be released (close it, retest); a
-			// device/HAL that never offers MMAP at all cannot -- every app,
-			// including a completely idle phone, would see Shared here,
-			// audio focus or not. These are test-only per Oboe's own header
-			// (may change/disappear), used here purely to log, never to alter
-			// behavior.
+			// isMMapSupported() is the device-wide capability; isMMapUsed() is
+			// what THIS stream actually got. support=1 with used=0 -- the 8T's
+			// reading -- means the hardware can do it and something above it
+			// said no, which is the vendor-allowlist case described above, not
+			// a hardware limit. These are test-only per Oboe's own header (may
+			// change/disappear), used purely to log, never to alter behavior.
 			AUDIO_WARN("Oboe: device MMAP support=%d, this stream using MMAP=%d "
-				"-- if support=0, no app on this device can ever get Exclusive, "
-				"regardless of focus or other apps",
+				"-- support=0 means no app here can ever get Exclusive; "
+				"support=1 with used=0 means something above the HAL refused "
+				"this app specifically",
 				(int) oboe::OboeExtensions::isMMapSupported(),
 				(int) oboe::OboeExtensions::isMMapUsed(outputStream.get()));
 		}

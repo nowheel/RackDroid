@@ -622,6 +622,13 @@ static int g_escalatedThreads = -1;
 static int g_lastWrittenThreadCount = -1;
 static double g_manualGuardUntil = 0.0;
 
+/** Set once raising threads has been PROVEN pointless on this device, in this
+session: see checkEscalationFutility() below for what proves it and what
+clears it again. While set, checkEngineOverload() stops reaching for the
+lever; checkEngineUnderload() is untouched, so an escalation already in
+effect still steps back down and then stays down instead of bouncing. */
+static bool g_escalationFutile = false;
+
 /** Held back for Android itself -- the compositor, system_server, the touch
 pipeline -- so the engine's own thread pool never wants every core at once.
 See engineThreadCeiling() for why one core, unconditionally, rather than a
@@ -728,6 +735,8 @@ static void checkEngineOverload() {
 
 	if (g_escalatedThreads >= 0 || !freshCeilingUnderrun)
 		return;
+	if (g_escalationFutile)
+		return; // proven not to help on this device; see checkEscalationFutility()
 	if (system::getTime() < g_manualGuardUntil)
 		return;
 	if (ceiling <= 1 || settings::threadCount >= ceiling)
@@ -866,6 +875,76 @@ static void checkBlockSizeOverload() {
 	rackdroid::audioSetBlockSize(next);
 }
 
+/** Stops the engine burning a whole device's worth of cores chasing underruns
+it cannot fix.
+
+checkEngineOverload() rests on an inference -- underruns mean the patch wants
+more CPU -- that holds right up until the bottleneck is not CPU at all. On a
+device denied the Exclusive audio path (see openStreams() in audio_oboe.cpp:
+a vendor allowlist, nothing this app can argue with) it stops holding
+completely, and the measurements say so plainly. On a OnePlus 8T, a
+fifteen-module patch underran at an indistinguishable rate at 4, 5, 6 and 7
+threads, buffer pegged at its ceiling throughout, at every rung.
+
+Left alone, the two halves then fight forever: checkEngineOverload() escalates
+to the ceiling on the next fresh underrun, checkEngineUnderload() steps back
+down 15 s later, another underrun escalates it straight back, and the device
+sits at maximum threads -- each one spinning at real audio priority, pinned to
+the big cores -- for as long as the app is open. That is a permanent heat and
+battery cost buying an amount of audio quality measured at zero.
+
+So: once the state checkMaxedOutOverload() already calls hopeless is reached
+AND the stream is Shared (an Exclusive stream keeps the lever -- there the
+thread count demonstrably works: 0 underruns/30 s on a heavy patch on an S22),
+the verdict is recorded and escalation stops. Deliberately NOT a thread-count
+reduction of its own: it only declines to raise further and lets an escalation
+this session made step back down. A count it did not set -- one restored from
+settings.json, which cannot be told apart from a number the user chose by hand
+-- is left exactly where it is.
+
+The verdict is not permanent, because the thing that justified it may not be:
+a lighter patch, or a route change that finally grants Exclusive, both show up
+as the underruns simply stopping. A clear stretch of quiet hands the lever
+back. */
+static void checkEscalationFutility() {
+	static const double QUIET_SEC = 20.0;
+	static int32_t lastCeilingCount = 0;
+	static double lastFreshUnderrunAt = 0.0;
+
+	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
+	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
+	lastCeilingCount = ceilingCount;
+	double now = system::getTime();
+
+	if (freshCeilingUnderrun) {
+		lastFreshUnderrunAt = now;
+	}
+	else if (g_escalationFutile && lastFreshUnderrunAt > 0.0
+		&& now - lastFreshUnderrunAt >= QUIET_SEC) {
+		LOGW("Engine: no ceiling underruns for %.0fs; thread escalation is "
+			"worth trying again if a later patch asks for it", QUIET_SEC);
+		g_escalationFutile = false;
+		lastFreshUnderrunAt = 0.0;
+		return;
+	}
+
+	if (g_escalationFutile || !freshCeilingUnderrun)
+		return;
+	// Every other lever has to be spent first: thread count at the ceiling,
+	// block size ladder finished (g_blockSizeTried), and still underrunning.
+	if (!g_blockSizeTried || !rackdroid::audioIsSharedMode())
+		return;
+	int ceiling = engineThreadCeiling();
+	if (ceiling <= 1 || settings::threadCount < ceiling)
+		return;
+	LOGW("Engine: still underrunning at %d threads with every lever spent, on a "
+		"Shared audio route -- more threads measurably do not help here, so "
+		"automatic escalation stops rather than holding every core at audio "
+		"priority for nothing (Engine > Threads still overrides)",
+		settings::threadCount);
+	g_escalationFutile = true;
+}
+
 /** Surfaces the one case the two levers above can do nothing further about:
 already at engineThreadCeiling() -- our own limit, one core short of the
 device's count, never the hardware max itself -- already past
@@ -975,6 +1054,7 @@ void android_main(android_app* app) {
 			checkEngineOverload();
 			checkEngineUnderload();
 			checkBlockSizeOverload();
+			checkEscalationFutility();
 			checkMaxedOutOverload();
 			checkLanguageChanged();
 				APP->window->step();
