@@ -268,9 +268,13 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (inputStream)
 			inputStream->requestStart();
 		outputStream->requestStart();
-		AUDIO_WARN("Oboe: stream started, sampleRate=%g burst=%d buffer=%d capacity=%d "
-			"sharing=%s performance=%s api=%s",
-			sampleRate, outputStream->getFramesPerBurst(),
+		// blockSize belongs in here: it is the one number in this line the app
+		// itself chooses, and leaving it out cost a debugging round trip --
+		// a log full of underruns with no way to tell which rung of
+		// checkBlockSizeOverload()'s ladder was in effect at the time.
+		AUDIO_WARN("Oboe: stream started, sampleRate=%g block=%d burst=%d buffer=%d "
+			"capacity=%d sharing=%s performance=%s api=%s",
+			sampleRate, blockSize, outputStream->getFramesPerBurst(),
 			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames(),
 			oboe::convertToText(outputStream->getSharingMode()),
 			oboe::convertToText(outputStream->getPerformanceMode()),
@@ -520,6 +524,26 @@ bool audioSetBlockSize(int blockSize) {
 		return false;
 	g_driver->device->setBlockSize(blockSize);
 	return true;
+}
+
+
+int audioMaxUsefulBlockSize() {
+	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
+		return 0;
+	int capacity = g_driver->device->outputStream->getBufferCapacityInFrames();
+	if (capacity <= 0)
+		return 0;
+	// Never hand the callback more frames than the whole stream can hold. A
+	// block bigger than the buffer is not a trade of latency for headroom, it
+	// is a guaranteed late callback: the OnePlus 8T reports capacity=1536
+	// frames (32 ms), and asking it for 4096-frame (85 ms) blocks produced
+	// 225 underruns in 30 s -- every callback due before it could possibly
+	// arrive. Largest power of two that fits, then, and never above the 1024
+	// the measurements in DEFAULT_BLOCK_SIZE's comment actually cover.
+	int block = 64;
+	while (block * 2 <= capacity && block < 1024)
+		block *= 2;
+	return block;
 }
 
 

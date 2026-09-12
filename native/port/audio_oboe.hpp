@@ -33,6 +33,15 @@ once, after thread count is already maxed out and still not enough. Returns
 false (no-op) if no device is open. */
 bool audioSetBlockSize(int blockSize);
 
+/** The largest block size worth asking the live stream for: the biggest power
+of two that still fits inside its buffer capacity, capped at 1024 (the
+largest size DEFAULT_BLOCK_SIZE's measurements actually cover). Bigger than
+the capacity is not a latency-for-headroom trade but a guaranteed late
+callback -- see the comment on the implementation for what that cost on real
+hardware. 0 if no device is open. Render-thread only, same contract as the
+engine itself (see CLAUDE.md). */
+int audioMaxUsefulBlockSize();
+
 /** True if the live Oboe device's output stream was granted Shared sharing
 mode instead of the Exclusive mode requested -- see the "asked for Exclusive
 ... got Shared" warning in openStreams() (audio_oboe.cpp) for the full story.

@@ -832,46 +832,59 @@ latency back can pick a smaller block size by hand in the Audio module, same
 as always.
 
 Measured on hardware (see audio_oboe.cpp's DEFAULT_BLOCK_SIZE comment):
-doubling block size roughly halves underruns. 1024 -- the top of Rack's own
-block-size list -- is the cap for a normal Exclusive/MMAP stream, and one
-doubling has been enough for everything tested so far. A Shared stream
-(audioIsSharedMode()) is a different animal: mixed through AudioFlinger
-instead of the dedicated low-latency path, with materially more jitter to
-buy headroom against -- confirmed on a real OnePlus 8T logging "asked for
-Exclusive... got Shared" and still underrunning constantly at 1024 with
-threads maxed, focus requested, and no other app running. For that case
-alone, the ladder keeps doubling past Rack's own UI ceiling, each further
-rung gated on ANOTHER fresh ceiling underrun the same way the first one is,
-until it reaches SHARED_BLOCK_SIZE_CAP -- a genuine latency-for-stability
-trade only this fallback path takes. */
-static const int SHARED_BLOCK_SIZE_CAP = 4096;
+doubling block size roughly halves underruns. The ceiling is NOT a taste
+judgement about how much latency is bearable -- it is audioMaxUsefulBlockSize(),
+the biggest block the live stream's own buffer can actually hold. Past that
+the trade stops being latency-for-headroom and becomes a callback that cannot
+possibly be on time, which an earlier version of this function got wrong: it
+climbed to 4096 frames (85 ms) on a OnePlus 8T whose whole buffer capacity is
+1536 frames (32 ms), and measured 225 underruns in 30 s for the trouble. A
+Shared stream does not change that arithmetic, so it no longer gets a taller
+ladder -- being denied the low-latency path is a reason the headroom is
+needed, not a reason the buffer got bigger.
 
+Because that earlier version shipped, a device can come back with a persisted
+block size ABOVE what its buffer can hold, which nothing would otherwise undo
+-- so this walks that back down, the one case where it lowers rather than
+raises. */
 static void checkBlockSizeOverload() {
 	static int32_t lastCeilingCount = 0;
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
 
+	int current = rackdroid::audioBlockSize();
+	int cap = rackdroid::audioMaxUsefulBlockSize();
+	if (current <= 0 || cap <= 0)
+		return; // no device open yet -- wait for one rather than trying nothing
+
+	// Repair first, and without waiting for an underrun to prove it: a block
+	// the buffer cannot hold is wrong on its own terms, not a judgement call.
+	if (current > cap) {
+		LOGW("Engine: block size %d is bigger than this stream can deliver on "
+			"time; returning to %d, the largest its buffer actually holds",
+			current, cap);
+		rackdroid::audioSetBlockSize(cap);
+		g_blockSizeTried = true;
+		return;
+	}
+
 	if (g_blockSizeTried || !freshCeilingUnderrun)
 		return;
 	int ceiling = engineThreadCeiling();
 	if (ceiling <= 1 || settings::threadCount < ceiling)
 		return; // the cheaper lever hasn't been maxed yet; let it go first
-	int current = rackdroid::audioBlockSize();
-	if (current <= 0)
-		return; // no device open yet -- wait for one rather than trying nothing
-	bool shared = rackdroid::audioIsSharedMode();
-	int cap = shared ? SHARED_BLOCK_SIZE_CAP : 1024;
 	if (current >= cap) {
-		g_blockSizeTried = true; // ladder fully spent for this mode
+		g_blockSizeTried = true; // ladder fully spent
 		return;
 	}
 	int next = current * 2;
+	if (next > cap)
+		next = cap;
 	LOGW("Engine: still underrunning at this device's thread ceiling; trying "
 		"block size %d instead of %d (Audio module > Block size to change it "
-		"back -- this will not be undone automatically)%s",
-		next, current,
-		shared ? " [Shared audio route granted instead of Exclusive -- needs more headroom]" : "");
+		"back -- this will not be undone automatically)",
+		next, current);
 	rackdroid::audioSetBlockSize(next);
 }
 
