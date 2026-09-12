@@ -801,8 +801,9 @@ static void checkEngineUnderload() {
 	escalatedAt = 0.0;
 }
 
-/** Set once checkBlockSizeOverload() below has made its one attempt (whether
-or not it actually changed anything). Read by checkMaxedOutOverload() so its
+/** Set once checkBlockSizeOverload() below has fully spent this lever --
+reached the cap for whichever mode is live, whether or not it actually
+changed anything along the way. Read by checkMaxedOutOverload() so its
 "nothing left to raise" diagnosis waits for the block-size lever too, not
 just thread count, before calling the situation hopeless. */
 static bool g_blockSizeTried = false;
@@ -816,14 +817,26 @@ thread count is. Reverting it later would buy back only latency, never CPU
 or heat, so there is little reason to want it back down automatically the
 way an idle thread is, and doing so on a cooldown timer the way
 checkEngineUnderload() does would mean a real dropout every 15 seconds for a
-much weaker reason. So: escalate once, ever, per session; never revert. A
-user who wants lower latency back can pick a smaller block size by hand in
-the Audio module, same as always.
+much weaker reason. So: escalate only on each fresh ceiling underrun, up to
+the cap, then stop there for good; never revert. A user who wants lower
+latency back can pick a smaller block size by hand in the Audio module, same
+as always.
 
 Measured on hardware (see audio_oboe.cpp's DEFAULT_BLOCK_SIZE comment):
-doubling block size roughly halves underruns, so this tries exactly one
-further doubling -- to 1024, the top of Rack's own block-size list -- not a
-ladder down from there. */
+doubling block size roughly halves underruns. 1024 -- the top of Rack's own
+block-size list -- is the cap for a normal Exclusive/MMAP stream, and one
+doubling has been enough for everything tested so far. A Shared stream
+(audioIsSharedMode()) is a different animal: mixed through AudioFlinger
+instead of the dedicated low-latency path, with materially more jitter to
+buy headroom against -- confirmed on a real OnePlus 8T logging "asked for
+Exclusive... got Shared" and still underrunning constantly at 1024 with
+threads maxed, focus requested, and no other app running. For that case
+alone, the ladder keeps doubling past Rack's own UI ceiling, each further
+rung gated on ANOTHER fresh ceiling underrun the same way the first one is,
+until it reaches SHARED_BLOCK_SIZE_CAP -- a genuine latency-for-stability
+trade only this fallback path takes. */
+static const int SHARED_BLOCK_SIZE_CAP = 4096;
+
 static void checkBlockSizeOverload() {
 	static int32_t lastCeilingCount = 0;
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
@@ -838,14 +851,18 @@ static void checkBlockSizeOverload() {
 	int current = rackdroid::audioBlockSize();
 	if (current <= 0)
 		return; // no device open yet -- wait for one rather than trying nothing
-	g_blockSizeTried = true;
-	if (current >= 1024)
-		return; // already at the top of Rack's own block-size list
+	bool shared = rackdroid::audioIsSharedMode();
+	int cap = shared ? SHARED_BLOCK_SIZE_CAP : 1024;
+	if (current >= cap) {
+		g_blockSizeTried = true; // ladder fully spent for this mode
+		return;
+	}
 	int next = current * 2;
 	LOGW("Engine: still underrunning at this device's thread ceiling; trying "
 		"block size %d instead of %d (Audio module > Block size to change it "
-		"back -- this will not be undone automatically)",
-		next, current);
+		"back -- this will not be undone automatically)%s",
+		next, current,
+		shared ? " [Shared audio route granted instead of Exclusive -- needs more headroom]" : "");
 	rackdroid::audioSetBlockSize(next);
 }
 

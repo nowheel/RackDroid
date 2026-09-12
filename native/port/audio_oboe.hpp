@@ -33,4 +33,14 @@ once, after thread count is already maxed out and still not enough. Returns
 false (no-op) if no device is open. */
 bool audioSetBlockSize(int blockSize);
 
+/** True if the live Oboe device's output stream was granted Shared sharing
+mode instead of the Exclusive mode requested -- see the "asked for Exclusive
+... got Shared" warning in openStreams() (audio_oboe.cpp) for the full story.
+A Shared stream is mixed through AudioFlinger and needs materially more
+headroom than the dedicated Exclusive/MMAP path checkBlockSizeOverload() in
+main_android.cpp was originally sized for, which is what this exists to let
+it detect. False (not true) if no device is open yet. Render-thread only,
+same contract as the engine itself (see CLAUDE.md). */
+bool audioIsSharedMode();
+
 } // namespace rackdroid

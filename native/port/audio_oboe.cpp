@@ -501,6 +501,13 @@ bool audioSetBlockSize(int blockSize) {
 }
 
 
+bool audioIsSharedMode() {
+	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
+		return false;
+	return g_driver->device->outputStream->getSharingMode() != oboe::SharingMode::Exclusive;
+}
+
+
 // ---- JNI: master recording toggle (MainActivity's ⏺ button) ----
 
 extern "C" JNIEXPORT jboolean JNICALL
