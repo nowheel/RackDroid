@@ -16,6 +16,7 @@
 #include <sys/system_properties.h>
 #include <dirent.h>
 #include <cstring>
+#include <sched.h>
 
 #include <common.hpp>
 #include <system.hpp>
@@ -479,11 +480,71 @@ static void applyWorkerPriority() {
 		LOGI("Engine: raised %d worker threads to audio priority", raised);
 }
 
+/** engineThreadCeiling() (below) gives the system a core back by asking for
+one fewer thread than there are cores -- a soft guarantee: it assumes the
+scheduler leaves the excluded core alone, and a user overriding our count
+through the Threads menu erases it entirely, since the affinity mask below
+does not exist yet at that point. This is the hard version of the same
+guarantee, and it does not depend on our thread count advice being followed:
+it excludes Worker threads from one specific logical CPU by mask, however
+many of them end up existing, so Android's compositor/system_server/touch
+pipeline always has a core no real-time Worker will ever be scheduled onto,
+full stop.
+
+Unlike applyWorkerPriority() above, this needs no JNI round-trip:
+sched_setaffinity() on a thread of one's own process is a plain, unprivileged
+syscall (governed by cpuset/cgroup membership, not a capability like
+CAP_SYS_NICE), so asking for a subset of the cores this cpuset already
+grants just works. */
+static void applyWorkerAffinity() {
+	int cores = system::getLogicalCoreCount();
+	if (cores <= 1)
+		return;
+	// Same index RESERVED_CORES reserves conceptually (see
+	// engineThreadCeiling() below): simplest deterministic choice, not
+	// (yet) chosen for being the fast or the slow cluster on a big.LITTLE
+	// device -- no evidence yet that which one matters.
+	int reservedCpu = cores - 1;
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	for (int cpu = 0; cpu < cores; cpu++) {
+		if (cpu != reservedCpu)
+			CPU_SET(cpu, &mask);
+	}
+
+	DIR* dir = opendir("/proc/self/task");
+	if (!dir)
+		return;
+	int pinned = 0;
+	while (dirent* e = readdir(dir)) {
+		int tid = atoi(e->d_name);
+		if (tid <= 0)
+			continue;
+		char path[64];
+		std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", tid);
+		FILE* f = std::fopen(path, "r");
+		if (!f)
+			continue;
+		char name[32] = {0};
+		bool worker = std::fgets(name, sizeof(name), f)
+			&& std::strncmp(name, "Worker ", 7) == 0;
+		std::fclose(f);
+		if (worker && sched_setaffinity(tid, sizeof(mask), &mask) == 0)
+			pinned++;
+	}
+	closedir(dir);
+	if (pinned > 0)
+		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system",
+			pinned, reservedCpu);
+}
+
 /** Workers are created by Engine::setThreadCount, which the Threads menu calls
 and tells nobody about, so this watches the setting the same way the language
 check below does. The delay is not decoration: a thread that has just been
 created has not necessarily reached system::setThreadName yet, and until it
-does it has no name to match. */
+does it has no name to match. Applies both the priority boost and the CPU
+affinity exclusion together: both act on the same "Worker N" threads, and
+both need to be redone every time Engine::setThreadCount recreates them. */
 static void checkWorkerPriority() {
 	static int lastThreadCount = -1;
 	static double applyAt = 0.0;
@@ -494,6 +555,7 @@ static void checkWorkerPriority() {
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
 		applyWorkerPriority();
+		applyWorkerAffinity();
 	}
 }
 
@@ -529,10 +591,14 @@ just as effectively as before the priority fix existed -- there is no such
 thing as "mostly" holding the barrier. The only lever that does not reopen
 that problem is asking for fewer threads, not lower-priority ones.
 
-If one reserved core ever proves not to be enough on some device, the
-sturdier fix is CPU-affinity pinning (keep the engine off one specific core
-via sched_setaffinity) rather than reserving more threads -- not implemented,
-no evidence yet that it is needed. */
+This is the soft half of the guarantee: it assumes the scheduler leaves the
+excluded core alone, and stops meaning anything if the user overrides the
+count through the Threads menu. applyWorkerAffinity() above is the hard
+half -- CPU-affinity pinning that excludes Worker threads from one specific
+core by mask, independent of how many of them there end up being. The two
+together are belt and suspenders, not either/or: a device where the
+scheduler already behaved would see no difference from the affinity mask,
+and a manual thread-count override still can't undo it. */
 static const int RESERVED_CORES = 1;
 
 /** The most threads checkEngineOverload() will ever ask for, and the point
