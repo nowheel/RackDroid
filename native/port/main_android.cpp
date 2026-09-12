@@ -513,14 +513,49 @@ static int g_escalatedThreads = -1;
 static int g_lastWrittenThreadCount = -1;
 static double g_manualGuardUntil = 0.0;
 
-/** Spend the cores the device has, once it is clear the patch needs them.
+/** Held back for Android itself -- the compositor, system_server, the touch
+pipeline -- so the engine's own thread pool never wants every core at once.
+See engineThreadCeiling() for why one core, unconditionally, rather than a
+fraction: a real device (OnePlus 8T, 8 cores) went sluggish system-wide, not
+just RackDroid, the moment the pool held all 8 at real audio priority
+(applyWorkerPriority() above). Android's own cpuset reservations (RenderThread
+and friends normally live in "top-app"/"foreground") don't help here, because
+moving Workers into the real-time scheduling class is specifically what lets
+them preempt across that boundary -- the same privilege that fixed the
+underruns in the first place. Lowering the priority back down for some
+Workers was considered and rejected: the engine's barrier syncs every worker
+twice per sample, so ANY one of them left preemptible stalls all the others
+just as effectively as before the priority fix existed -- there is no such
+thing as "mostly" holding the barrier. The only lever that does not reopen
+that problem is asking for fewer threads, not lower-priority ones.
+
+If one reserved core ever proves not to be enough on some device, the
+sturdier fix is CPU-affinity pinning (keep the engine off one specific core
+via sched_setaffinity) rather than reserving more threads -- not implemented,
+no evidence yet that it is needed. */
+static const int RESERVED_CORES = 1;
+
+/** The most threads checkEngineOverload() will ever ask for, and the point
+checkMaxedOutOverload() calls "nothing left to raise" -- one short of the
+device's core count. A 1-core device has nothing to spare and keeps the
+previous behavior of never escalating at all. */
+static int engineThreadCeiling() {
+	int cores = system::getLogicalCoreCount();
+	return cores <= 1 ? cores : cores - RESERVED_CORES;
+}
+
+/** Spend the cores the device can give up, once it is clear the patch needs
+them.
 
 Measured on hardware, 224 modules at 48 kHz, underruns over 30 s: 1 thread
 1522, 2 threads 2298, 4 threads 3217, 8 threads 22. Eight is the core count of
 that phone. The shape is not a gentle curve with a peak in the middle -- the
 fractions of the core count are all bad and the full count is a hundred times
-better -- so the rule is "all of them", never "some of them", and a device with
-four cores gets four rather than the two that would be its bad middle.
+better -- so the rule is "as many as we will ever ask for", never a smaller
+fraction, and a device with four cores gets three (its ceiling) rather than
+the two that would be its bad middle. (Eight cores was measured; the ceiling
+introduced by RESERVED_CORES -- one short of that -- has not been separately
+benchmarked yet, only reasoned about: see the comment above it.)
 
 This does not run on a hunch: it reacts to the audio thread reporting a FRESH
 underrun with the buffer already at its ceiling, which is the difference
@@ -559,20 +594,21 @@ static void checkEngineOverload() {
 		return;
 	if (system::getTime() < g_manualGuardUntil)
 		return;
-	int cores = system::getLogicalCoreCount();
-	if (cores <= 1 || settings::threadCount >= cores)
+	int ceiling = engineThreadCeiling();
+	if (ceiling <= 1 || settings::threadCount >= ceiling)
 		return;
 	LOGW("Engine: underrunning with the buffer at its ceiling; raising threads "
-		"from %d to %d (Engine > Threads to change it back)",
-		settings::threadCount, cores);
+		"from %d to %d, one short of this device's %d cores (Engine > Threads "
+		"to change it back)",
+		settings::threadCount, ceiling, ceiling + RESERVED_CORES);
 	g_preEscalationThreads = settings::threadCount;
-	g_escalatedThreads = cores;
+	g_escalatedThreads = ceiling;
 	// Setting it is all that is needed: Engine::stepBlock relaunches its
 	// workers from settings::threadCount on every block (Engine.cpp:572),
 	// which is also how the Threads menu works -- it writes the setting and
 	// nothing else.
-	settings::threadCount = cores;
-	g_lastWrittenThreadCount = cores;
+	settings::threadCount = ceiling;
+	g_lastWrittenThreadCount = ceiling;
 }
 
 /** Symmetric to checkEngineOverload() above: undoes an escalation THIS device
@@ -630,13 +666,63 @@ static void checkEngineUnderload() {
 	escalatedAt = 0.0;
 }
 
-/** Surfaces the one case checkEngineOverload() above can do nothing about:
-already at the device's core count (nothing left to escalate to) and still
-producing fresh ceiling underruns. Until now that state was invisible --
-the audio thread keeps warning to a log file nobody but a developer reads,
-and the user just hears crackling with no explanation, forever, since
-there is no "try lowering it" step symmetric to checkEngineUnderload() for
-a number that was never raised in the first place.
+/** Set once checkBlockSizeOverload() below has made its one attempt (whether
+or not it actually changed anything). Read by checkMaxedOutOverload() so its
+"nothing left to raise" diagnosis waits for the block-size lever too, not
+just thread count, before calling the situation hopeless. */
+static bool g_blockSizeTried = false;
+
+/** The second, much blunter lever, tried only after checkEngineOverload()
+above has already spent the thread-count one: reaches for a bigger block
+size. NOT symmetric with checkEngineUnderload() on purpose -- changing block
+size closes and reopens the audio stream (audioSetBlockSize(), in
+audio_oboe.cpp), an audible gap, not a free reallocation the way changing
+thread count is. Reverting it later would buy back only latency, never CPU
+or heat, so there is little reason to want it back down automatically the
+way an idle thread is, and doing so on a cooldown timer the way
+checkEngineUnderload() does would mean a real dropout every 15 seconds for a
+much weaker reason. So: escalate once, ever, per session; never revert. A
+user who wants lower latency back can pick a smaller block size by hand in
+the Audio module, same as always.
+
+Measured on hardware (see audio_oboe.cpp's DEFAULT_BLOCK_SIZE comment):
+doubling block size roughly halves underruns, so this tries exactly one
+further doubling -- to 1024, the top of Rack's own block-size list -- not a
+ladder down from there. */
+static void checkBlockSizeOverload() {
+	static int32_t lastCeilingCount = 0;
+	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
+	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
+	lastCeilingCount = ceilingCount;
+
+	if (g_blockSizeTried || !freshCeilingUnderrun)
+		return;
+	int ceiling = engineThreadCeiling();
+	if (ceiling <= 1 || settings::threadCount < ceiling)
+		return; // the cheaper lever hasn't been maxed yet; let it go first
+	int current = rackdroid::audioBlockSize();
+	if (current <= 0)
+		return; // no device open yet -- wait for one rather than trying nothing
+	g_blockSizeTried = true;
+	if (current >= 1024)
+		return; // already at the top of Rack's own block-size list
+	int next = current * 2;
+	LOGW("Engine: still underrunning at this device's thread ceiling; trying "
+		"block size %d instead of %d (Audio module > Block size to change it "
+		"back -- this will not be undone automatically)",
+		next, current);
+	rackdroid::audioSetBlockSize(next);
+}
+
+/** Surfaces the one case the two levers above can do nothing further about:
+already at engineThreadCeiling() -- our own limit, one core short of the
+device's count, never the hardware max itself -- already past
+checkBlockSizeOverload()'s one attempt, and still producing fresh ceiling
+underruns. Until now that state was invisible -- the audio thread keeps
+warning to a log file nobody but a developer reads, and the user just hears
+crackling with no explanation, forever, since there is no "try lowering it"
+step symmetric to checkEngineUnderload() for a number that was never raised
+in the first place.
 
 Distinguishes two causes, because they call for different reactions: the
 device's OWN thermal throttling (Android's verdict, SEVERE or worse) means
@@ -654,21 +740,23 @@ static void checkMaxedOutOverload() {
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
 
-	if (shown || !freshCeilingUnderrun)
+	if (shown || !freshCeilingUnderrun || !g_blockSizeTried)
 		return;
-	int cores = system::getLogicalCoreCount();
-	// Below the core count: there is still room for checkEngineOverload()
-	// to act, so this is not yet the maxed-out case.
-	if (cores <= 1 || settings::threadCount < cores)
+	int ceiling = engineThreadCeiling();
+	// Below our ceiling: there is still room for checkEngineOverload() to
+	// act, so this is not yet the maxed-out case. (A manual pick at or above
+	// the hardware max also counts as maxed out here, same as before -- it is
+	// >= ceiling too.)
+	if (ceiling <= 1 || settings::threadCount < ceiling)
 		return;
 	shown = true;
 
 	int thermal = rackdroid::thermalStatus();
 	// PowerManager.THERMAL_STATUS_SEVERE = 3.
 	bool throttled = thermal >= 3;
-	LOGW("Engine: underrunning at %d threads (the device's core count) with "
-		"nothing left to raise; thermal status %d (%s)",
-		cores, thermal, throttled ? "throttled" : "not throttled");
+	LOGW("Engine: underrunning at %d threads (this device's ceiling, one core "
+		"short of its %d) with nothing left to raise; thermal status %d (%s)",
+		ceiling, ceiling + RESERVED_CORES, thermal, throttled ? "throttled" : "not throttled");
 	rackdroid::showEngineNotice(throttled ? 1 : 0);
 }
 
@@ -734,6 +822,7 @@ void android_main(android_app* app) {
 				checkWorkerPriority();
 			checkEngineOverload();
 			checkEngineUnderload();
+			checkBlockSizeOverload();
 			checkMaxedOutOverload();
 			checkLanguageChanged();
 				APP->window->step();

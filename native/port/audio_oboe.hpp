@@ -20,4 +20,17 @@ all to notice it got heavy (see checkEngineOverload/checkEngineUnderload in
 main_android.cpp). */
 int32_t audioCeilingUnderrunCount();
 
+/** The live Oboe device's current block size (frames per callback), or 0 if
+no device is open yet. Render-thread only, same contract as the engine
+itself (see CLAUDE.md). */
+int audioBlockSize();
+
+/** Changes the live Oboe device's block size, same call the Audio module's
+own widget makes when the user picks one by hand -- closes and reopens the
+stream, so this is NOT free: it is an audible gap, not a silent tweak, and
+exists for checkBlockSizeOverload() in main_android.cpp to reach for only
+once, after thread count is already maxed out and still not enough. Returns
+false (no-op) if no device is open. */
+bool audioSetBlockSize(int blockSize);
+
 } // namespace rackdroid

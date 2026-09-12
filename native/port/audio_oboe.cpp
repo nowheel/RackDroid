@@ -440,8 +440,24 @@ struct OboeDriver : rack::audio::Driver {
 };
 
 
+static OboeDriver* g_driver = NULL;
+
 void oboeInit() {
-	rack::audio::addDriver(OBOE_DRIVER_ID, new OboeDriver);
+	g_driver = new OboeDriver;
+	rack::audio::addDriver(OBOE_DRIVER_ID, g_driver);
+}
+
+
+int audioBlockSize() {
+	return (g_driver && g_driver->device) ? g_driver->device->blockSize : 0;
+}
+
+
+bool audioSetBlockSize(int blockSize) {
+	if (!g_driver || !g_driver->device)
+		return false;
+	g_driver->device->setBlockSize(blockSize);
+	return true;
 }
 
 
