@@ -934,11 +934,16 @@ so. A clear stretch with no underruns at any point ends the search for good,
 whether because it succeeded or because the situation changed underneath it. */
 static void checkThreadSearch() {
 	static const double SETTLE_SEC = 5.0;
+	// Long enough that a rung which merely crackles less cannot pass for one
+	// that is clean. The whole descent still takes well under a minute, and
+	// none of it is audible.
+	static const double CONFIRM_SEC = 15.0;
 	static const double RETRY_QUIET_SEC = 60.0;
 	static int32_t lastCeilingCount = 0;
 	static double lastFreshUnderrunAt = 0.0;
 	static double rungStartedAt = 0.0;
 	static int32_t rungStartCount = 0;
+	static bool confirming = false;
 	static int searchRestoreTo = -1;
 	// A search that walked all the way down without finding a clean rung
 	// answered its question: the thread count is not what is wrong. Running it
@@ -948,6 +953,7 @@ static void checkThreadSearch() {
 	static double exhaustedAt = 0.0;
 
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
+	int32_t totalCount = rackdroid::audioUnderrunCount();
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
 	double now = system::getTime();
@@ -971,25 +977,44 @@ static void checkThreadSearch() {
 	// keep walking away from.
 	if (g_escalationFutile && now < g_manualGuardUntil) {
 		g_escalationFutile = false;
+		confirming = false;
 		searchRestoreTo = -1;
 		return;
 	}
 
 	if (g_escalationFutile) {
-		if (now - rungStartedAt < SETTLE_SEC)
+		double window = confirming ? CONFIRM_SEC : SETTLE_SEC;
+		if (now - rungStartedAt < window)
 			return; // this rung has not had its fair hearing yet
-		// The whole question, asked of THIS rung only: did the ceiling-underrun
-		// counter move while it was in effect? A global "how long since the last
-		// underrun" cannot answer it -- the rungs are 5 s apart and the search
-		// would march straight past the first count that worked, which is
-		// exactly what an earlier version of this did on the 8T.
-		if (ceilingCount == rungStartCount) {
+		// The whole question, asked of THIS rung only: did the underrun counter
+		// move while it was in effect? A global "how long since the last
+		// underrun" cannot answer it -- the rungs are seconds apart and the
+		// search would march straight past the first count that worked, which
+		// is exactly what an earlier version of this did on the 8T.
+		//
+		// And the count is audioUnderrunCount(), every underrun, NOT the
+		// ceiling-only one the escalation triggers use: a rung whose buffer is
+		// still growing produces no ceiling underruns at all while crackling
+		// audibly, and one did -- this search declared 3 threads clean on the
+		// 8T and the user's ears said otherwise. A rung has to be silent, not
+		// merely better.
+		if (totalCount == rungStartCount) {
+			if (!confirming) {
+				// Promising, not proven. A marginal rung can hold out for a
+				// few seconds; make it hold out for longer before the search
+				// stops and leaves the user with it.
+				confirming = true;
+				rungStartedAt = now;
+				return;
+			}
 			LOGW("Engine: %d threads ran clean for %.0fs; search done (was %d)",
-				settings::threadCount, SETTLE_SEC, searchRestoreTo);
+				settings::threadCount, CONFIRM_SEC, searchRestoreTo);
 			g_escalationFutile = false;
+			confirming = false;
 			searchRestoreTo = -1;
 			return;
 		}
+		confirming = false;
 		if (settings::threadCount <= 1) {
 			// Nothing left below. Not a thread-count problem at all, then: put
 			// the count back and let checkMaxedOutOverload() call it what it is.
@@ -998,6 +1023,7 @@ static void checkThreadSearch() {
 			settings::threadCount = searchRestoreTo;
 			g_lastWrittenThreadCount = searchRestoreTo;
 			g_escalationFutile = false;
+			confirming = false;
 			searchRestoreTo = -1;
 			searchExhausted = true;
 			exhaustedAt = now;
@@ -1011,7 +1037,7 @@ static void checkThreadSearch() {
 		settings::threadCount = next;
 		g_lastWrittenThreadCount = next;
 		rungStartedAt = now;
-		rungStartCount = ceilingCount;
+		rungStartCount = totalCount;
 		return;
 	}
 
@@ -1029,9 +1055,10 @@ static void checkThreadSearch() {
 		"instead (Engine > Threads still overrides)",
 		settings::threadCount);
 	g_escalationFutile = true;
+	confirming = false;
 	searchRestoreTo = settings::threadCount;
 	rungStartedAt = now;
-	rungStartCount = ceilingCount;
+	rungStartCount = totalCount;
 	// Whatever checkEngineUnderload() was holding is ours now; without this it
 	// would revert a rung mid-search and both would be writing the same knob.
 	g_escalatedThreads = -1;

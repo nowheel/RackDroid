@@ -172,6 +172,19 @@ int32_t audioCeilingUnderrunCount() {
 	return g_ceilingUnderruns.load(std::memory_order_relaxed);
 }
 
+/** Every underrun, not just the ones at the buffer ceiling. The distinction
+matters: the count above deliberately ignores underruns the LatencyTuner can
+still answer by growing the buffer, because those do not prove the engine is
+short of anything. But the listener hears all of them, and asking "is this
+configuration actually clean?" is a different question from "is this engine
+overloaded?" -- checkThreadSearch() in main_android.cpp judges its rungs on
+this one after a rung that crackled audibly passed as clean on the other. */
+static std::atomic<int32_t> g_totalUnderruns{0};
+
+int32_t audioUnderrunCount() {
+	return g_totalUnderruns.load(std::memory_order_relaxed);
+}
+
 
 static const int NUM_OUTPUTS = 2;
 static const int NUM_INPUTS = 2;
@@ -419,6 +432,12 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			latencyTuner->tune();
 		int32_t xruns = stream->getXRunCount().value();
 		if (xruns != lastXRuns) {
+			// Count every one of them, however small the buffer still is: this
+			// is the number that corresponds to what a listener hears. The
+			// stream's own counter restarts at zero on reopen, so take the
+			// difference and ignore it when it goes backwards.
+			if (xruns > lastXRuns)
+				g_totalUnderruns.fetch_add(xruns - lastXRuns, std::memory_order_relaxed);
 			lastXRuns = xruns;
 			// Underruns while the tuner has already grown the buffer as far as
 			// it goes: the device is not jittering, it is short of CPU, and no

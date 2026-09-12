@@ -20,6 +20,12 @@ all to notice it got heavy (see checkEngineOverload/checkEngineUnderload in
 main_android.cpp). */
 int32_t audioCeilingUnderrunCount();
 
+/** Every underrun, including the ones the buffer tuner could still answer by
+growing -- the count that matches what a listener actually hears, as opposed
+to the narrower "the engine is out of CPU" signal above. Same threading
+contract: written by the audio thread, read by the render thread. */
+int32_t audioUnderrunCount();
+
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
 itself (see CLAUDE.md). */
