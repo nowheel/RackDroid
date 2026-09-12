@@ -260,9 +260,28 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (inputStream)
 			inputStream->requestStart();
 		outputStream->requestStart();
-		AUDIO_WARN("Oboe: stream started, sampleRate=%g burst=%d buffer=%d capacity=%d",
+		AUDIO_WARN("Oboe: stream started, sampleRate=%g burst=%d buffer=%d capacity=%d "
+			"sharing=%s performance=%s api=%s",
 			sampleRate, outputStream->getFramesPerBurst(),
-			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames());
+			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames(),
+			oboe::convertToText(outputStream->getSharingMode()),
+			oboe::convertToText(outputStream->getPerformanceMode()),
+			oboe::convertToText(outputStream->getAudioApi()));
+		// Exclusive+LowLatency is what we ask for, not necessarily what gets
+		// granted: Android can silently hand back a Shared stream instead --
+		// typically because another app already holds the device, or the HAL
+		// simply won't offer exclusive here -- and Shared mode goes through
+		// AudioFlinger's mixer, with materially worse and less consistent
+		// latency than the dedicated path we tuned block size and thread
+		// priority around. That downgrade is invisible without logging the
+		// GRANTED mode: underruns that never improve no matter the thread
+		// count look identical to a CPU shortage from inside this process,
+		// but no thread-side fix here can undo a sharing-mode fallback.
+		if (outputStream->getSharingMode() != oboe::SharingMode::Exclusive)
+			AUDIO_WARN("Oboe: asked for Exclusive sharing but got %s -- likely "
+				"another app is also using audio right now; underruns here may "
+				"not be about CPU or thread count at all",
+				oboe::convertToText(outputStream->getSharingMode()));
 		// The single most common cause of unexplained crackling, and until now
 		// the one thing a log could not show: the engine pinned to a rate the
 		// device does not run at. Rack then resamples every block, on the audio
