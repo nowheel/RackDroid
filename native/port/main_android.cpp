@@ -888,60 +888,134 @@ static void checkBlockSizeOverload() {
 	rackdroid::audioSetBlockSize(next);
 }
 
-/** Stops the engine burning a whole device's worth of cores chasing underruns
-it cannot fix.
+/** Searches DOWNWARD when raising the thread count has stopped working, which
+is a real state and not a theoretical one.
 
 checkEngineOverload() rests on an inference -- underruns mean the patch wants
-more CPU -- that holds right up until the bottleneck is not CPU at all. On a
-device denied the Exclusive audio path (see openStreams() in audio_oboe.cpp:
-a vendor allowlist, nothing this app can argue with) it stops holding
-completely, and the measurements say so plainly. On a OnePlus 8T, a
-fifteen-module patch underran at an indistinguishable rate at 4, 5, 6 and 7
-threads, buffer pegged at its ceiling throughout, at every rung.
+more CPU -- and the whole escalate/de-escalate machinery only ever tries the
+lever in that one direction. Measured on a OnePlus 8T denied the Exclusive
+audio path (see openStreams() in audio_oboe.cpp), cold, fifteen-module patch,
+block size 1024:
 
-Left alone, the two halves then fight forever: checkEngineOverload() escalates
-to the ceiling on the next fresh underrun, checkEngineUnderload() steps back
-down 15 s later, another underrun escalates it straight back, and the device
-sits at maximum threads -- each one spinning at real audio priority, pinned to
-the big cores -- for as long as the app is open. That is a permanent heat and
-battery cost buying an amount of audio quality measured at zero.
+    1 thread     0 underruns / 60 s
+    2 threads    0 underruns / 60 s
+    4 threads    ~8.4 / s
+    7 threads    ~9.2 / s
 
-So: once the state checkMaxedOutOverload() already calls hopeless is reached
-AND the stream is Shared (an Exclusive stream keeps the lever -- there the
-thread count demonstrably works: 0 underruns/30 s on a heavy patch on an S22),
-the verdict is recorded and escalation stops. Deliberately NOT a thread-count
-reduction of its own: it only declines to raise further and lets an escalation
-this session made step back down. A count it did not set -- one restored from
-settings.json, which cannot be told apart from a number the user chose by hand
--- is left exactly where it is.
+The cliff is between 2 and 4, and everything above it is equally broken --
+which is why an earlier reading of "4, 5, 6 and 7 are identical" looked like
+"the thread count does not matter here" when it actually meant "every rung
+tested was already past the cliff". Engine_stepFrame() synchronises every
+worker at two barriers per SAMPLE (Engine.cpp), and the HybridBarrier spins;
+that cost scales with the thread count and not with the patch, so on a patch
+this light the threads are almost entirely spinning rather than working. With
+the low-latency path denied, that spinning -- at real audio priority, pinned
+to the big cores -- starves the very callback it is meant to feed. Measured
+CPU bears it out: ~515% of 800% at 7 threads, ~75% at 1, for identical audio
+work.
 
-The verdict is not permanent, because the thing that justified it may not be:
-a lighter patch, or a route change that finally grants Exclusive, both show up
-as the underruns simply stopping. A clear stretch of quiet hands the lever
-back. */
-static void checkEscalationFutility() {
-	static const double QUIET_SEC = 20.0;
+So reaching the state checkMaxedOutOverload() calls hopeless is not the end of
+the search, it is the start of a different one. The count walks down a rung at
+a time, each given SETTLE_SEC to prove itself, and stops at the first that
+produces no fresh ceiling underruns at all. Changing the thread count is
+silent and immediate -- Engine::stepBlock relaunches its workers from the
+setting every block -- so unlike the block-size ladder this search costs the
+listener nothing to run.
+
+Confined to Shared streams on purpose. On an Exclusive stream the lever
+demonstrably works the other way (S22, 224 modules: 1 thread 1522 underruns,
+8 threads 22), and walking down there would wreck a working engine to fix
+nothing.
+
+If even one thread cannot keep up, the patch really is too heavy for this
+device, which is a different diagnosis with a different answer -- so the count
+goes back where the search found it and checkMaxedOutOverload() gets to say
+so. A clear stretch with no underruns at any point ends the search for good,
+whether because it succeeded or because the situation changed underneath it. */
+static void checkThreadSearch() {
+	static const double SETTLE_SEC = 5.0;
+	static const double RETRY_QUIET_SEC = 60.0;
 	static int32_t lastCeilingCount = 0;
 	static double lastFreshUnderrunAt = 0.0;
+	static double rungStartedAt = 0.0;
+	static int32_t rungStartCount = 0;
+	static int searchRestoreTo = -1;
+	// A search that walked all the way down without finding a clean rung
+	// answered its question: the thread count is not what is wrong. Running it
+	// again immediately would just loop forever, so it takes a long stretch of
+	// quiet -- i.e. an actually different situation -- before asking again.
+	static bool searchExhausted = false;
+	static double exhaustedAt = 0.0;
 
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
 	double now = system::getTime();
 
-	if (freshCeilingUnderrun) {
+	if (freshCeilingUnderrun)
 		lastFreshUnderrunAt = now;
-	}
-	else if (g_escalationFutile && lastFreshUnderrunAt > 0.0
-		&& now - lastFreshUnderrunAt >= QUIET_SEC) {
-		LOGW("Engine: no ceiling underruns for %.0fs; thread escalation is "
-			"worth trying again if a later patch asks for it", QUIET_SEC);
-		g_escalationFutile = false;
-		lastFreshUnderrunAt = 0.0;
+
+	if (searchExhausted) {
+		if (lastFreshUnderrunAt > 0.0 && now - lastFreshUnderrunAt >= RETRY_QUIET_SEC) {
+			LOGW("Engine: quiet for %.0fs since the thread search came up empty; "
+				"it may be worth another look if underruns return",
+				RETRY_QUIET_SEC);
+			searchExhausted = false;
+			exhaustedAt = 0.0;
+		}
 		return;
 	}
 
-	if (g_escalationFutile || !freshCeilingUnderrun)
+	// A manual pick through the Threads menu ends the search: checkEngineOverload()
+	// spots it and opens the guard window, and the user's number is not ours to
+	// keep walking away from.
+	if (g_escalationFutile && now < g_manualGuardUntil) {
+		g_escalationFutile = false;
+		searchRestoreTo = -1;
+		return;
+	}
+
+	if (g_escalationFutile) {
+		if (now - rungStartedAt < SETTLE_SEC)
+			return; // this rung has not had its fair hearing yet
+		// The whole question, asked of THIS rung only: did the ceiling-underrun
+		// counter move while it was in effect? A global "how long since the last
+		// underrun" cannot answer it -- the rungs are 5 s apart and the search
+		// would march straight past the first count that worked, which is
+		// exactly what an earlier version of this did on the 8T.
+		if (ceilingCount == rungStartCount) {
+			LOGW("Engine: %d threads ran clean for %.0fs; search done (was %d)",
+				settings::threadCount, SETTLE_SEC, searchRestoreTo);
+			g_escalationFutile = false;
+			searchRestoreTo = -1;
+			return;
+		}
+		if (settings::threadCount <= 1) {
+			// Nothing left below. Not a thread-count problem at all, then: put
+			// the count back and let checkMaxedOutOverload() call it what it is.
+			LOGW("Engine: still underrunning at 1 thread -- this is not the "
+				"thread count; restoring %d", searchRestoreTo);
+			settings::threadCount = searchRestoreTo;
+			g_lastWrittenThreadCount = searchRestoreTo;
+			g_escalationFutile = false;
+			searchRestoreTo = -1;
+			searchExhausted = true;
+			exhaustedAt = now;
+			return;
+		}
+		int next = settings::threadCount - 1;
+		LOGW("Engine: %d threads still underrunning after %.0fs; trying %d "
+			"(searching downward -- the barrier cost scales with the thread "
+			"count, so fewer can be better here)",
+			settings::threadCount, SETTLE_SEC, next);
+		settings::threadCount = next;
+		g_lastWrittenThreadCount = next;
+		rungStartedAt = now;
+		rungStartCount = ceilingCount;
+		return;
+	}
+
+	if (!freshCeilingUnderrun)
 		return;
 	// Every other lever has to be spent first: thread count at the ceiling,
 	// block size ladder finished (g_blockSizeTried), and still underrunning.
@@ -951,11 +1025,16 @@ static void checkEscalationFutility() {
 	if (ceiling <= 1 || settings::threadCount < ceiling)
 		return;
 	LOGW("Engine: still underrunning at %d threads with every lever spent, on a "
-		"Shared audio route -- more threads measurably do not help here, so "
-		"automatic escalation stops rather than holding every core at audio "
-		"priority for nothing (Engine > Threads still overrides)",
+		"Shared audio route -- raising stopped helping, so searching downward "
+		"instead (Engine > Threads still overrides)",
 		settings::threadCount);
 	g_escalationFutile = true;
+	searchRestoreTo = settings::threadCount;
+	rungStartedAt = now;
+	rungStartCount = ceilingCount;
+	// Whatever checkEngineUnderload() was holding is ours now; without this it
+	// would revert a rung mid-search and both would be writing the same knob.
+	g_escalatedThreads = -1;
 }
 
 /** Surfaces the one case the two levers above can do nothing further about:
@@ -1067,7 +1146,7 @@ void android_main(android_app* app) {
 			checkEngineOverload();
 			checkEngineUnderload();
 			checkBlockSizeOverload();
-			checkEscalationFutility();
+			checkThreadSearch();
 			checkMaxedOutOverload();
 			checkLanguageChanged();
 				APP->window->step();
