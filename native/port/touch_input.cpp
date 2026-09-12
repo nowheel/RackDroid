@@ -108,6 +108,36 @@ static float clampPinchRatio(float ratio) {
 	return ratio;
 }
 
+// clampPinchRatio bounds a single MOVE callback's zoom change, which stops a
+// single glitched sample -- but not a BURST of them: a render/input thread
+// stalled by the engine underrunning (the far more common trigger here, per
+// issue #3's field logs) does not drop the touch events queued behind it, it
+// delivers them all at once when it recovers. Each one clamped is still each
+// one applied, and pow(2, 2*ratio) compounds across the burst regardless of
+// how small any single step was told to be -- confirmed on hardware: the
+// per-event clamp alone cut the framebuffer-allocation failures from 8 to 3
+// in one session, not to zero.
+//
+// The fix is the same idea clampPanVelocity already applies: rate-limit
+// against real elapsed time, not per callback. Bounding how fast the raw
+// finger SEPARATION may change, in scene units per second, means the total
+// change over any stretch of wall-clock time is bounded by what a real pinch
+// could have produced in that same stretch -- no matter how many stale
+// samples a stall lets through to cover it. 12000/s is 1.5x MAX_PAN_SPEED:
+// two fingers spreading is two flicks' worth of motion, at most.
+static const float MAX_PINCH_DIST_SPEED = 12000.f; // scene units/s
+
+static float clampPinchDistRate(float distDelta, float dt) {
+	float rate = distDelta / dt;
+	if (std::fabs(rate) > MAX_PINCH_DIST_SPEED) {
+		TOUCH_WARN("Touch: pinch distance rate %.0f/s exceeds cap, clamping to %.0f/s "
+			"(lift-off glitch or a processing stall, not a real pinch)",
+			rate, std::copysign(MAX_PINCH_DIST_SPEED, rate));
+		rate = std::copysign(MAX_PINCH_DIST_SPEED, rate);
+	}
+	return rate * dt;
+}
+
 struct TouchState {
 	bool down = false;
 	bool leftSent = false;
@@ -450,10 +480,17 @@ int touchHandleEvent(AInputEvent* event) {
 				rack::math::Vec p1 = scenePos(AMotionEvent_getX(event, 1), AMotionEvent_getY(event, 1));
 				rack::math::Vec centroid = pos.plus(p1).mult(0.5f);
 				float dist = pos.minus(p1).norm();
+				double now = rack::system::getTime();
+				double dt = now - st.lastMoveTime;
 
-				// Pinch → Ctrl+scroll (Rack's zoom gesture)
-				if (st.lastDist > 0.f) {
-					float ratio = clampPinchRatio(dist / st.lastDist - 1.f);
+				// Pinch → Ctrl+scroll (Rack's zoom gesture). Rate-limited
+				// against dt (clampPinchDistRate), not merely clamped per
+				// callback (clampPinchRatio, kept as a belt-and-braces cap
+				// on the resulting ratio itself) -- see clampPinchDistRate's
+				// comment for why a burst of queued samples needs the former.
+				if (st.lastDist > 0.f && dt > 1e-4) {
+					float distDelta = clampPinchDistRate(dist - st.lastDist, (float) dt);
+					float ratio = clampPinchRatio((st.lastDist + distDelta) / st.lastDist - 1.f);
 					if (std::fabs(ratio) > PINCH_DETECT_RATIO) {
 						windowSetMods(GLFW_MOD_CONTROL);
 						APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
@@ -466,8 +503,6 @@ int touchHandleEvent(AInputEvent* event) {
 					APP->event->handleScroll(centroid, delta);
 
 				// Track panning velocity for release inertia (EMA).
-				double now = rack::system::getTime();
-				double dt = now - st.lastMoveTime;
 				if (dt > 1e-4) {
 					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
 					st.panVelocity = st.panVelocity.mult(0.5f).plus(instV.mult(0.5f));
