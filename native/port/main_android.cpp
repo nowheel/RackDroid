@@ -635,22 +635,45 @@ once from paying forever after.
 Reacts to the ceiling-underrun COUNT moving, not merely "it happened at some
 point this session": that is what lets a device checkEngineUnderload() has
 already brought back down pay this cost again if a later patch earns it,
-without a stale one-time flag standing in the way. The Threads menu still
-keeps the last word in both directions: writing it by hand is detected below
-and given a few seconds' peace before this reacts to anything. */
+without a stale one-time flag standing in the way.
+
+The Threads menu keeps the last word for anything AT OR BELOW the ceiling --
+writing it by hand is detected below and given a few seconds' peace before
+this reacts to anything. NOT above it, any more: a real OnePlus 8T locked up
+badly enough at a manually-picked full core count (8 of 8) to need a hard
+reboot, not just feel sluggish -- worse than anything that prompted
+RESERVED_CORES in the first place, and with the barrier syncing every worker
+twice per sample, an over-subscribed core the moment the pool exceeds the
+cores it was actually left, real-time priority and all, can plausibly wedge
+the scheduler badly enough to explain it. So the ceiling clamps immediately,
+no grace period, for anything picked above it -- the one case this function
+does not treat as the user's last word. */
 static void checkEngineOverload() {
 	static int32_t lastCeilingCount = 0;
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
+	int ceiling = engineThreadCeiling();
 
 	if (g_lastWrittenThreadCount < 0) {
 		g_lastWrittenThreadCount = settings::threadCount; // first look, ever
 	}
 	else if (settings::threadCount != g_lastWrittenThreadCount) {
-		// Not our doing (both of our own writes below update this to match),
-		// so: the Threads menu. Whatever we thought was in effect no longer
-		// is, and this gets a few seconds before any auto-adjustment reacts.
+		if (settings::threadCount > ceiling) {
+			// Above the ceiling: not the user's to have, not anymore. See the
+			// comment above for why -- this is a stability floor, not a
+			// preference to respect, and it does not wait the usual few
+			// seconds either.
+			LOGW("Engine: %d threads is above this device's %d-thread ceiling "
+				"(one short of %d cores, reserved for the system); holding at "
+				"%d -- a real device has locked up hard enough to need a "
+				"reboot at the full core count",
+				settings::threadCount, ceiling, ceiling + RESERVED_CORES, ceiling);
+			settings::threadCount = ceiling;
+		}
+		// Not our doing (both of our own writes update this to match), so:
+		// the Threads menu. Whatever we thought was in effect no longer is,
+		// and this gets a few seconds before any auto-escalation reacts.
 		g_lastWrittenThreadCount = settings::threadCount;
 		g_manualGuardUntil = system::getTime() + 3.0;
 		g_escalatedThreads = -1;
@@ -660,7 +683,6 @@ static void checkEngineOverload() {
 		return;
 	if (system::getTime() < g_manualGuardUntil)
 		return;
-	int ceiling = engineThreadCeiling();
 	if (ceiling <= 1 || settings::threadCount >= ceiling)
 		return;
 	LOGW("Engine: underrunning with the buffer at its ceiling; raising threads "
