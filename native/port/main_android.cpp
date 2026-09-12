@@ -630,6 +630,48 @@ static void checkEngineUnderload() {
 	escalatedAt = 0.0;
 }
 
+/** Surfaces the one case checkEngineOverload() above can do nothing about:
+already at the device's core count (nothing left to escalate to) and still
+producing fresh ceiling underruns. Until now that state was invisible --
+the audio thread keeps warning to a log file nobody but a developer reads,
+and the user just hears crackling with no explanation, forever, since
+there is no "try lowering it" step symmetric to checkEngineUnderload() for
+a number that was never raised in the first place.
+
+Distinguishes two causes, because they call for different reactions: the
+device's OWN thermal throttling (Android's verdict, SEVERE or worse) means
+it has less to give right now than its core count promises, and likely
+recovers once it cools -- waiting helps. Short of that, the patch itself
+asks for more than this device has even at full tilt and cooled; no amount
+of waiting fixes that, and the honest answer is to simplify the patch or
+lower the sample rate. Once per session: this is a diagnosis, not a
+running commentary. */
+static void checkMaxedOutOverload() {
+	static bool shown = false;
+	static int32_t lastCeilingCount = 0;
+
+	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
+	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
+	lastCeilingCount = ceilingCount;
+
+	if (shown || !freshCeilingUnderrun)
+		return;
+	int cores = system::getLogicalCoreCount();
+	// Below the core count: there is still room for checkEngineOverload()
+	// to act, so this is not yet the maxed-out case.
+	if (cores <= 1 || settings::threadCount < cores)
+		return;
+	shown = true;
+
+	int thermal = rackdroid::thermalStatus();
+	// PowerManager.THERMAL_STATUS_SEVERE = 3.
+	bool throttled = thermal >= 3;
+	LOGW("Engine: underrunning at %d threads (the device's core count) with "
+		"nothing left to raise; thermal status %d (%s)",
+		cores, thermal, throttled ? "throttled" : "not throttled");
+	rackdroid::showEngineNotice(throttled ? 1 : 0);
+}
+
 static void checkLanguageChanged() {
 	if (g_language.empty() || settings::language == g_language)
 		return;
@@ -692,6 +734,7 @@ void android_main(android_app* app) {
 				checkWorkerPriority();
 			checkEngineOverload();
 			checkEngineUnderload();
+			checkMaxedOutOverload();
 			checkLanguageChanged();
 				APP->window->step();
 			}

@@ -133,6 +133,8 @@
 	<string name="tutlevel_4">第 4 级 — 效果</string>
 	<string name="tutlevel_5">第 5 级 — 进阶音色</string>
 	<string name="modules_loaded">已加载 %1$d 个额外模块包</string>
+	<string name="engine_maxed_out">此补丁所需的 CPU 性能超过了设备满载时能提供的上限。请尝试简化补丁或降低采样率。</string>
+	<string name="engine_thermal_throttled">设备过热并自行降速,这就是补丁卡顿的原因。请让设备冷却一下。</string>
 	<string name="installing_modules">正在安装模块…</string>
 	<string name="install_failed">无法安装模块</string>
 	<string name="cable_tension">连线松紧</string>

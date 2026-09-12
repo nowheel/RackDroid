@@ -528,6 +528,8 @@
 	<string name="t30_s5">Record 10 minutes (⏺). Somewhere in there is your album intro.</string>
 	<string name="t30_s6">Drone teaches the deepest lesson: modular is about listening, not playing.</string>
 	<string name="modules_loaded">Loaded %1$d extra module pack(s)</string>
+	<string name="engine_maxed_out">This patch needs more CPU than your device can give, even at full power. Try simplifying it or lowering the sample rate.</string>
+	<string name="engine_thermal_throttled">Your device has heated up and is slowing itself down, which is why this patch is stuttering. Let it cool off.</string>
 	<string name="installing_modules">Installing modules…</string>
 	<string name="install_failed">Could not install modules</string>
 	<string name="cable_tension">Cable tension</string>

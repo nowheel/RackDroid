@@ -47,6 +47,9 @@ static jmethodID midShowHelp;
 static jmethodID midLoadUserPlugins;
 static jmethodID midPatchReady;
 static jmethodID midLanguageChanged;
+static jmethodID midThermalStatus;
+static jmethodID midShowToast;
+static jmethodID midShowEngineNotice;
 
 // ---- dialog result handoff (UI thread -> pumping glue thread) ----
 static void (*pumpOnce)(int timeoutMs) = NULL; // installed by main_android
@@ -143,6 +146,9 @@ void jniInit(ANativeActivity* activity) {
 	midLoadUserPlugins = env->GetMethodID(activityCls, "loadUserPluginsFromNative", "()V");
 	midPatchReady = env->GetMethodID(activityCls, "patchReadyFromNative", "()V");
 	midLanguageChanged = env->GetMethodID(activityCls, "languageChangedFromNative", "(Ljava/lang/String;)V");
+	midThermalStatus = env->GetMethodID(activityCls, "currentThermalStatus", "()I");
+	midShowToast = env->GetMethodID(activityCls, "showToastFromNative", "(Ljava/lang/String;)V");
+	midShowEngineNotice = env->GetMethodID(activityCls, "showEngineNoticeFromNative", "(I)V");
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
 		LOGE("jniInit: MainActivity methods missing; dialogs/clipboard disabled");
@@ -277,6 +283,41 @@ std::string clipboardGet() {
 	if (js)
 		env->DeleteLocalRef(js);
 	return s;
+}
+
+
+int thermalStatus() {
+	JNIEnv* env = getEnv();
+	if (!env || !midThermalStatus)
+		return 0; // PowerManager.THERMAL_STATUS_NONE
+	int status = env->CallIntMethod(activityObj, midThermalStatus);
+	if (env->ExceptionCheck()) {
+		env->ExceptionClear();
+		return 0;
+	}
+	return status;
+}
+
+
+void showToast(const std::string& text) {
+	JNIEnv* env = getEnv();
+	if (!env || !midShowToast)
+		return;
+	jstring js = env->NewStringUTF(text.c_str());
+	env->CallVoidMethod(activityObj, midShowToast, js);
+	env->DeleteLocalRef(js);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+}
+
+
+void showEngineNotice(int kind) {
+	JNIEnv* env = getEnv();
+	if (!env || !midShowEngineNotice)
+		return;
+	env->CallVoidMethod(activityObj, midShowEngineNotice, (jint) kind);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
 }
 
 

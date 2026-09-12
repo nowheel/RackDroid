@@ -133,6 +133,8 @@
 	<string name="tutlevel_4">Niveau 4 — Effets</string>
 	<string name="tutlevel_5">Niveau 5 — Voix avancées</string>
 	<string name="modules_loaded">%1$d paquet(s) de modules supplémentaires chargé(s)</string>
+	<string name="engine_maxed_out">Ce patch demande plus de CPU que votre appareil ne peut en fournir, même à pleine puissance. Essayez de le simplifier ou de baisser la fréquence d\'échantillonnage.</string>
+	<string name="engine_thermal_throttled">Votre appareil a chauffé et ralentit de lui-même, c\'est pourquoi le patch saccade. Laissez-le refroidir.</string>
 	<string name="installing_modules">Installation des modules…</string>
 	<string name="install_failed">Impossible d\'installer les modules</string>
 	<string name="cable_tension">Tension des câbles</string>

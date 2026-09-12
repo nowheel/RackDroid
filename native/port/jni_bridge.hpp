@@ -66,6 +66,25 @@ void loadUserPluginsBlocking();
 void clipboardSet(const std::string& text);
 std::string clipboardGet();
 
+/** Android's own thermal throttling verdict for the whole device
+(PowerManager.THERMAL_STATUS_*): 0 NONE, 1 LIGHT, 2 MODERATE, 3 SEVERE,
+4 CRITICAL, 5 EMERGENCY, 6 SHUTDOWN. Thread-safe, dispatches to the Java UI
+thread internally, same as the clipboard calls above. */
+int thermalStatus();
+
+/** A one-off, non-blocking notice shown as a Toast, already-resolved text --
+for anything that does not need one of the specific localized notices below.
+Fire-and-forget: does not wait for Java, unlike the clipboard/thermal reads
+above. */
+void showToast(const std::string& text);
+
+/** Same idea, for the two notices the engine itself can raise: native has
+no Android string resources of its own, so this passes a kind rather than
+text, and Java resolves + localizes it (0 = engine_maxed_out, 1 =
+engine_thermal_throttled -- see checkMaxedOutOverload() in main_android.cpp
+for when each fires). */
+void showEngineNotice(int kind);
+
 /** Synchronous dialogs, called from the native glue thread. The thread blocks
 while the dialog is shown on the Java UI thread. Levels/buttons use the
 osdialog enum values. Returns 1 for OK/Yes. */

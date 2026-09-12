@@ -27,6 +27,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.Gravity
@@ -1629,6 +1630,49 @@ class MainActivity : NativeActivity() {
 		}
 		latch.await()
 		return result
+	}
+
+	// ---- Thermal status (called from native, any thread) ----
+
+	/** Android's own throttling verdict (PowerManager.THERMAL_STATUS_*):
+	NONE=0, LIGHT=1, MODERATE=2, SEVERE=3, CRITICAL=4, EMERGENCY=5,
+	SHUTDOWN=6. Read synchronously like clipboardGet() above -- PowerManager
+	wants no particular thread, but posting through uiHandler keeps every
+	Android API call in this file on the one thread, which is one fewer thing
+	to get wrong. */
+	fun currentThermalStatus(): Int {
+		var result = PowerManager.THERMAL_STATUS_NONE
+		val latch = CountDownLatch(1)
+		uiHandler.post {
+			try {
+				val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+				result = pm?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
+			} finally {
+				latch.countDown()
+			}
+		}
+		latch.await()
+		return result
+	}
+
+	/** A one-off, non-blocking notice from native -- the same Toast the
+	module installer already uses for "Loaded N extra module pack(s)", so a
+	message from the engine looks like everything else the app already says
+	unprompted, not like a new kind of interruption. */
+	fun showToastFromNative(text: String) {
+		uiHandler.post {
+			Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+		}
+	}
+
+	/** kind: 0 = engine_maxed_out, 1 = engine_thermal_throttled -- see
+	checkMaxedOutOverload() in main_android.cpp for when each fires. Native
+	has no Android string resources of its own, so it passes which notice,
+	not the text; this resolves and localizes it, then reuses the Toast
+	above to show it. */
+	fun showEngineNoticeFromNative(kind: Int) {
+		val res = if (kind == 1) R.string.engine_thermal_throttled else R.string.engine_maxed_out
+		showToastFromNative(getString(res))
 	}
 
 	// ---- Async dialogs (called from the native glue thread) ----
