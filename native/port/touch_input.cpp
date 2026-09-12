@@ -87,6 +87,27 @@ static rack::math::Vec clampPanVelocity(rack::math::Vec v) {
 	return v;
 }
 
+// Same family of glitch, same fix, on the pinch-zoom path: ratio = dist/
+// lastDist - 1 blows up exactly like a velocity sample does if either
+// finger's reported position glitches for one sample (a lift-off jitter, or
+// lastDist itself near zero) -- and it feeds RackScrollWidget::setZoom as
+// pow(2, 2*ratio) with nothing to stop it. Issue #3's log showed a ~25000x7500
+// framebuffer allocation failing right after a burst of clamped pan samples
+// on the same gesture; this is the same touch glitch reaching zoom instead of
+// pan. Capped to ±1 -- a 4x zoom change in a single touch sample is already
+// far past anything a real pinch produces, so nothing legitimate is lost.
+static const float MAX_PINCH_RATIO = 1.f;
+
+static float clampPinchRatio(float ratio) {
+	if (std::fabs(ratio) > MAX_PINCH_RATIO) {
+		TOUCH_WARN("Touch: pinch ratio %.2f exceeds cap, clamping to %.2f "
+			"(lift-off glitch or a processing stall, not a real pinch)",
+			ratio, std::copysign(MAX_PINCH_RATIO, ratio));
+		return std::copysign(MAX_PINCH_RATIO, ratio);
+	}
+	return ratio;
+}
+
 struct TouchState {
 	bool down = false;
 	bool leftSent = false;
@@ -432,7 +453,7 @@ int touchHandleEvent(AInputEvent* event) {
 
 				// Pinch → Ctrl+scroll (Rack's zoom gesture)
 				if (st.lastDist > 0.f) {
-					float ratio = dist / st.lastDist - 1.f;
+					float ratio = clampPinchRatio(dist / st.lastDist - 1.f);
 					if (std::fabs(ratio) > PINCH_DETECT_RATIO) {
 						windowSetMods(GLFW_MOD_CONTROL);
 						APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
