@@ -381,6 +381,41 @@ bool dialogFile(bool save, const std::string& dir, const std::string& filename, 
 }
 
 
+bool jniSetThreadPriority(int tid, int priority) {
+	JNIEnv* env = getEnv();
+	if (!env)
+		return false;
+	static jclass processCls = NULL;      // global ref, resolved once
+	static jmethodID midSetPriority = NULL;
+	if (!processCls) {
+		jclass local = env->FindClass("android/os/Process");
+		if (!local) {
+			env->ExceptionClear();
+			return false;
+		}
+		processCls = (jclass) env->NewGlobalRef(local);
+		env->DeleteLocalRef(local);
+		midSetPriority = env->GetStaticMethodID(processCls, "setThreadPriority", "(II)V");
+		if (env->ExceptionCheck() || !midSetPriority) {
+			env->ExceptionClear();
+			midSetPriority = NULL;
+			return false;
+		}
+	}
+	if (!midSetPriority)
+		return false;
+	env->CallStaticVoidMethod(processCls, midSetPriority, (jint) tid, (jint) priority);
+	if (env->ExceptionCheck()) {
+		// Process.setThreadPriority throws IllegalArgumentException if the tid
+		// is gone by the time this runs (a worker can be torn down between our
+		// /proc scan and this call) -- routine, not worth logging.
+		env->ExceptionClear();
+		return false;
+	}
+	return true;
+}
+
+
 // ---- results posted by MainActivity (UI thread) ----
 
 extern "C" JNIEXPORT void JNICALL

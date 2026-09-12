@@ -79,4 +79,14 @@ save=true asks for a filename (suggesting `filename`). Returns true and fills
 `path` (absolute) if confirmed. */
 bool dialogFile(bool save, const std::string& dir, const std::string& filename, std::string& path);
 
+/** Sets a thread's scheduling priority through android.os.Process, not a raw
+setpriority() syscall: a thread renicing ANOTHER thread of the same process
+below nice 0 needs CAP_SYS_NICE, which an app does not have, so a native-only
+attempt silently no-ops. Process.setThreadPriority additionally moves the
+thread into Android's audio/foreground cgroup (libcutils set_sched_policy),
+which the app IS allowed to do to its own threads -- it is how RenderThread
+and the audio callback thread get their elevated priority. Returns false (and
+clears any pending JNI exception) if the call could not be made or threw. */
+bool jniSetThreadPriority(int tid, int priority);
+
 } // namespace rackdroid

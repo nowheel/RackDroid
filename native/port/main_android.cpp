@@ -14,7 +14,6 @@
 #include <android/configuration.h>
 #include <android/log.h>
 #include <sys/system_properties.h>
-#include <sys/resource.h>
 #include <dirent.h>
 #include <cstring>
 
@@ -439,10 +438,19 @@ through a spin barrier, waits for the slowest of them. Every sample.
 
 Rack creates the threads, so there is nothing to pass a priority to at
 creation; the thread names are the only handle, and /proc/self/task is where
-they are legible. setpriority on a thread of our own process is allowed
-without any permission -- it is what Java's Process.setThreadPriority(
-THREAD_PRIORITY_URGENT_AUDIO) does. Real-time scheduling is not: SCHED_FIFO
-needs CAP_SYS_NICE, which an app does not have. */
+they are legible. A first version called setpriority() on the tid directly,
+reasoning that a thread renicing its own process's threads needs no special
+permission -- measured wrong: setpriority() to a negative nice value needs
+CAP_SYS_NICE (or a raised RLIMIT_NICE) regardless of same-process/same-uid,
+which an app has for none of its threads, so it silently failed on every tid,
+every call, for the life of the session (confirmed on hardware: the workers
+sat at nice +1, and the "raised" log line below never once printed). Real
+audio-priority threads on Android (RenderThread, AAudio's callback thread)
+get there through android.os.Process.setThreadPriority, which ALSO moves the
+thread into the audio/foreground scheduler group (libcutils set_sched_policy)
+-- a privilege an app is granted over its own threads that a raw setpriority()
+syscall does not carry. So this goes through that Java call via JNI instead
+(jniSetThreadPriority) rather than reimplementing it natively. */
 static void applyWorkerPriority() {
 	DIR* dir = opendir("/proc/self/task");
 	if (!dir)
@@ -463,7 +471,7 @@ static void applyWorkerPriority() {
 		std::fclose(f);
 		// -19 is URGENT_AUDIO. Not -20: that is reserved for the thread that
 		// must never be late, and these are helpers to it, not it.
-		if (worker && setpriority(PRIO_PROCESS, tid, -19) == 0)
+		if (worker && rackdroid::jniSetThreadPriority(tid, -19))
 			raised++;
 	}
 	closedir(dir);
