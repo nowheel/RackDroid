@@ -161,13 +161,15 @@ WavRecorder gRecorder;
 namespace rackdroid {
 
 
-/** Set by the audio thread when it is underrunning with the buffer already at
-its ceiling. Read by the render thread, which is the only one allowed to touch
-the engine. */
-static std::atomic<bool> g_overloaded{false};
+/** Bumped by the audio thread on every underrun that happens with the buffer
+already at its ceiling. Read by the render thread, which is the only one
+allowed to touch the engine. A live count, not a one-way latch: it needs to
+be able to go quiet again so checkEngineUnderload() can notice and undo an
+escalation checkEngineOverload() made earlier in the session. */
+static std::atomic<int32_t> g_ceilingUnderruns{0};
 
-bool audioOverloaded() {
-	return g_overloaded.load(std::memory_order_relaxed);
+int32_t audioCeilingUnderrunCount() {
+	return g_ceilingUnderruns.load(std::memory_order_relaxed);
 }
 
 
@@ -357,7 +359,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			// buffer will fix that. Publish it so the engine can answer.
 			if (stream->getBufferSizeInFrames() >=
 				stream->getBufferCapacityInFrames() - stream->getFramesPerBurst())
-				g_overloaded.store(true, std::memory_order_relaxed);
+				g_ceilingUnderruns.fetch_add(1, std::memory_order_relaxed);
 			AUDIO_WARN("Oboe: %d underruns, buffer now %d frames of %d",
 				xruns, stream->getBufferSizeInFrames(),
 				stream->getBufferCapacityInFrames());

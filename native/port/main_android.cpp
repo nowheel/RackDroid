@@ -497,6 +497,22 @@ static void checkWorkerPriority() {
 	}
 }
 
+/** Shared between checkEngineOverload() and checkEngineUnderload().
+g_escalatedThreads is >= 0 while an escalation THIS SESSION made is still in
+effect; g_preEscalationThreads is what to put back. g_lastWrittenThreadCount
+is the value as of the last look, so a change neither function just made --
+the user, through the Threads menu -- can be told apart from one of their own
+writes (which update it to match in the same breath). g_manualGuardUntil
+holds the escalation check off for a few seconds after such a change: without
+it, a manual drop made WHILE the engine is genuinely underrunning (the exact
+moment someone reaches for the menu) reads as a fresh ceiling underrun on the
+very next frame and gets escalated straight back before the user's own choice
+ever has a chance to be felt. */
+static int g_preEscalationThreads = -1;
+static int g_escalatedThreads = -1;
+static int g_lastWrittenThreadCount = -1;
+static double g_manualGuardUntil = 0.0;
+
 /** Spend the cores the device has, once it is clear the patch needs them.
 
 Measured on hardware, 224 modules at 48 kHz, underruns over 30 s: 1 thread
@@ -506,31 +522,112 @@ fractions of the core count are all bad and the full count is a hundred times
 better -- so the rule is "all of them", never "some of them", and a device with
 four cores gets four rather than the two that would be its bad middle.
 
-This does not run on a hunch: it waits for the audio thread to report that it
-underran with the buffer already at its ceiling, which is the difference
+This does not run on a hunch: it reacts to the audio thread reporting a FRESH
+underrun with the buffer already at its ceiling, which is the difference
 between a patch that is too heavy and a device that merely jitters. Extra
 threads are not free -- the engine syncs them twice per sample, which costs
-battery and heat -- so a patch that never asks never pays.
+battery and heat, and (now that applyWorkerPriority() actually reaches them)
+idle workers spin at real audio priority too -- so a patch that never asks
+never pays, and checkEngineUnderload() below is what stops a patch that asked
+once from paying forever after.
 
-Once per session, and the Threads menu keeps the last word afterwards: it is
-written to the setting too, so the menu agrees with the engine and the user can
-put it back. */
+Reacts to the ceiling-underrun COUNT moving, not merely "it happened at some
+point this session": that is what lets a device checkEngineUnderload() has
+already brought back down pay this cost again if a later patch earns it,
+without a stale one-time flag standing in the way. The Threads menu still
+keeps the last word in both directions: writing it by hand is detected below
+and given a few seconds' peace before this reacts to anything. */
 static void checkEngineOverload() {
-	static bool escalated = false;
-	if (escalated || !rackdroid::audioOverloaded())
+	static int32_t lastCeilingCount = 0;
+	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
+	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
+	lastCeilingCount = ceilingCount;
+
+	if (g_lastWrittenThreadCount < 0) {
+		g_lastWrittenThreadCount = settings::threadCount; // first look, ever
+	}
+	else if (settings::threadCount != g_lastWrittenThreadCount) {
+		// Not our doing (both of our own writes below update this to match),
+		// so: the Threads menu. Whatever we thought was in effect no longer
+		// is, and this gets a few seconds before any auto-adjustment reacts.
+		g_lastWrittenThreadCount = settings::threadCount;
+		g_manualGuardUntil = system::getTime() + 3.0;
+		g_escalatedThreads = -1;
+	}
+
+	if (g_escalatedThreads >= 0 || !freshCeilingUnderrun)
 		return;
-	escalated = true; // whatever we decide below, decide it only once
+	if (system::getTime() < g_manualGuardUntil)
+		return;
 	int cores = system::getLogicalCoreCount();
 	if (cores <= 1 || settings::threadCount >= cores)
 		return;
 	LOGW("Engine: underrunning with the buffer at its ceiling; raising threads "
 		"from %d to %d (Engine > Threads to change it back)",
 		settings::threadCount, cores);
+	g_preEscalationThreads = settings::threadCount;
+	g_escalatedThreads = cores;
 	// Setting it is all that is needed: Engine::stepBlock relaunches its
 	// workers from settings::threadCount on every block (Engine.cpp:572),
 	// which is also how the Threads menu works -- it writes the setting and
 	// nothing else.
 	settings::threadCount = cores;
+	g_lastWrittenThreadCount = cores;
+}
+
+/** Symmetric to checkEngineOverload() above: undoes an escalation THIS device
+made, rather than leaving every core (and its worker's now-real audio-priority
+spin loop, see applyWorkerPriority()) running flat out against a patch that no
+longer asks for it.
+
+This does NOT wait for things to go quiet first -- measured on hardware, they
+often never do: a patch that genuinely needs only one thread underran at
+~42-58/s with eight cores left spinning at real audio priority from an
+earlier heavy patch, because the idle workers competing for CPU at that
+priority are themselves enough to cause underruns. Waiting for quiet at the
+escalated count is waiting for a condition the escalation itself prevents.
+
+So instead this tries reverting after a flat cooldown, once, and leans on
+checkEngineOverload() to correct a bad guess: if the patch genuinely still
+needs every core, reverting immediately produces a fresh ceiling underrun,
+which escalates straight back on the next frame it is checked (past its own
+manual-change guard, since that write updates g_lastWrittenThreadCount to
+match) -- a brief, self-healing dip rather than a wait that can never end.
+Only ever reverts what checkEngineOverload() itself set: a manual change is
+noticed by checkEngineOverload() above (called first each frame), which
+already clears g_escalatedThreads, so by the time this looks the revert is
+simply no longer its to make. */
+static void checkEngineUnderload() {
+	static double escalatedAt = 0.0;
+	// Not a "how long until it's safe" number, just "don't re-litigate this
+	// every frame" -- one bad section of a patch (a build-up, a dense fill)
+	// gets this long before the guess is tried.
+	static const double COOLDOWN_SEC = 15.0;
+
+	if (g_escalatedThreads < 0) {
+		escalatedAt = 0.0; // nothing of ours in effect; reset for next time
+		return;
+	}
+	if (settings::threadCount != g_escalatedThreads) {
+		// Already handled above (checkEngineOverload runs first each frame
+		// and clears g_escalatedThreads the moment it sees this); just stop.
+		escalatedAt = 0.0;
+		return;
+	}
+	if (escalatedAt == 0.0) {
+		escalatedAt = system::getTime(); // just escalated: start the clock
+		return;
+	}
+	if (system::getTime() - escalatedAt < COOLDOWN_SEC)
+		return;
+	LOGW("Engine: trying threads back down from %d to %d after %.0fs "
+		"(escalates straight back if that turns out to still be too few; "
+		"Engine > Threads to change it back)",
+		settings::threadCount, g_preEscalationThreads, COOLDOWN_SEC);
+	settings::threadCount = g_preEscalationThreads;
+	g_lastWrittenThreadCount = g_preEscalationThreads;
+	g_escalatedThreads = -1;
+	escalatedAt = 0.0;
 }
 
 static void checkLanguageChanged() {
@@ -594,6 +691,7 @@ void android_main(android_app* app) {
 				rackdroid::processTourDemo();
 				checkWorkerPriority();
 			checkEngineOverload();
+			checkEngineUnderload();
 			checkLanguageChanged();
 				APP->window->step();
 			}
