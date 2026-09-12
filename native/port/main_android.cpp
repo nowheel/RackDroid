@@ -480,6 +480,46 @@ static void applyWorkerPriority() {
 		LOGI("Engine: raised %d worker threads to audio priority", raised);
 }
 
+/** Which logical CPU applyWorkerAffinity() below reserves for the system.
+Picks the one with the lowest maximum clock frequency -- a LITTLE/efficiency
+core -- rather than assuming an index. Core numbering order is NOT consistent
+across SoC vendors: verified the hard way. Pinning off cpu(cores-1) worked
+perfectly on the S22 (0 underruns/30s on a heavy patch), but made a genuinely
+light patch underrun continuously on a real OnePlus 8T (Snapdragon 865),
+whose highest-numbered core -- cpu7 -- is the single fastest "prime" core,
+not a spare one; reserving it forced every worker onto weaker cores instead.
+Reading actual clock ceilings sidesteps the whole question of which vendor's
+convention applies. Falls back to cores-1 (the previous, S22-verified
+behavior) if the frequency files cannot be read at all -- e.g. no
+CONFIG_CPU_FREQ, or restricted sysfs -- rather than guessing further. */
+static int pickReservedCpu(int cores) {
+	int bestCpu = cores - 1;
+	long bestFreq = -1;
+	bool ok = true;
+	for (int cpu = 0; cpu < cores; cpu++) {
+		char path[96];
+		std::snprintf(path, sizeof(path),
+			"/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+		FILE* f = std::fopen(path, "r");
+		if (!f) {
+			ok = false;
+			break;
+		}
+		long freq = -1;
+		int n = std::fscanf(f, "%ld", &freq);
+		std::fclose(f);
+		if (n != 1 || freq <= 0) {
+			ok = false;
+			break;
+		}
+		if (bestFreq < 0 || freq < bestFreq) {
+			bestFreq = freq;
+			bestCpu = cpu;
+		}
+	}
+	return ok ? bestCpu : cores - 1;
+}
+
 /** engineThreadCeiling() (below) gives the system a core back by asking for
 one fewer thread than there are cores -- a soft guarantee: it assumes the
 scheduler leaves the excluded core alone, and a user overriding our count
@@ -500,11 +540,7 @@ static void applyWorkerAffinity() {
 	int cores = system::getLogicalCoreCount();
 	if (cores <= 1)
 		return;
-	// Same index RESERVED_CORES reserves conceptually (see
-	// engineThreadCeiling() below): simplest deterministic choice, not
-	// (yet) chosen for being the fast or the slow cluster on a big.LITTLE
-	// device -- no evidence yet that which one matters.
-	int reservedCpu = cores - 1;
+	int reservedCpu = pickReservedCpu(cores);
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	for (int cpu = 0; cpu < cores; cpu++) {
