@@ -223,6 +223,14 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		outBuilder.setDirection(oboe::Direction::Output)
 			->setPerformanceMode(oboe::PerformanceMode::LowLatency)
 			->setSharingMode(oboe::SharingMode::Exclusive)
+			// Optional per Oboe's own docs, but read by the audio policy
+			// service (API 28+) as one input into whether it grants this
+			// Exclusive request or hands back Shared instead -- matches the
+			// AudioAttributes MainActivity.requestAudioFocusFromNative() uses
+			// for the focus request made just before this stream opens
+			// (main_android.cpp), so both halves of the ask agree.
+			->setUsage(oboe::Usage::Media)
+			->setContentType(oboe::ContentType::Music)
 			->setFormat(oboe::AudioFormat::Float)
 			->setChannelCount(NUM_OUTPUTS)
 			->setSampleRate((int) sampleRate)

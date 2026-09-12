@@ -98,6 +98,20 @@ save=true asks for a filename (suggesting `filename`). Returns true and fills
 `path` (absolute) if confirmed. */
 bool dialogFile(bool save, const std::string& dir, const std::string& filename, std::string& path);
 
+/** Requests AUDIOFOCUS_GAIN once, held for the process's lifetime (never
+ducked or abandoned automatically -- see requestAudioFocusFromNative() in
+MainActivity.kt for why). Not just app etiquette: AAudio's audio policy
+service uses the requesting app's audio focus/attributes state as one input
+into whether it grants an Exclusive (dedicated, low-latency) stream or falls
+back to Shared (mixed through AudioFlinger, materially worse and less
+consistent latency) -- confirmed on a real OnePlus 8T logging "sharing=Shared"
+while another app was audible, something no thread-count or block-size tuning
+here can fix, since the bottleneck in that case is outside this process
+entirely. Returns false (and clears any pending JNI exception) if the method
+is missing or the call failed; the caller logs, and the Oboe stream still
+opens either way -- this only improves the odds of the mode we actually want. */
+bool requestAudioFocus();
+
 /** Sets a thread's scheduling priority through android.os.Process, not a raw
 setpriority() syscall: a thread renicing ANOTHER thread of the same process
 below nice 0 needs CAP_SYS_NICE, which an app does not have, so a native-only

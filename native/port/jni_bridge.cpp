@@ -50,6 +50,7 @@ static jmethodID midLanguageChanged;
 static jmethodID midThermalStatus;
 static jmethodID midShowToast;
 static jmethodID midShowEngineNotice;
+static jmethodID midRequestAudioFocus;
 
 // ---- dialog result handoff (UI thread -> pumping glue thread) ----
 static void (*pumpOnce)(int timeoutMs) = NULL; // installed by main_android
@@ -155,12 +156,16 @@ void jniInit(ANativeActivity* activity) {
 	midShowEngineNotice = env->GetMethodID(activityCls, "showEngineNoticeFromNative", "(I)V");
 	if (env->ExceptionCheck())
 		env->ExceptionClear();
+	midRequestAudioFocus = env->GetMethodID(activityCls, "requestAudioFocusFromNative", "()Z");
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
 	// Checked (and logged) separately from the generic catch-all below, which
 	// only nulls midClipboardSet -- a silent miss here would otherwise look
 	// identical to the notice simply never being shown.
-	if (!midThermalStatus || !midShowToast || !midShowEngineNotice)
-		LOGE("jniInit: engine-notice methods not found (thermal=%p toast=%p notice=%p)",
-			(void*) midThermalStatus, (void*) midShowToast, (void*) midShowEngineNotice);
+	if (!midThermalStatus || !midShowToast || !midShowEngineNotice || !midRequestAudioFocus)
+		LOGE("jniInit: engine-notice methods not found (thermal=%p toast=%p notice=%p focus=%p)",
+			(void*) midThermalStatus, (void*) midShowToast, (void*) midShowEngineNotice,
+			(void*) midRequestAudioFocus);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
 		LOGE("jniInit: MainActivity methods missing; dialogs/clipboard disabled");
@@ -351,6 +356,19 @@ void showEngineNotice(int kind) {
 	env->CallVoidMethod(activityObj, midShowEngineNotice, (jint) kind);
 	if (env->ExceptionCheck())
 		logAndClearException("showEngineNotice");
+}
+
+
+bool requestAudioFocus() {
+	JNIEnv* env = getEnv();
+	if (!env || !midRequestAudioFocus)
+		return false;
+	jboolean granted = env->CallBooleanMethod(activityObj, midRequestAudioFocus);
+	if (env->ExceptionCheck()) {
+		logAndClearException("requestAudioFocus");
+		return false;
+	}
+	return granted;
 }
 
 

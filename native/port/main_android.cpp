@@ -245,6 +245,17 @@ struct RackDroidApp {
 
 		network::init();
 		audio::init();
+		// Before opening the Oboe stream, not after: AAudio's audio policy
+		// service weighs the caller's current focus/attributes state when
+		// deciding whether to grant an Exclusive stream or fall back to
+		// Shared -- asking too late would not un-negotiate the first stream
+		// open. See requestAudioFocus()'s doc comment (jni_bridge.hpp) for why
+		// this exists at all; the return value is just for the log, since the
+		// stream opens the same way either way.
+		if (!rackdroid::requestAudioFocus())
+			LOGW("Engine: audio focus request was denied or unavailable; the "
+				"audio stream may be granted Shared instead of Exclusive mode "
+				"if another app is also using audio");
 		rackdroid::oboeInit();
 		midi::init();
 		rackdroid::amidiInit();

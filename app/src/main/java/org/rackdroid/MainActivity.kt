@@ -18,6 +18,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.midi.MidiDevice
 import android.media.midi.MidiDeviceInfo
 import android.media.midi.MidiManager
@@ -86,6 +89,7 @@ class MainActivity : NativeActivity() {
 	private val nextMidiId = AtomicInteger(1)
 	private var startupRecoveryActive = false
 	private var recoveryDialogShown = false
+	private var audioFocusRequest: AudioFocusRequest? = null
 
 	/** Our half of the strings -- toolbar, palette, tour, our dialogs -- comes
 	 * from Android resources, which follow the DEVICE locale. Rack's half comes
@@ -1565,6 +1569,10 @@ class MainActivity : NativeActivity() {
 		}
 		buttonPopup?.dismiss()
 		buttonPopup = null
+		audioFocusRequest?.let {
+			(getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.abandonAudioFocusRequest(it)
+		}
+		audioFocusRequest = null
 		RackService.stop(this)
 		if (activeActivity?.get() === this)
 			activeActivity = null
@@ -1673,6 +1681,55 @@ class MainActivity : NativeActivity() {
 	fun showEngineNoticeFromNative(kind: Int) {
 		val res = if (kind == 1) R.string.engine_thermal_throttled else R.string.engine_maxed_out
 		showToastFromNative(getString(res))
+	}
+
+	// ---- Audio focus (called from native, once, before the Oboe stream opens) ----
+
+	/** RackDroid produces continuous audio via a MEDIA_PLAYBACK foreground
+	service (RackService) -- the same category of app Android expects to hold
+	audio focus, and requesting it is not just etiquette here: AAudio's audio
+	policy service weighs the caller's focus/attributes state when deciding
+	whether to grant an Exclusive (dedicated, low-latency) stream or fall back
+	to Shared (mixed through AudioFlinger). A real OnePlus 8T logged
+	"sharing=Shared" -- with materially worse, less consistent latency than
+	the Exclusive path the block-size and thread-priority tuning elsewhere in
+	this codebase were built around -- while another app was also audible and
+	RackDroid had never once asked for focus. No amount of tuning on our side
+	of that stream fixes a mode Android chose not to grant us.
+	AUDIOFOCUS_GAIN (not _TRANSIENT): this is not a one-off sound, and Rack's
+	own design keeps the engine and its audio running even in the background
+	(see APP_CMD_LOST_FOCUS in main_android.cpp) -- deliberately unlike a
+	normal media player, we do NOT pause or duck on AUDIOFOCUS_LOSS below,
+	only log it, so this cannot make that existing behavior any less
+	surprising than it already was. Requested once and held for the process's
+	life; released in onDestroy(). Returns false (native logs it) if the
+	system denied focus outright -- the Oboe stream still opens either way. */
+	fun requestAudioFocusFromNative(): Boolean {
+		var granted = false
+		val latch = CountDownLatch(1)
+		uiHandler.post {
+			try {
+				val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+				if (am == null) return@post
+				val attrs = AudioAttributes.Builder()
+					.setUsage(AudioAttributes.USAGE_MEDIA)
+					.setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+					.build()
+				val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+					.setAudioAttributes(attrs)
+					.setOnAudioFocusChangeListener { change ->
+						jlog("AudioManager focus change: $change (engine keeps running regardless -- see requestAudioFocusFromNative)")
+					}
+					.build()
+				granted = am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+				if (granted)
+					audioFocusRequest = request
+			} finally {
+				latch.countDown()
+			}
+		}
+		latch.await()
+		return granted
 	}
 
 	// ---- Async dialogs (called from the native glue thread) ----
