@@ -147,8 +147,20 @@ void jniInit(ANativeActivity* activity) {
 	midPatchReady = env->GetMethodID(activityCls, "patchReadyFromNative", "()V");
 	midLanguageChanged = env->GetMethodID(activityCls, "languageChangedFromNative", "(Ljava/lang/String;)V");
 	midThermalStatus = env->GetMethodID(activityCls, "currentThermalStatus", "()I");
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
 	midShowToast = env->GetMethodID(activityCls, "showToastFromNative", "(Ljava/lang/String;)V");
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
 	midShowEngineNotice = env->GetMethodID(activityCls, "showEngineNoticeFromNative", "(I)V");
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+	// Checked (and logged) separately from the generic catch-all below, which
+	// only nulls midClipboardSet -- a silent miss here would otherwise look
+	// identical to the notice simply never being shown.
+	if (!midThermalStatus || !midShowToast || !midShowEngineNotice)
+		LOGE("jniInit: engine-notice methods not found (thermal=%p toast=%p notice=%p)",
+			(void*) midThermalStatus, (void*) midShowToast, (void*) midShowEngineNotice);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
 		LOGE("jniInit: MainActivity methods missing; dialogs/clipboard disabled");
@@ -286,13 +298,34 @@ std::string clipboardGet() {
 }
 
 
+/** Logs a pending Java exception's toString() instead of just clearing it --
+the difference between "we know why this call never took effect" and a
+silent no-op indistinguishable from the call simply never having happened.
+Always clears the exception before returning: JNI's behaviour with one still
+pending, on the next JNI call, is undefined. */
+static void logAndClearException(const char* where) {
+	JNIEnv* env = getEnv();
+	if (!env || !env->ExceptionCheck())
+		return;
+	jthrowable ex = env->ExceptionOccurred();
+	env->ExceptionClear(); // must come before any further JNI call below
+	jclass exCls = ex ? env->GetObjectClass(ex) : NULL;
+	jmethodID midToString = exCls ? env->GetMethodID(exCls, "toString", "()Ljava/lang/String;") : NULL;
+	jstring exStr = midToString ? (jstring) env->CallObjectMethod(ex, midToString) : NULL;
+	if (env->ExceptionCheck())
+		env->ExceptionClear(); // toString() itself throwing: give up gracefully
+	std::string msg = exStr ? jstringToStd(env, exStr) : "(no exception object)";
+	LOGE("%s: Java exception: %s", where, msg.c_str());
+}
+
+
 int thermalStatus() {
 	JNIEnv* env = getEnv();
 	if (!env || !midThermalStatus)
 		return 0; // PowerManager.THERMAL_STATUS_NONE
 	int status = env->CallIntMethod(activityObj, midThermalStatus);
 	if (env->ExceptionCheck()) {
-		env->ExceptionClear();
+		logAndClearException("thermalStatus");
 		return 0;
 	}
 	return status;
@@ -307,7 +340,7 @@ void showToast(const std::string& text) {
 	env->CallVoidMethod(activityObj, midShowToast, js);
 	env->DeleteLocalRef(js);
 	if (env->ExceptionCheck())
-		env->ExceptionClear();
+		logAndClearException("showToast");
 }
 
 
@@ -317,7 +350,7 @@ void showEngineNotice(int kind) {
 		return;
 	env->CallVoidMethod(activityObj, midShowEngineNotice, (jint) kind);
 	if (env->ExceptionCheck())
-		env->ExceptionClear();
+		logAndClearException("showEngineNotice");
 }
 
 
