@@ -25,11 +25,17 @@
 
 #include <midi.hpp>
 #include <common.hpp>
+#include <logger.hpp>
 
 #include "amidi_driver.hpp"
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "rackdroid", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__)
+/* Both sinks, like the rest of the port layer. These used to reach logcat
+only, which means a user reporting "my keyboard is not detected" sends a log
+saying nothing whatever about MIDI -- the one file that could have answered it.
+Neither of these is in the 1 kHz polling path: they fire on hotplug and on a
+device that failed to open, so Rack's WARN and its fflush cost nothing here. */
+#define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO, "rackdroid", __VA_ARGS__); INFO(__VA_ARGS__); } while (0)
+#define LOGE(...) do { __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__); WARN(__VA_ARGS__); } while (0)
 
 
 namespace rackdroid {

@@ -19,6 +19,7 @@
 
 #include <system.hpp>
 #include <common.hpp>
+#include <logger.hpp>
 
 
 namespace rackdroid {
@@ -49,6 +50,7 @@ static bool extractZipAsset(AAssetManager* am, const char* assetName,
 	AAsset* asset = AAssetManager_open(am, assetName, AASSET_MODE_STREAMING);
 	if (!asset) {
 		__android_log_print(ANDROID_LOG_ERROR, "rackdroid", "assets/%s missing from APK", assetName);
+		WARN("assets/%s missing from APK", assetName);
 		return false;
 	}
 
@@ -71,6 +73,7 @@ static bool extractZipAsset(AAssetManager* am, const char* assetName,
 	bool ok = true;
 	if (archive_read_open1(a) != ARCHIVE_OK) {
 		__android_log_print(ANDROID_LOG_ERROR, "rackdroid", "%s: %s", assetName, archive_error_string(a));
+		WARN("%s: %s", assetName, archive_error_string(a));
 		ok = false;
 	}
 
@@ -85,6 +88,7 @@ static bool extractZipAsset(AAssetManager* am, const char* assetName,
 		FILE* f = std::fopen(path.c_str(), "wb");
 		if (!f) {
 			__android_log_print(ANDROID_LOG_ERROR, "rackdroid", "cannot write %s", path.c_str());
+			WARN("cannot write %s", path.c_str());
 			ok = false;
 			break;
 		}

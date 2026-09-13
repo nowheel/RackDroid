@@ -26,6 +26,7 @@
 #include <asset.hpp>
 #include <system.hpp>
 #include <common.hpp>
+#include <logger.hpp>
 
 #include "static_plugins.hpp"
 
@@ -207,7 +208,10 @@ Java_org_rackdroid_MainActivity_nativeLoadUserPlugin(
 		ok = loadUserPluginAt(dir ? dir : "", soname ? soname : "");
 	}
 	catch (std::exception& e) {
+		// Both sinks: a pack that refuses to load is the single most reported
+		// problem here, and logcat needs a cable at the other end of it.
 		__android_log_print(ANDROID_LOG_ERROR, "rackdroid", "loadUserPlugin: %s", e.what());
+		WARN("loadUserPlugin: %s", e.what());
 	}
 	if (dir) env->ReleaseStringUTFChars(dirJ, dir);
 	if (soname) env->ReleaseStringUTFChars(sonameJ, soname);
