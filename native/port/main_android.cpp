@@ -803,6 +803,26 @@ static void checkThreadCount() {
 	if (touched)
 		return; // measured the gesture, not the patch: discard and try again
 
+	// A single underrun in five seconds is as likely to be the phone as the
+	// patch -- a notification, a rotation, another app waking up. Acting on
+	// one meant leaving a rung that was doing its job, and the rung it moved
+	// to could be audibly worse for the next five seconds. So tolerate an
+	// isolated one; a rung that keeps producing them is a different matter and
+	// is not tolerated forever.
+	static int toleratedRuns = 0;
+	static const int32_t TOLERANCE = 1;
+	static const int TOLERATED_RUNS_MAX = 3;
+	bool tolerated = underruns > 0 && underruns <= TOLERANCE
+		&& toleratedRuns < TOLERATED_RUNS_MAX;
+	if (tolerated) {
+		toleratedRuns++;
+		LOGI("Engine: %d underrun in %.0fs at %d threads; ignoring (%d of %d)",
+			underruns, WINDOW_SEC, current, toleratedRuns, TOLERATED_RUNS_MAX);
+		return; // and do not record it as this rung's score
+	}
+	if (underruns == 0)
+		toleratedRuns = 0;
+
 	if (current >= 1 && current <= MAX_TRACKED_THREADS)
 		scores[current] = underruns;
 
@@ -814,6 +834,7 @@ static void checkThreadCount() {
 		return;
 	}
 	settledAt = -1;
+	toleratedRuns = 0;
 
 	// An unmeasured neighbour first -- nearest, and downward before upward,
 	// since the barrier cost is the commoner problem on a phone. Exploration
@@ -1015,8 +1036,15 @@ void android_main(android_app* app) {
 		int events;
 		android_poll_source* source;
 		// Recompute every iteration: 0 (render continuously, vsync paces us
-		// via eglSwapBuffers) while a surface exists, block otherwise.
-		int timeout = (rd.rackStarted && rackdroid::windowHasSurface()) ? 0 : -1;
+		// via eglSwapBuffers) while a surface exists; 100 ms once it is gone,
+		// because the engine keeps playing in the background and its
+		// maintenance -- above all the thread-count tuner -- has to keep
+		// running with it. Blocking forever here froze the tuner at whatever
+		// count was right when the app was last on screen, and a phone that
+		// throttles while backgrounded then underruns with nothing awake to
+		// correct it. Only with no engine at all is waiting indefinitely free.
+		int timeout = !rd.rackStarted ? -1
+			: rackdroid::windowHasSurface() ? 0 : 100;
 		int ident = ALooper_pollOnce(timeout, NULL, &events, (void**) &source);
 		if (ident >= 0 && source)
 			source->process(app, source);
@@ -1026,19 +1054,28 @@ void android_main(android_app* app) {
 			return;
 		}
 
-		if (rd.rackStarted && APP->window && rackdroid::windowHasSurface()) {
+		if (rd.rackStarted) {
 			try {
-				rackdroid::touchStep();
-				rackdroid::processTourDemo();
+				// Engine and audio outlive the surface, so what tunes them
+				// runs whether or not anything is on screen. None of these
+				// touch the window or the scene.
 				checkWorkerPriority();
-			rackdroid::audioReleaseIdleDevice();
-			checkZoomCeiling();
-			rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
-			checkThreadCount();
-			checkBlockSizeOverload();
-			checkMaxedOutOverload();
-			checkLanguageChanged();
-				APP->window->step();
+				rackdroid::audioReleaseIdleDevice();
+				rackdroid::audioReportUnderruns();
+				rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
+				checkThreadCount();
+				checkBlockSizeOverload();
+
+				// The rest needs a surface: input, the scene, a dialog to
+				// show, or a restart the user would not see coming.
+				if (APP->window && rackdroid::windowHasSurface()) {
+					rackdroid::touchStep();
+					rackdroid::processTourDemo();
+					checkZoomCeiling();
+					checkMaxedOutOverload();
+					checkLanguageChanged();
+					APP->window->step();
+				}
 			}
 			catch (std::exception& e) {
 				LOGE("FATAL in frame step: %s", e.what());

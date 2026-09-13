@@ -33,6 +33,11 @@ to the narrower "the engine is out of CPU" signal above. Same threading
 contract: written by the audio thread, read by the render thread. */
 int32_t audioUnderrunCount();
 
+/** Writes any new underruns to the log. Call from the frame loop, never from
+the audio callback: Rack's logger locks a mutex and fflush()es, which is the
+last thing a late callback should be made to wait for. */
+void audioReportUnderruns();
+
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
 itself (see CLAUDE.md). */

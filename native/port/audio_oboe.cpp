@@ -196,6 +196,32 @@ bool audioUnderrunsRecently() {
 	return rack::system::getTime() - at < 2.0;
 }
 
+/* What the callback saw when the count last moved, so the report can be
+written from somewhere it is allowed to block. Packed into one word because
+two separate atomics could be read a callback apart and describe no buffer
+that ever existed: size in the low 16 bits, capacity in the high 16. */
+static std::atomic<uint32_t> g_underrunBuffer{0};
+
+void audioReportUnderruns() {
+	static int32_t lastReported = 0;
+	static double nextReportAt = 0.0;
+	int32_t now = g_totalUnderruns.load(std::memory_order_relaxed);
+	if (now == lastReported)
+		return;
+	// One line per second, carrying everything since the last one. Underruns
+	// arrive one per callback, so reporting each frame wrote a hundred lines a
+	// second into a log file with a size cap -- the evidence of what went
+	// wrong would push itself out of the file it is meant to be found in.
+	double t = rack::system::getTime();
+	if (t < nextReportAt)
+		return;
+	nextReportAt = t + 1.0;
+	uint32_t packed = g_underrunBuffer.load(std::memory_order_relaxed);
+	AUDIO_WARN("Oboe: %d underruns (%d total), buffer now %d frames of %d",
+		now - lastReported, now, (int) (packed & 0xffff), (int) (packed >> 16));
+	lastReported = now;
+}
+
 
 static const int NUM_OUTPUTS = 2;
 static const int NUM_INPUTS = 2;
@@ -501,12 +527,20 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			// Underruns while the tuner has already grown the buffer as far as
 			// it goes: the device is not jittering, it is short of CPU, and no
 			// buffer will fix that. Publish it so the engine can answer.
-			if (stream->getBufferSizeInFrames() >=
-				stream->getBufferCapacityInFrames() - stream->getFramesPerBurst())
+			int32_t size = stream->getBufferSizeInFrames();
+			int32_t capacity = stream->getBufferCapacityInFrames();
+			if (size >= capacity - stream->getFramesPerBurst())
 				g_ceilingUnderruns.fetch_add(1, std::memory_order_relaxed);
-			AUDIO_WARN("Oboe: %d underruns, buffer now %d frames of %d",
-				xruns, stream->getBufferSizeInFrames(),
-				stream->getBufferCapacityInFrames());
+			// Do NOT log from here. Rack's WARN takes a mutex the render
+			// thread also holds and ends in fflush() -- a blocking write to
+			// flash -- and upstream says as much in logger.cpp: "logging is
+			// not used in performance critical code". Firing that from the
+			// audio callback, at the exact moment the callback is already
+			// late, makes the next underrun more likely rather than less.
+			// Publish what was seen; audioReportUnderruns() writes it.
+			g_underrunBuffer.store(
+				((uint32_t) (capacity & 0xffff) << 16) | (uint32_t) (size & 0xffff),
+				std::memory_order_relaxed);
 		}
 
 		const float* input = NULL;

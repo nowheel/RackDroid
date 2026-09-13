@@ -165,8 +165,10 @@ struct PanelLabelOverlay : widget::Widget {
 				if (!pq || pq->name.empty())
 					continue;
 				math::Vec c = pw->getRelativeOffset(pw->box.size.mult(0.5f), ref);
-				drawLabel(args, c.x, c.y + pw->box.size.y * 0.5f + 0.5f,
-					shortLabel(pq->name), nvgRGB(0xED, 0xE6, 0xD8));
+				float ly = c.y + pw->box.size.y * 0.5f + 0.5f;
+				if (!labelVisible(args, c.x, ly))
+					continue;
+				drawLabel(args, c.x, ly, shortLabel(pq->name), nvgRGB(0xED, 0xE6, 0xD8));
 			}
 			// Inputs/outputs: label below the jack, tinted by direction
 			for (app::PortWidget* port : mw->getPorts()) {
@@ -176,16 +178,25 @@ struct PanelLabelOverlay : widget::Widget {
 				NVGcolor col = (port->type == engine::Port::INPUT)
 					? nvgRGB(0xB8, 0xAF, 0x9C) : nvgRGB(0xFF, 0xDA, 0x9F);
 				math::Vec c = port->getRelativeOffset(port->box.size.mult(0.5f), ref);
-				drawLabel(args, c.x, c.y + port->box.size.y * 0.5f + 0.5f,
-					shortLabel(pi->name), col);
+				float ly = c.y + port->box.size.y * 0.5f + 0.5f;
+				if (!labelVisible(args, c.x, ly))
+					continue;
+				drawLabel(args, c.x, ly, shortLabel(pi->name), col);
 			}
 		}
 	}
 
+	/** Cheap cull: is a label at this point worth building at all? Separate
+	from drawLabel because shortLabel() allocates -- twice, for the substr and
+	the copy -- and doing that for a label that is then thrown away costs a
+	few thousand allocations a second on a full rack. */
+	static bool labelVisible(const DrawArgs& args, float x, float y) {
+		return !(x < args.clipBox.pos.x - 40 || x > args.clipBox.pos.x + args.clipBox.size.x + 40 ||
+			y < args.clipBox.pos.y - 20 || y > args.clipBox.pos.y + args.clipBox.size.y + 20);
+	}
+
 	void drawLabel(const DrawArgs& args, float x, float y, const std::string& text, NVGcolor col) {
-		// Cheap cull: skip labels well outside the visible clip box.
-		if (x < args.clipBox.pos.x - 40 || x > args.clipBox.pos.x + args.clipBox.size.x + 40 ||
-			y < args.clipBox.pos.y - 20 || y > args.clipBox.pos.y + args.clipBox.size.y + 20)
+		if (!labelVisible(args, x, y))
 			return;
 		// Subtle shadow for legibility over busy panels
 		nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 180));
