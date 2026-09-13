@@ -133,8 +133,16 @@ void applyRackTheme(const std::string& systemDir, const std::string& userDir) {
 	// theme in userDir/rack-theme.txt. Here -- at startup, BEFORE any panel
 	// SVG is loaded (Rack's Svg::load caches by filename for the process
 	// lifetime, so this must run first) -- we copy the chosen theme's files
-	// over the canonical paths. Runs every launch (cheap: ~250 tiny SVGs),
-	// so a theme change (or a switch back to amber) is always reconciled.
+	// over the canonical paths.
+	//
+	// Skipped when the same theme is already in place over the same assets.
+	// It used to run unconditionally, which sounds cheap for ~250 tiny SVGs
+	// and measured ~51 ms on an S22 -- but it is also 256 deletes and 256
+	// writes to flash on every single launch, to end up byte for byte where
+	// the previous launch left off. The marker carries the asset revision as
+	// well as the theme name, so extractSystemAssets() laying down fresh
+	// canonical files (a new APP_VERSION or ASSETS_REVISION) still forces the
+	// theme back over them -- that ordering is why this runs after it.
 	std::string themeFile = userDir + "/rack-theme.txt";
 	std::string theme = "amber";
 	if (rack::system::isFile(themeFile)) {
@@ -144,6 +152,17 @@ void applyRackTheme(const std::string& systemDir, const std::string& userDir) {
 				|| theme.back() == ' ' || theme.back() == '\t'))
 			theme.pop_back();
 	}
+	std::string marker = userDir + "/.rack-theme-applied";
+	std::string stamp = theme + "+" + rack::APP_VERSION + "+" + ASSETS_REVISION;
+	if (rack::system::isFile(marker)) {
+		std::vector<uint8_t> have = rack::system::readFile(marker);
+		if (std::string(have.begin(), have.end()) == stamp) {
+			__android_log_print(ANDROID_LOG_INFO, "rackdroid",
+				"rack theme '%s' already in place", theme.c_str());
+			return;
+		}
+	}
+
 	std::string themeDir = systemDir + "/themes/" + theme;
 	if (!rack::system::isDirectory(themeDir)) {
 		__android_log_print(ANDROID_LOG_INFO, "rackdroid",
@@ -160,6 +179,12 @@ void applyRackTheme(const std::string& systemDir, const std::string& userDir) {
 		rack::system::remove(dst); // system::copy won't overwrite an existing file
 		if (rack::system::copy(src, dst))
 			n++;
+	}
+	// Only after the copies succeeded: a half-applied theme must be retried on
+	// the next launch, not remembered as done.
+	if (FILE* f = std::fopen(marker.c_str(), "w")) {
+		std::fwrite(stamp.data(), 1, stamp.size(), f);
+		std::fclose(f);
 	}
 	__android_log_print(ANDROID_LOG_INFO, "rackdroid",
 		"applied rack theme '%s' (%d files)", theme.c_str(), n);
