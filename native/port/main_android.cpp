@@ -945,6 +945,9 @@ static void checkThreadSearch() {
 	static int32_t rungStartCount = 0;
 	static bool confirming = false;
 	static int searchRestoreTo = -1;
+	// What the search itself last wrote, so a value that differs can be told
+	// apart from one of its own writes -- see the manual-override branch.
+	static int searchWrote = -1;
 	// A search that walked all the way down without finding a clean rung
 	// answered its question: the thread count is not what is wrong. Running it
 	// again immediately would just loop forever, so it takes a long stretch of
@@ -961,24 +964,40 @@ static void checkThreadSearch() {
 	if (freshCeilingUnderrun)
 		lastFreshUnderrunAt = now;
 
+	// The search has finished -- either it found a count that holds, or it ran
+	// out of rungs. Both leave the same standing verdict: raising does not help
+	// on this stream, so checkEngineOverload() stays blocked (g_escalationFutile)
+	// and no new search starts. Only a long stretch with NO underruns at all
+	// retires that: quiet means either the search's answer is working or the
+	// load changed, and in both cases there is nothing for escalation to undo
+	// -- it is the one moment it is safe to hand the lever back for whatever a
+	// later, heavier patch might genuinely need.
 	if (searchExhausted) {
 		if (lastFreshUnderrunAt > 0.0 && now - lastFreshUnderrunAt >= RETRY_QUIET_SEC) {
-			LOGW("Engine: quiet for %.0fs since the thread search came up empty; "
-				"it may be worth another look if underruns return",
-				RETRY_QUIET_SEC);
+			LOGW("Engine: %d threads has been clean for %.0fs; releasing the hold "
+				"on automatic thread changes",
+				settings::threadCount, RETRY_QUIET_SEC);
 			searchExhausted = false;
+			g_escalationFutile = false;
 			exhaustedAt = 0.0;
 		}
 		return;
 	}
 
-	// A manual pick through the Threads menu ends the search: checkEngineOverload()
-	// spots it and opens the guard window, and the user's number is not ours to
-	// keep walking away from.
+	// A manual pick through the Threads menu ends the search -- the user's
+	// number is not ours to keep walking away from. But ONLY a real one: the
+	// guard window that checkEngineOverload() opens is not by itself proof
+	// that anyone touched the menu, and treating it as proof made this branch
+	// tear the search down and the trigger below rebuild it on every frame for
+	// the whole three seconds, eighteen times over, in the 8T log. The count
+	// differing from what the search itself last wrote is the actual evidence.
 	if (g_escalationFutile && now < g_manualGuardUntil) {
-		g_escalationFutile = false;
-		confirming = false;
-		searchRestoreTo = -1;
+		if (searchWrote >= 0 && settings::threadCount != searchWrote) {
+			g_escalationFutile = false;
+			confirming = false;
+			searchRestoreTo = -1;
+			searchWrote = -1;
+		}
 		return;
 	}
 
@@ -1009,20 +1028,30 @@ static void checkThreadSearch() {
 			}
 			LOGW("Engine: %d threads ran clean for %.0fs; search done (was %d)",
 				settings::threadCount, CONFIRM_SEC, searchRestoreTo);
-			g_escalationFutile = false;
+			// g_escalationFutile deliberately STAYS set. Clearing it here was a
+			// real bug, caught on the 8T: the moment the search let go,
+			// checkEngineOverload() saw the next underrun, raised straight back
+			// to the ceiling, and the search started over -- an endless cycle
+			// that undid its own answer every time. The verdict the search
+			// reached ("raising does not help here") does not stop being true
+			// because the search finished; only searchExhausted's quiet window
+			// below retires it.
 			confirming = false;
 			searchRestoreTo = -1;
+			searchExhausted = true;
+			exhaustedAt = now;
 			return;
 		}
 		confirming = false;
 		if (settings::threadCount <= 1) {
-			// Nothing left below. Not a thread-count problem at all, then: put
-			// the count back and let checkMaxedOutOverload() call it what it is.
+			// Nothing left below: the thread count is not what is wrong, so let
+			// checkMaxedOutOverload() say so. Stay at 1 rather than restoring
+			// the count the search started from -- that count was measured to
+			// be no better here, and it costs a great deal more heat and
+			// battery to be no better at.
 			LOGW("Engine: still underrunning at 1 thread -- this is not the "
-				"thread count; restoring %d", searchRestoreTo);
-			settings::threadCount = searchRestoreTo;
-			g_lastWrittenThreadCount = searchRestoreTo;
-			g_escalationFutile = false;
+				"thread count; staying here rather than going back to %d, which "
+				"measured no better and costs far more", searchRestoreTo);
 			confirming = false;
 			searchRestoreTo = -1;
 			searchExhausted = true;
@@ -1036,6 +1065,7 @@ static void checkThreadSearch() {
 			settings::threadCount, SETTLE_SEC, next);
 		settings::threadCount = next;
 		g_lastWrittenThreadCount = next;
+		searchWrote = next;
 		rungStartedAt = now;
 		rungStartCount = totalCount;
 		return;
@@ -1057,6 +1087,7 @@ static void checkThreadSearch() {
 	g_escalationFutile = true;
 	confirming = false;
 	searchRestoreTo = settings::threadCount;
+	searchWrote = settings::threadCount;
 	rungStartedAt = now;
 	rungStartCount = totalCount;
 	// Whatever checkEngineUnderload() was holding is ours now; without this it
