@@ -400,9 +400,18 @@ static void handleCmdInner(RackDroidApp* rd, int32_t cmd) {
 			if (rd->rackStarted)
 				rackdroid::windowSurfaceLost();
 			break;
+		case APP_CMD_WINDOW_RESIZED:
+		case APP_CMD_CONFIG_CHANGED:
 		case APP_CMD_LOST_FOCUS:
+		case APP_CMD_GAINED_FOCUS:
 			// Keep engine/audio running in background; only rendering stops
-			// (Window::step() is a no-op without a surface).
+			// (Window::step() is a no-op without a surface). But every one of
+			// these costs a burst of dropped frames and underruns, and the
+			// thread tuner must not read that as the patch being too heavy.
+			// Rotation in particular never reaches TERM_WINDOW at all: the
+			// activity declares configChanges for orientation, so the surface
+			// survives and only a resize arrives.
+			rackdroid::windowNoteSurfaceChange();
 			break;
 		case APP_CMD_STOP:
 			// Android may kill a stopped app without APP_CMD_DESTROY:
@@ -796,7 +805,19 @@ static void checkThreadCount() {
 		return;
 	}
 
+	// Anything that disturbs the audio while a window is open makes that
+	// window worthless: it measures the disturbance, not the thread count.
+	// A touch was the first case found; two more showed up on the S22 while
+	// backgrounding, returning and rotating the phone in a loop -- every
+	// surface change and every stream reopen costs a burst of underruns, and
+	// the tuner charged them to whatever count happened to be current. It
+	// wandered 2 -> 1 -> 2 -> 5 -> 3 -> 4 over twenty-five seconds before
+	// settling back where it started.
 	if (rackdroid::windowSecondsSinceInteraction() < INTERACTION_SETTLE_SEC)
+		windowTouched = true;
+	if (rackdroid::windowSecondsSinceSurfaceChange() < WINDOW_SEC)
+		windowTouched = true;
+	if (rackdroid::audioSecondsSinceStreamOpen() < WINDOW_SEC)
 		windowTouched = true;
 
 	if (now - windowStartedAt < WINDOW_SEC)
@@ -808,8 +829,14 @@ static void checkThreadCount() {
 	windowStartedAt = now;
 	windowStartCount = total;
 	windowTouched = false;
-	if (touched)
-		return; // measured the gesture, not the patch: discard and try again
+	if (touched) {
+		// Say so: a discarded window looks exactly like a tuner doing nothing,
+		// and telling those apart from a log file is otherwise guesswork.
+		if (underruns > 0)
+			LOGI("Engine: %d underruns in %.0fs at %d threads, but the window was "
+				"disturbed; not counting it", underruns, WINDOW_SEC, current);
+		return; // measured the disturbance, not the patch
+	}
 
 	// A single underrun in five seconds is as likely to be the phone as the
 	// patch -- a notification, a rotation, another app waking up. Acting on

@@ -38,6 +38,11 @@ the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */
 void audioReportUnderruns();
 
+/** Seconds since the output stream was last opened, or a large number if it
+never has. The seconds right after a reopen underrun whatever the patch is
+doing; they are not a measurement of anything. */
+double audioSecondsSinceStreamOpen();
+
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
 itself (see CLAUDE.md). */

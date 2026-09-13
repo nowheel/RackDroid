@@ -40,4 +40,15 @@ the audio callback for as long as it lasts, and those underruns say nothing
 about the patch or the thread count. */
 double windowSecondsSinceInteraction();
 
+/** Seconds since the EGL surface last appeared, went away or was disturbed
+(backgrounding, returning, rotation), or a large number if it never has. */
+double windowSecondsSinceSurfaceChange();
+
+/** Records a disturbance that costs a burst of frames without destroying the
+surface. The activity declares configChanges="orientation|screenSize|...", so
+a rotation never reaches APP_CMD_TERM_WINDOW -- it arrives as a resize, and
+without this the underruns it causes look to the engine like the patch's
+fault. */
+void windowNoteSurfaceChange();
+
 } // namespace rackdroid

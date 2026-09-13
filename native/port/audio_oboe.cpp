@@ -196,6 +196,18 @@ bool audioUnderrunsRecently() {
 	return rack::system::getTime() - at < 2.0;
 }
 
+/** When the output stream was last (re)opened. The first seconds after a
+reopen underrun regardless of the patch -- the device is settling and the
+engine has just been handed a new block size -- so anything judging the engine
+by underruns has to skip them. */
+static double g_lastStreamOpen = 0.0;
+
+double audioSecondsSinceStreamOpen() {
+	if (g_lastStreamOpen <= 0.0)
+		return 1e9;
+	return rack::system::getTime() - g_lastStreamOpen;
+}
+
 /* What the callback saw when the count last moved, so the report can be
 written from somewhere it is allowed to block. Packed into one word because
 two separate atomics could be read a callback apart and describe no buffer
@@ -358,6 +370,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (inputStream)
 			inputStream->requestStart();
 		outputStream->requestStart();
+		g_lastStreamOpen = rack::system::getTime();
 		// blockSize belongs in here: it is the one number in this line the app
 		// itself chooses, and leaving it out cost a debugging round trip --
 		// a log full of underruns with no way to tell which rung of

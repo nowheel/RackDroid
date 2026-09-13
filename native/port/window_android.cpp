@@ -540,7 +540,26 @@ void windowSetPendingSurface(ANativeWindow* win, float density) {
 }
 
 
+/** When the EGL surface last appeared or went away. Backgrounding, returning
+and every rotation land here, and each one costs a burst of underruns that has
+nothing to do with the patch -- so whatever is judging the engine by its
+underrun count needs to know not to believe the next few seconds. */
+static double g_lastSurfaceChange = 0.0;
+
+double windowSecondsSinceSurfaceChange() {
+	if (g_lastSurfaceChange <= 0.0)
+		return 1e9;
+	return rack::system::getTime() - g_lastSurfaceChange;
+}
+
+
+void windowNoteSurfaceChange() {
+	g_lastSurfaceChange = rack::system::getTime();
+}
+
+
 void windowSurfaceChanged(ANativeWindow* win) {
+	windowNoteSurfaceChange();
 	rack::window::Window* w = APP->window;
 	if (!w)
 		return;
