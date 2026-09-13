@@ -286,6 +286,11 @@ struct RackDroidApp {
 			return;
 		rackdroid::windowSetPendingSurface(app->window, getDensity());
 		if (!APP->window) {
+			// Startup phase timings. The gap between "Rack runtime started" and
+			// "Patch launched" was over a second and nothing said what was in
+			// it; guessing "patch loading" is how the two audio-stream wastes
+			// went unnoticed for as long as they did.
+			double tWindow = system::getTime();
 			try {
 				APP->window = new window::Window;
 			}
@@ -293,18 +298,26 @@ struct RackDroidApp {
 				LOGE("Window creation failed: %s", e.what());
 				return;
 			}
+			LOGI("Startup: window created in %.0f ms",
+				(system::getTime() - tWindow) * 1000.0);
 			if (!patchLaunched) {
 				// Side-loaded .rdmod packs must be registered BEFORE the patch
 				// is restored, or Rack reports their modules as missing and
 				// drops them from the patch. Blocks (pumping the looper) until
 				// Java has loaded them; see jni_bridge's loadUserPluginsBlocking
 				// and MainActivity.loadUserPluginsFromNative.
+				double tPlugins = system::getTime();
 				if (!rackdroid::userPluginsDisabled())
 					rackdroid::loadUserPluginsBlocking();
 				else
 					LOGW("Recovery startup: skipped user plugin loading");
+				LOGI("Startup: user plugins loaded in %.0f ms",
+					(system::getTime() - tPlugins) * 1000.0);
 				// Loads the last patch or falls back to the template.
+				double tPatch = system::getTime();
 				APP->patch->launch("");
+				LOGI("Startup: patch loaded in %.0f ms",
+					(system::getTime() - tPatch) * 1000.0);
 				APP->engine->startFallbackThread();
 				rackdroid::installLabelOverlay();
 				rackdroid::installCableParkBar();

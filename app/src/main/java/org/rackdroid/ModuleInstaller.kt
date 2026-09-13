@@ -60,13 +60,22 @@ object ModuleInstaller {
 		// manager, a backup tool), which makes this write throw -- that must
 		// not abort the import/load below, which is the whole point of this
 		// call and does not need to write there at all.
+		// Phase timings: this call blocks native startup (loadUserPluginsBlocking
+		// in jni_bridge.cpp waits for it before the patch can be restored), and
+		// it measured over a second on an S22 with no packs installed at all --
+		// so where the time goes is worth stating rather than assuming.
+		val tReadme = android.os.SystemClock.uptimeMillis()
 		runCatching { writeReadme(activity) }
 			.onFailure { jlog("could not write Modules/README.txt: ${it.message}") }
+		val tImport = android.os.SystemClock.uptimeMillis()
 		importNewPacks(activity)
+		val tLoad = android.os.SystemClock.uptimeMillis()
 		var loaded = 0
 		installedDir(activity).listFiles { f -> f.isDirectory }?.forEach { dir ->
 			if (loadInstalled(activity, dir)) loaded++
 		}
+		jlog("loadUserPlugins: readme ${tImport - tReadme} ms, import ${tLoad - tImport} ms, " +
+			"load ${android.os.SystemClock.uptimeMillis() - tLoad} ms ($loaded packs)")
 		if (loaded > 0)
 			activity.runOnUiThread {
 				android.widget.Toast.makeText(activity,
@@ -199,9 +208,49 @@ object ModuleInstaller {
 		}
 	}
 
+	/** name|size|mtime -> slug, so a pack already seen need not be opened again
+	just to ask what it is called. peekSlug() reads plugin.json out of the
+	archive, which measured 887 ms across 22 packs (75 MB) sitting in the drop
+	folder on an S22 -- paid on every launch, to conclude every time that they
+	are all installed already. The key changes if the file does, so replacing a
+	.rdmod re-reads it.
+
+	Deliberately caches the SLUG and not the decision: whether to import is
+	still answered by asking if the destination exists. Caching that instead
+	would quietly change what uninstalling means -- today removing an installed
+	pack while its .rdmod is still in the drop folder brings it back on the next
+	launch, and that is not a behaviour to alter as a side effect of making
+	startup faster. */
+	private fun slugIndexFile(activity: Activity) = File(activity.filesDir, "user/.pack-slugs")
+
+	private fun readSlugIndex(activity: Activity): MutableMap<String, String> {
+		val map = mutableMapOf<String, String>()
+		runCatching {
+			val f = slugIndexFile(activity)
+			if (!f.isFile) return@runCatching
+			f.forEachLine { line ->
+				val i = line.lastIndexOf('|')
+				if (i > 0) map[line.substring(0, i)] = line.substring(i + 1)
+			}
+		}
+		return map
+	}
+
+	private fun writeSlugIndex(activity: Activity, map: Map<String, String>) {
+		runCatching {
+			slugIndexFile(activity).parentFile?.mkdirs()
+			slugIndexFile(activity).writeText(
+				map.entries.joinToString("\n") { "${it.key}|${it.value}" })
+		}
+	}
+
+	private fun packKey(f: File) = "${f.name}|${f.length()}|${f.lastModified()}"
+
 	private fun importNewPacks(activity: Activity) {
 		// Turn any bundle into loose packs first, so the scan below sees them.
+		val tExpand = android.os.SystemClock.uptimeMillis()
 		expandBundles(activity)
+		val tScan = android.os.SystemClock.uptimeMillis()
 		val dir = modulesDir(activity)
 		// listFiles() returns null when the folder is missing or unreadable
 		// (again: possible when another uid created it). Silently treating
@@ -214,10 +263,14 @@ object ModuleInstaller {
 			jlog("cannot read module drop folder $dir - no packs imported")
 			return
 		}
+		val slugIndex = readSlugIndex(activity)
+		val seen = mutableMapOf<String, String>()
 		for (pack in packs) {
 			var tmp: File? = null
 			try {
-				val slug = peekSlug(pack) ?: continue
+				val key = packKey(pack)
+				val slug = slugIndex[key] ?: peekSlug(pack) ?: continue
+				seen[key] = slug
 				val dest = destinationForSlug(activity, slug)
 				if (dest.exists()) continue // already installed; drop a new slug to add
 				tmp = File(dest.parentFile, "$slug.tmp")
@@ -231,6 +284,13 @@ object ModuleInstaller {
 				tmp?.deleteRecursively()
 			}
 		}
+		// Rewritten from what this pass actually saw, so packs the user has
+		// since deleted drop out instead of accumulating forever.
+		if (seen != slugIndex)
+			writeSlugIndex(activity, seen)
+		jlog("importNewPacks: expandBundles ${tScan - tExpand} ms, scan+import " +
+			"${android.os.SystemClock.uptimeMillis() - tScan} ms (${packs.size} files, " +
+			"${slugIndex.size} cached slugs)")
 	}
 
 	private fun loadInstalled(activity: Activity, dir: File): Boolean {
