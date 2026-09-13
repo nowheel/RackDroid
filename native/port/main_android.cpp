@@ -645,6 +645,25 @@ static int engineThreadCeiling() {
 	int cores = system::getLogicalCoreCount();
 	return cores <= 1 ? cores : cores - RESERVED_CORES;
 }
+/** Holds the rack to rackdroid::MAX_RACK_ZOOM however it got past it -- the
+View menu's zoom slider, or a patch saved on desktop at 4x and opened here.
+The pinch path stops itself (touch_input.cpp) rather than being clamped, so
+this only ever fires for those other routes and costs one comparison a frame.
+See MAX_RACK_ZOOM's comment for why the ceiling exists at all. */
+static void checkZoomCeiling() {
+	if (!APP->scene || !APP->scene->rackScroll)
+		return;
+	float zoom = APP->scene->rackScroll->getZoom();
+	if (zoom <= rackdroid::MAX_RACK_ZOOM)
+		return;
+	// Worth a line: the view will not be where the patch said, and the reason
+	// is ours rather than anything wrong with the file.
+	LOGW("View: patch asked for %.2fx zoom; holding at %.0fx (a phone reallocates "
+		"every module's framebuffer on each zoom step, and past this it breaks "
+		"the audio up)", zoom, rackdroid::MAX_RACK_ZOOM);
+	APP->scene->rackScroll->setZoom(rackdroid::MAX_RACK_ZOOM);
+}
+
 /** Owns settings::threadCount outright. Nothing else writes it, and the user
 is not asked: the Threads menu is filtered out on Android (hiddenOnAndroid in
 menu_native.cpp), because the right number is not a preference anyone can be
@@ -974,6 +993,7 @@ void android_main(android_app* app) {
 				rackdroid::touchStep();
 				rackdroid::processTourDemo();
 				checkWorkerPriority();
+			checkZoomCeiling();
 			rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 			checkThreadCount();
 			checkBlockSizeOverload();

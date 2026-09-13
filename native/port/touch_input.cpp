@@ -25,6 +25,8 @@
 #include <ui/TextField.hpp>
 #include <app/ModuleWidget.hpp>
 #include <app/PortWidget.hpp>
+#include <app/Scene.hpp>
+#include <app/RackScrollWidget.hpp>
 #include <system.hpp>
 
 #include "touch_input.hpp"
@@ -33,6 +35,8 @@
 #include "cable_park.hpp"
 #include <app/CableWidget.hpp>
 #include <app/PortWidget.hpp>
+#include <app/Scene.hpp>
+#include <app/RackScrollWidget.hpp>
 #include <app/RackWidget.hpp>
 #include <app/Scene.hpp>
 #include "window_android.hpp"
@@ -491,7 +495,12 @@ int touchHandleEvent(AInputEvent* event) {
 				if (st.lastDist > 0.f && dt > 1e-4) {
 					float distDelta = clampPinchDistRate(dist - st.lastDist, (float) dt);
 					float ratio = clampPinchRatio((st.lastDist + distDelta) / st.lastDist - 1.f);
-					if (std::fabs(ratio) > PINCH_DETECT_RATIO) {
+					// Zooming IN past the cap is simply not asked for: letting
+					// it through and clamping afterwards would fight the
+					// gesture once per frame. Zooming out is always fine.
+					bool atCap = ratio > 0.f && APP->scene && APP->scene->rackScroll
+						&& APP->scene->rackScroll->getZoom() >= MAX_RACK_ZOOM;
+					if (std::fabs(ratio) > PINCH_DETECT_RATIO && !atCap) {
 						windowSetMods(GLFW_MOD_CONTROL);
 						APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
 						windowSetMods(0);
