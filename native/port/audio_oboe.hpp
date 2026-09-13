@@ -20,6 +20,13 @@ all to notice it got heavy (see checkEngineOverload/checkEngineUnderload in
 main_android.cpp). */
 int32_t audioCeilingUnderrunCount();
 
+/** True if the audio stream underran in the last couple of seconds. Lets the
+renderer notice it is crowding the audio callback and back off (see
+Window::step in window_android.cpp); deliberately a short, self-clearing
+window rather than a latch, so smoothness returns as soon as the sound does.
+Safe from any thread. */
+bool audioUnderrunsRecently();
+
 /** Every underrun, including the ones the buffer tuner could still answer by
 growing -- the count that matches what a listener actually hears, as opposed
 to the narrower "the engine is out of CPU" signal above. Same threading

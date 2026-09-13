@@ -20,8 +20,24 @@ bool windowShouldClose();
 to emulate Ctrl+scroll (pinch zoom). */
 void windowSetMods(int mods);
 
+/** Tells the renderer the audio callback is struggling, so it halves the frame
+rate until the sound recovers. Rendering and the callback compete for the same
+cores and some views cost far more to draw than others -- zoomed in close,
+every module is rasterised into a much larger framebuffer, which was reported
+breaking up the sound on an 8T with nothing about the patch changed. Half rate
+is a visible cost, but only while something is already audibly wrong, and no
+thread count can buy back time the renderer is taking. */
+void windowSetAudioStressed(bool stressed);
+
 /** Marks user interaction: keeps the frame rate at full speed (it drops to
 half after a few idle seconds to save battery). */
 void windowNoteInteraction();
+
+/** Seconds since the last touch, or a large number if there has never been
+one. The engine's underrun machinery uses it to keep out of the way while the
+rack is being handled: a pinch-zoom or a drag makes the render thread crowd
+the audio callback for as long as it lasts, and those underruns say nothing
+about the patch or the thread count. */
+double windowSecondsSinceInteraction();
 
 } // namespace rackdroid

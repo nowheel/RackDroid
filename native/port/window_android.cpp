@@ -39,8 +39,16 @@
 
 #include <blendish.h>
 
+#include <atomic>
+
 #include "window_android.hpp"
 #include "menu_touch.hpp"
+
+/** Set from the frame loop (main_android.cpp), which is the layer that can see
+both the audio driver and the window: this file lives in the engine library and
+cannot call into the app's. Read by Window::step, written by
+rackdroid::windowSetAudioStressed at the bottom of this file. */
+static std::atomic<bool> g_audioStressed{false};
 #if defined(__ANDROID__)
 	#include "menu_native.hpp"
 	#include "browser_native.hpp"
@@ -359,6 +367,16 @@ void Window::step() {
 	// Battery: halve the frame rate (vsync/2) after a few seconds without
 	// touch interaction; back to full rate on the next touch.
 	int wantedInterval = (frameTime - internal->lastInteraction > 5.0) ? 2 : 1;
+	// Audio first. Rendering and the audio callback compete for the same
+	// cores, and some views cost far more to draw than others -- zoomed in
+	// close, every module is rasterised into a much larger framebuffer, which
+	// was reported breaking up the sound on an 8T while nothing about the
+	// patch had changed. Underruns in the last couple of seconds mean the
+	// callback is losing that competition, so give it room: half rate is a
+	// visible cost, but only while something is already audibly wrong, and no
+	// thread count can buy back time the renderer is taking.
+	if (g_audioStressed.load(std::memory_order_relaxed))
+		wantedInterval = 2;
 	if (wantedInterval != internal->swapInterval) {
 		internal->swapInterval = wantedInterval;
 		eglSwapInterval(internal->display, wantedInterval);
@@ -556,10 +574,23 @@ void windowSetMods(int mods) {
 }
 
 
+void windowSetAudioStressed(bool stressed) {
+	g_audioStressed.store(stressed, std::memory_order_relaxed);
+}
+
+
 void windowNoteInteraction() {
 	rack::window::Window* w = APP->window;
 	if (w)
 		w->internal->lastInteraction = rack::system::getTime();
+}
+
+
+double windowSecondsSinceInteraction() {
+	rack::window::Window* w = APP->window;
+	if (!w || w->internal->lastInteraction <= 0.0)
+		return 1e9;
+	return rack::system::getTime() - w->internal->lastInteraction;
 }
 
 

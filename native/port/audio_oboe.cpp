@@ -185,6 +185,16 @@ int32_t audioUnderrunCount() {
 	return g_totalUnderruns.load(std::memory_order_relaxed);
 }
 
+/** When the last underrun happened, as rack::system::getTime(). */
+static std::atomic<double> g_lastUnderrunAt{0.0};
+
+bool audioUnderrunsRecently() {
+	double at = g_lastUnderrunAt.load(std::memory_order_relaxed);
+	if (at <= 0.0)
+		return false;
+	return rack::system::getTime() - at < 2.0;
+}
+
 
 static const int NUM_OUTPUTS = 2;
 static const int NUM_INPUTS = 2;
@@ -436,8 +446,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			// is the number that corresponds to what a listener hears. The
 			// stream's own counter restarts at zero on reopen, so take the
 			// difference and ignore it when it goes backwards.
-			if (xruns > lastXRuns)
+			if (xruns > lastXRuns) {
 				g_totalUnderruns.fetch_add(xruns - lastXRuns, std::memory_order_relaxed);
+				g_lastUnderrunAt.store(rack::system::getTime(), std::memory_order_relaxed);
+			}
 			lastXRuns = xruns;
 			// Underruns while the tuner has already grown the buffer as far as
 			// it goes: the device is not jittering, it is short of CPU, and no

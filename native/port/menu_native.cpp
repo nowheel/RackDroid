@@ -163,6 +163,14 @@ static bool hiddenOnAndroid(const std::string& text) {
 		"VCVRack.com",
 		string::translate("MenuBar.help.userFolder"),
 		string::translate("MenuBar.help.changelog"),
+		// The engine picks the thread count itself (checkThreadCount in
+		// main_android.cpp) from what it measures on the device's actual audio
+		// path. It is not a preference a user can hold a useful opinion about
+		// -- the right answer was 8 on one phone and 2 on another, and moved
+		// again when one of them got hot -- and leaving the row in meant two
+		// owners writing one number, which is where every thread bug in issue
+		// #3 lived.
+		string::translate("MenuBar.engine.threads"),
 		string::f(string::translate("MenuBar.help.update"), APP_NAME),
 		string::f(string::translate("MenuBar.help.checkUpdate"), APP_NAME),
 	};
