@@ -93,6 +93,22 @@ struct PanelLabelOverlay : widget::Widget {
 		double now = system::getTime();
 
 		for (app::ModuleWidget* mw : APP->scene->rack->getModules()) {
+			// Skip the whole module before touching its params and ports.
+			// drawLabel() already culls each label, but only after the caller
+			// has walked the widget hierarchy (getRelativeOffset) once per
+			// param and once per port to find out where it would have gone --
+			// for every module in the patch, on every frame. Measured on an
+			// S22: 3.9 ms a frame with 75 modules, 23% of a 60 Hz budget,
+			// nearly all of it computing positions for labels off screen. One
+			// offset and one rectangle test per module answers the same
+			// question. MARGIN covers the labels that hang below a module's
+			// bottom edge, which must not vanish when the panel itself is only
+			// just out of view.
+			static const float MARGIN = 24.f;
+			math::Vec mpos = mw->getRelativeOffset(math::Vec(0, 0), ref);
+			math::Rect mbox = math::Rect(mpos, mw->box.size).grow(math::Vec(MARGIN, MARGIN));
+			if (!mbox.intersects(args.clipBox))
+				continue;
 			// "Lift" glow while a module is dragged; expanding pop glow
 			// right after it lands from the browser.
 			float glowAlpha = 0.f, glowInflate = 0.f;
