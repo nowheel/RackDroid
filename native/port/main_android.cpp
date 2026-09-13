@@ -637,6 +637,29 @@ count. Covers the gesture itself and the moment after it, so a pinch or a drag
 is never mistaken for the patch outgrowing its threads. */
 static const double INTERACTION_SETTLE_SEC = 2.0;
 
+/** True once the audio device has been open long enough that what it reports
+means something. Starting up is not a measurement: the patch is still loading,
+Rack rewrites the audio port's settings several times, and the underruns that
+produces say nothing about the workload. Both levers below consult this --
+checkThreadCount() was already discarding that window, checkBlockSizeOverload()
+was not, and reacted to it on every single launch by doubling the block size,
+which costs a stream close (~170 ms blocking) plus an open: 677 ms of startup
+and an audible gap, spent redoing a decision the previous run had made. */
+static bool startupSettled() {
+	static const double WARMUP_SEC = 5.0;
+	static double audioReadyAt = 0.0;
+	if (rackdroid::audioBlockSize() <= 0) {
+		audioReadyAt = 0.0; // no device yet; the clock has not started
+		return false;
+	}
+	double now = system::getTime();
+	if (audioReadyAt <= 0.0) {
+		audioReadyAt = now;
+		return false;
+	}
+	return now - audioReadyAt >= WARMUP_SEC;
+}
+
 /** The most threads checkThreadCount() will ever ask for, and the point
 checkMaxedOutOverload() calls "nothing left to raise" -- one short of the
 device's core count, so Android always has one no Worker will claim. A 1-core
@@ -873,6 +896,8 @@ static void checkBlockSizeOverload() {
 
 	if (g_blockSizeTried || !freshCeilingUnderrun)
 		return;
+	if (!startupSettled())
+		return; // the patch is still loading; those underruns are not the workload
 	// No thread-count gate: checkThreadCount() picks whatever count measures
 	// best rather than climbing to the ceiling, so "wait until we are at the
 	// ceiling" would mean waiting forever on a Shared path.

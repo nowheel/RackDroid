@@ -36,6 +36,7 @@ rest of the port layer follows. */
 
 #include <audio.hpp>
 #include <settings.hpp>
+#include <asset.hpp>
 #include <system.hpp>
 #include <context.hpp>
 #include <engine/Engine.hpp>
@@ -209,12 +210,46 @@ static const int DEFAULT_SAMPLE_RATE = 48000;
 // can pick it in the Audio module -- this only moves the starting point.
 static const int DEFAULT_BLOCK_SIZE = 512;
 
+/** Remembers the block size across launches, because the device is built
+before anyone tells it which one to use. Rack stores the real value per audio
+port in the patch and applies it just after construction, so a device that
+opens at DEFAULT_BLOCK_SIZE is then closed and reopened at the patch's value --
+measured on an S22 at 452 ms to close plus 222 ms to open, 671 ms of startup
+and an audible gap, paid on every single launch to arrive at the same number as
+last time. Starting from the remembered value makes Rack's setBlockSize() a
+no-op in the common case (same patch, same settings) and costs nothing when the
+guess is wrong: that is exactly today's behaviour. */
+static std::string blockSizeMemoPath() {
+	return rack::asset::user("audio-blocksize");
+}
+
+static int rememberedBlockSize() {
+	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "r");
+	if (!f)
+		return DEFAULT_BLOCK_SIZE;
+	int v = 0;
+	bool ok = std::fscanf(f, "%d", &v) == 1;
+	std::fclose(f);
+	// Only sizes Rack itself offers; anything else is a stale or corrupt file.
+	if (!ok || v < 64 || v > 4096 || (v & (v - 1)) != 0)
+		return DEFAULT_BLOCK_SIZE;
+	return v;
+}
+
+static void rememberBlockSize(int bs) {
+	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
+	if (!f)
+		return;
+	std::fprintf(f, "%d\n", bs);
+	std::fclose(f);
+}
+
 
 struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
 	std::shared_ptr<oboe::AudioStream> outputStream;
 	std::shared_ptr<oboe::AudioStream> inputStream;
 	float sampleRate = DEFAULT_SAMPLE_RATE;
-	int blockSize = DEFAULT_BLOCK_SIZE;
+	int blockSize = rememberedBlockSize();
 	std::vector<float> inputBuffer;
 	/** Guards stream open/close against the data callback. */
 	std::mutex streamMutex;
@@ -245,6 +280,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	the sample rate settling, the block size being repaired, or the HAL
 	disconnecting underneath. Saying which removes the guesswork. */
 	void openStreams(const char* why) {
+		double t0 = rack::system::getTime();
 		std::lock_guard<std::mutex> lock(streamMutex);
 
 		oboe::AudioStreamBuilder outBuilder;
@@ -300,6 +336,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// itself chooses, and leaving it out cost a debugging round trip --
 		// a log full of underruns with no way to tell which rung of
 		// checkBlockSizeOverload()'s ladder was in effect at the time.
+		AUDIO_WARN("Oboe: openStreams took %.0f ms", (rack::system::getTime() - t0) * 1000.0);
 		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d burst=%d buffer=%d "
 			"capacity=%d sharing=%s performance=%s api=%s",
 			why, sampleRate, blockSize, outputStream->getFramesPerBurst(),
@@ -370,6 +407,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	}
 
 	void closeStreams() {
+		double t0 = rack::system::getTime();
 		std::lock_guard<std::mutex> lock(streamMutex);
 		// Holds a reference to the stream, so it goes first.
 		latencyTuner.reset();
@@ -394,6 +432,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			inputStream->close();
 			inputStream.reset();
 		}
+		AUDIO_WARN("Oboe: closeStreams took %.0f ms", (rack::system::getTime() - t0) * 1000.0);
 	}
 
 	// rack::audio::Device
@@ -435,6 +474,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		AUDIO_WARN("Oboe: block size %d -> %d", blockSize, bs);
 		closeStreams();
 		blockSize = bs;
+		rememberBlockSize(bs);
 		openStreams("block size changed");
 	}
 
