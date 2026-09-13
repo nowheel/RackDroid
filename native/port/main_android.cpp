@@ -16,6 +16,7 @@
 #include <sys/system_properties.h>
 #include <dirent.h>
 #include <cstring>
+#include <vector>
 #include <sched.h>
 
 #include <common.hpp>
@@ -44,6 +45,7 @@
 
 #include "asset_extract.hpp"
 #include "audio_oboe.hpp"
+#include "adpf.hpp"
 #include "window_android.hpp"
 #include "touch_input.hpp"
 #include "static_plugins.hpp"
@@ -485,33 +487,6 @@ thread into the audio/foreground scheduler group (libcutils set_sched_policy)
 -- a privilege an app is granted over its own threads that a raw setpriority()
 syscall does not carry. So this goes through that Java call via JNI instead
 (jniSetThreadPriority) rather than reimplementing it natively. */
-static void applyWorkerPriority() {
-	DIR* dir = opendir("/proc/self/task");
-	if (!dir)
-		return;
-	int raised = 0;
-	while (dirent* e = readdir(dir)) {
-		int tid = atoi(e->d_name);
-		if (tid <= 0)
-			continue;
-		char path[64];
-		std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", tid);
-		FILE* f = std::fopen(path, "r");
-		if (!f)
-			continue;
-		char name[32] = {0};
-		bool worker = std::fgets(name, sizeof(name), f)
-			&& std::strncmp(name, "Worker ", 7) == 0;
-		std::fclose(f);
-		// -19 is URGENT_AUDIO. Not -20: that is reserved for the thread that
-		// must never be late, and these are helpers to it, not it.
-		if (worker && rackdroid::jniSetThreadPriority(tid, -19))
-			raised++;
-	}
-	closedir(dir);
-	if (raised > 0)
-		LOGI("Engine: raised %d worker threads to audio priority", raised);
-}
 
 /** Which logical CPU applyWorkerAffinity() below reserves for the system.
 Picks the one with the lowest maximum clock frequency -- a LITTLE/efficiency
@@ -553,38 +528,16 @@ static int pickReservedCpu(int cores) {
 	return ok ? bestCpu : cores - 1;
 }
 
-/** engineThreadCeiling() (below) gives the system a core back by asking for
-one fewer thread than there are cores -- a soft guarantee: it assumes the
-scheduler leaves the excluded core alone, and a user overriding our count
-through the Threads menu erases it entirely, since the affinity mask below
-does not exist yet at that point. This is the hard version of the same
-guarantee, and it does not depend on our thread count advice being followed:
-it excludes Worker threads from one specific logical CPU by mask, however
-many of them end up existing, so Android's compositor/system_server/touch
-pipeline always has a core no real-time Worker will ever be scheduled onto,
-full stop.
 
-Unlike applyWorkerPriority() above, this needs no JNI round-trip:
-sched_setaffinity() on a thread of one's own process is a plain, unprivileged
-syscall (governed by cpuset/cgroup membership, not a capability like
-CAP_SYS_NICE), so asking for a subset of the cores this cpuset already
-grants just works. */
-static void applyWorkerAffinity() {
-	int cores = system::getLogicalCoreCount();
-	if (cores <= 1)
-		return;
-	int reservedCpu = pickReservedCpu(cores);
-	cpu_set_t mask;
-	CPU_ZERO(&mask);
-	for (int cpu = 0; cpu < cores; cpu++) {
-		if (cpu != reservedCpu)
-			CPU_SET(cpu, &mask);
-	}
-
+/** The engine's worker threads, by id. One walk of /proc/self/task rather
+than the three that would otherwise be needed -- priority, affinity and the
+ADPF hint session all want the same list, and they are all applied together
+whenever the tuner changes the count. */
+static std::vector<int> collectWorkerThreads() {
+	std::vector<int> workers;
 	DIR* dir = opendir("/proc/self/task");
 	if (!dir)
-		return;
-	int pinned = 0;
+		return workers;
 	while (dirent* e = readdir(dir)) {
 		int tid = atoi(e->d_name);
 		if (tid <= 0)
@@ -598,13 +551,60 @@ static void applyWorkerAffinity() {
 		bool worker = std::fgets(name, sizeof(name), f)
 			&& std::strncmp(name, "Worker ", 7) == 0;
 		std::fclose(f);
-		if (worker && sched_setaffinity(tid, sizeof(mask), &mask) == 0)
-			pinned++;
+		if (worker)
+			workers.push_back(tid);
 	}
 	closedir(dir);
+	return workers;
+}
+
+
+static void applyWorkerPriority(const std::vector<int>& workers) {
+	int raised = 0;
+	for (int tid : workers) {
+		// -19 is URGENT_AUDIO. Not -20: that is reserved for the thread that
+		// must never be late, and these are helpers to it, not it.
+		if (rackdroid::jniSetThreadPriority(tid, -19))
+			raised++;
+	}
+	if (raised > 0)
+		LOGI("Engine: raised %d worker threads to audio priority", raised);
+}
+
+
+static void applyWorkerAffinity(const std::vector<int>& workers) {
+	int cores = system::getLogicalCoreCount();
+	if (cores <= 1)
+		return;
+	int reservedCpu = pickReservedCpu(cores);
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	for (int cpu = 0; cpu < cores; cpu++) {
+		if (cpu != reservedCpu)
+			CPU_SET(cpu, &mask);
+	}
+	int pinned = 0;
+	for (int tid : workers) {
+		if (sched_setaffinity(tid, sizeof(mask), &mask) == 0)
+			pinned++;
+	}
 	if (pinned > 0)
 		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system",
 			pinned, reservedCpu);
+}
+
+
+/** Tells ADPF which threads are doing the work: the audio callback first --
+it is the one with the deadline -- then the engine's workers behind it. */
+static void applyAdpfThreads(const std::vector<int>& workers) {
+	int audioTid = rackdroid::audioCallbackThreadTid();
+	if (audioTid <= 0)
+		return; // no callback has run yet; nothing to describe
+	std::vector<int> tids;
+	tids.reserve(workers.size() + 1);
+	tids.push_back(audioTid);
+	tids.insert(tids.end(), workers.begin(), workers.end());
+	rackdroid::adpfSetThreads(tids.data(), tids.size());
 }
 
 /** Workers are created by Engine::setThreadCount, which the Threads menu calls
@@ -623,8 +623,10 @@ static void checkWorkerPriority() {
 	}
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
-		applyWorkerPriority();
-		applyWorkerAffinity();
+		std::vector<int> workers = collectWorkerThreads();
+		applyWorkerPriority(workers);
+		applyWorkerAffinity(workers);
+		applyAdpfThreads(workers);
 	}
 }
 
@@ -801,9 +803,31 @@ static void rememberThreadCount(int n) {
 	lastWritten = n;
 }
 
+/** Keeps ADPF's deadline in step with the stream. One callback has to deliver
+`block` frames, so the time it may take is block / sampleRate -- the same
+number the audio device is already clocked by. Recomputed rather than set once
+because both halves move: the tuner can change the block size, and the device
+can open at a rate the engine did not ask for. */
+static void checkAdpfTarget() {
+	static int64_t lastNanos = 0;
+	int block = rackdroid::audioBlockSize();
+	if (block <= 0 || !APP->engine)
+		return;
+	float rate = APP->engine->getSampleRate();
+	if (rate <= 0.f)
+		return;
+	int64_t nanos = (int64_t) (block / (double) rate * 1e9);
+	if (nanos == lastNanos)
+		return;
+	lastNanos = nanos;
+	rackdroid::adpfSetTargetNanos(nanos);
+}
+
+
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
 	static int scores[MAX_TRACKED_THREADS + 1];
+	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static bool initialised = false;
 	static int settledAt = -1;
 	static const double WARMUP_SEC = 5.0;
@@ -831,6 +855,13 @@ static void checkThreadCount() {
 			want = ceiling;
 		if (want < 2 && ceiling >= 2)
 			want = 2; // same floor the ladder keeps; covers a memo written before it
+		// A remembered count is one that ran a full window clean last time, so
+		// it starts trusted rather than on probation. Without this the first
+		// couple of stray underruns after a launch knocked the engine off the
+		// very count it had just been told was right, and it spent ten seconds
+		// walking back to it -- seen doing exactly that on the S22.
+		if (remembered > 0 && want >= 1 && want <= MAX_TRACKED_THREADS)
+			provenClean[want] = true;
 		LOGI("Engine: starting at %d threads (%s, %s audio path, %d-thread ceiling)",
 			want, remembered > 0 ? "where it settled last time" : "first guess",
 			shared ? "Shared" : "Exclusive", ceiling);
@@ -895,7 +926,6 @@ static void checkThreadCount() {
 	// down reached 1 thread, which produced seventy-eight in one window.
 	// So a rung that has proved itself gets the benefit of the doubt, and an
 	// unproven one still gets a little. Neither gets it forever.
-	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static int toleratedRuns = 0;
 	static const int TOLERATED_RUNS_MAX = 3;
 	bool proven = current >= 1 && current <= MAX_TRACKED_THREADS && provenClean[current];
@@ -1235,6 +1265,7 @@ void android_main(android_app* app) {
 				checkWorkerPriority();
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
+				checkAdpfTarget();
 				rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 				checkThreadCount();
 				checkBlockSizeOverload();

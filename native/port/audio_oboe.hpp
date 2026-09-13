@@ -38,6 +38,10 @@ the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */
 void audioReportUnderruns();
 
+/** The audio callback thread's id, or 0 before the first callback has run.
+Only that thread can read it, so it publishes it the first time round. */
+int audioCallbackThreadTid();
+
 /** Seconds since the output stream was last opened, or a large number if it
 never has. The seconds right after a reopen underrun whatever the patch is
 doing; they are not a measurement of anything. */

@@ -22,6 +22,9 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <unistd.h>
+#include <ctime>
+
 #include <oboe/Oboe.h>
 #include <oboe/LatencyTuner.h>
 
@@ -41,6 +44,8 @@ rest of the port layer follows. */
 #include <context.hpp>
 #include <engine/Engine.hpp>
 #include <common.hpp>
+
+#include "adpf.hpp"
 
 
 // ---- Master WAV recorder ------------------------------------------------
@@ -198,6 +203,15 @@ bool audioUnderrunsRecently() {
 	if (at <= 0.0)
 		return false;
 	return rack::system::getTime() - at < 2.0;
+}
+
+/** The audio callback thread, as gettid() -- readable only from inside the
+callback, so it is published from there the first time it runs. Zero until
+then. ADPF wants it at the head of its thread list. */
+static std::atomic<int> g_audioThreadTid{0};
+
+int audioCallbackThreadTid() {
+	return g_audioThreadTid.load(std::memory_order_relaxed);
 }
 
 /** When the output stream was last (re)opened. The first seconds after a
@@ -560,6 +574,20 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 				std::memory_order_relaxed);
 		}
 
+		// The callback thread is one of the threads ADPF needs to know about,
+		// and it is the only place its id can be read. Published once.
+		if (g_audioThreadTid.load(std::memory_order_relaxed) == 0)
+			g_audioThreadTid.store(gettid(), std::memory_order_relaxed);
+
+		// Bracket the work ADPF is asked to make fit. CLOCK_MONOTONIC because
+		// that is what the API documents its durations against. Skipped
+		// entirely where no session exists -- most devices, as it turns out --
+		// so a refused session costs the callback nothing at all.
+		bool timing = adpfActive();
+		timespec t0;
+		if (timing)
+			clock_gettime(CLOCK_MONOTONIC, &t0);
+
 		const float* input = NULL;
 		if (inputStream) {
 			if ((int) inputBuffer.size() < numFrames * NUM_INPUTS)
@@ -577,6 +605,13 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// Drives Engine::stepBlock() through the subscribed audio Ports.
 		processBuffer(input, NUM_INPUTS, output, stream->getChannelCount(), numFrames);
 		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
+
+		if (timing) {
+			timespec t1;
+			clock_gettime(CLOCK_MONOTONIC, &t1);
+			adpfReportNanos((int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
+				+ (t1.tv_nsec - t0.tv_nsec));
+		}
 
 		return oboe::DataCallbackResult::Continue;
 	}

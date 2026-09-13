@@ -901,6 +901,7 @@ if(ANDROID)
 		port/main_android.cpp
 		port/asset_extract.cpp
 		port/audio_oboe.cpp
+		port/adpf.cpp
 		port/amidi_driver.cpp
 		port/static_plugins.cpp
 	)
