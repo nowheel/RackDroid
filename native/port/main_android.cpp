@@ -739,6 +739,14 @@ exactly as long as the gesture lasts (436 underruns, in the report that
 prompted this), and none of that says anything about the patch. */
 static const int MAX_TRACKED_THREADS = 64;
 
+/** Set by checkThreadCount() when it is underrunning and has nothing left to
+try: every neighbouring count has been measured and none is clearly better.
+Cleared the moment it moves again. Only then is "this patch is too heavy" an
+honest thing to tell someone -- while the tuner is still walking down from its
+opening guess it is underrunning on purpose, and the answer is usually three
+rungs away. */
+static bool g_threadTunerExhausted = false;
+
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
 	static int scores[MAX_TRACKED_THREADS + 1];
@@ -859,11 +867,14 @@ static void checkThreadCount() {
 		if (best != current && bestScore * 2 < underruns)
 			candidate = best;
 	}
-	if (candidate < 0)
+	if (candidate < 0) {
+		g_threadTunerExhausted = true;
 		return; // nothing known to be better; stay where we are
+	}
 
 	LOGW("Engine: %d underruns in %.0fs at %d threads; trying %d",
 		underruns, WINDOW_SEC, current, candidate);
+	g_threadTunerExhausted = false;
 	settings::threadCount = candidate;
 	// Setting it is all that is needed: Engine::stepBlock relaunches its
 	// workers from settings::threadCount on every block (Engine.cpp:572).
@@ -976,6 +987,13 @@ static void checkMaxedOutOverload() {
 	lastCeilingCount = ceilingCount;
 
 	if (shown || !freshCeilingUnderrun || !g_blockSizeTried)
+		return;
+	// Not while the thread tuner is still working. It opens at the ceiling and
+	// walks down, so the first seconds of a heavy patch underrun by design: an
+	// S22 showed "this patch needs more CPU than your device can give" six
+	// seconds after launch and was playing the same patch cleanly at three
+	// threads fifteen seconds later. Bad advice, and the user acts on it.
+	if (!g_threadTunerExhausted)
 		return;
 	int ceiling = engineThreadCeiling();
 	if (ceiling <= 1)
