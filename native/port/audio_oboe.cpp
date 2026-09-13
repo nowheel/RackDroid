@@ -232,14 +232,19 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	int32_t lastXRuns = 0;
 
 	OboeDevice() {
-		openStreams();
+		openStreams("device created");
 	}
 
 	~OboeDevice() override {
 		closeStreams();
 	}
 
-	void openStreams() {
+	/** `why` names the caller in the log. Reopening is not cheap -- closing the
+	output stream alone waits ~170 ms for the callback to stop -- and a startup
+	that does it five times over looks identical, from the log, whether it is
+	the sample rate settling, the block size being repaired, or the HAL
+	disconnecting underneath. Saying which removes the guesswork. */
+	void openStreams(const char* why) {
 		std::lock_guard<std::mutex> lock(streamMutex);
 
 		oboe::AudioStreamBuilder outBuilder;
@@ -295,9 +300,9 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// itself chooses, and leaving it out cost a debugging round trip --
 		// a log full of underruns with no way to tell which rung of
 		// checkBlockSizeOverload()'s ladder was in effect at the time.
-		AUDIO_WARN("Oboe: stream started, sampleRate=%g block=%d burst=%d buffer=%d "
+		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d burst=%d buffer=%d "
 			"capacity=%d sharing=%s performance=%s api=%s",
-			sampleRate, blockSize, outputStream->getFramesPerBurst(),
+			why, sampleRate, blockSize, outputStream->getFramesPerBurst(),
 			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames(),
 			oboe::convertToText(outputStream->getSharingMode()),
 			oboe::convertToText(outputStream->getPerformanceMode()),
@@ -412,9 +417,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	void setSampleRate(float sr) override {
 		if (sr == sampleRate)
 			return;
+		AUDIO_WARN("Oboe: sample rate %g -> %g", sampleRate, sr);
 		closeStreams();
 		sampleRate = sr;
-		openStreams();
+		openStreams("sample rate changed");
 	}
 
 	std::set<int> getBlockSizes() override {
@@ -426,9 +432,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	void setBlockSize(int bs) override {
 		if (bs == blockSize)
 			return;
+		AUDIO_WARN("Oboe: block size %d -> %d", blockSize, bs);
 		closeStreams();
 		blockSize = bs;
-		openStreams();
+		openStreams("block size changed");
 	}
 
 	// oboe::AudioStreamDataCallback
@@ -487,9 +494,9 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 	void onErrorAfterClose(oboe::AudioStream* stream, oboe::Result error) override {
 		// Device disconnected (headphones unplugged, route change): reopen.
-		WARN("Oboe: stream error %s, reopening", oboe::convertToText(error));
+		AUDIO_WARN("Oboe: stream error %s, reopening", oboe::convertToText(error));
 		closeStreams();
-		openStreams();
+		openStreams("stream error");
 	}
 };
 
@@ -516,12 +523,17 @@ struct OboeDriver : rack::audio::Driver {
 		return (deviceId == 0) ? NUM_OUTPUTS : 0;
 	}
 
+	/** When the last port left, or 0 while something is still subscribed. */
+	double idleSince = 0.0;
+
 	rack::audio::Device* subscribe(int deviceId, rack::audio::Port* port) override {
 		if (deviceId != 0)
 			return NULL;
+		idleSince = 0.0;
 		if (!device)
 			device = new OboeDevice;
 		device->subscribe(port);
+		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
 	}
 
@@ -529,10 +541,18 @@ struct OboeDriver : rack::audio::Driver {
 		if (deviceId != 0 || !device)
 			return;
 		device->unsubscribe(port);
-		if (device->subscribed.empty()) {
-			delete device;
-			device = NULL;
-		}
+		AUDIO_WARN("Oboe: port unsubscribed (%d left)", (int) device->subscribed.size());
+		// Deliberately NOT destroyed here. Rack rewrites a port's driver,
+		// device and channel count one after another while restoring a patch,
+		// and every one of those is an unsubscribe followed immediately by a
+		// subscribe. Tearing the device down in between meant three complete
+		// create/destroy cycles on every startup -- each one opening an Oboe
+		// stream and then blocking ~170 ms in stop() waiting for the callback
+		// to finish -- which is most of the 2.8 s the audio took to settle, and
+		// the source of the underruns heard while a patch loads. Keeping it for
+		// a moment lets the next subscribe walk straight back in.
+		if (device->subscribed.empty())
+			idleSince = rack::system::getTime();
 	}
 };
 
@@ -575,6 +595,24 @@ int audioMaxUsefulBlockSize() {
 	while (block * 2 <= capacity && block < 1024)
 		block *= 2;
 	return block;
+}
+
+
+void audioReleaseIdleDevice() {
+	if (!g_driver || !g_driver->device)
+		return;
+	if (!g_driver->device->subscribed.empty() || g_driver->idleSince <= 0.0)
+		return;
+	// Long enough to cover Rack rewriting a port's settings in sequence (each
+	// rewrite is an unsubscribe immediately followed by a subscribe), short
+	// enough that genuinely deleting the Audio module stops holding the audio
+	// device and its callback soon after.
+	if (rack::system::getTime() - g_driver->idleSince < 2.0)
+		return;
+	AUDIO_WARN("Oboe: no ports left; closing the audio device");
+	delete g_driver->device;
+	g_driver->device = NULL;
+	g_driver->idleSince = 0.0;
 }
 
 

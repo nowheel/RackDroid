@@ -993,6 +993,7 @@ void android_main(android_app* app) {
 				rackdroid::touchStep();
 				rackdroid::processTourDemo();
 				checkWorkerPriority();
+			rackdroid::audioReleaseIdleDevice();
 			checkZoomCeiling();
 			rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 			checkThreadCount();

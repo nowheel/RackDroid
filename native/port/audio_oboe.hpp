@@ -55,6 +55,15 @@ hardware. 0 if no device is open. Render-thread only, same contract as the
 engine itself (see CLAUDE.md). */
 int audioMaxUsefulBlockSize();
 
+/** Closes the audio device once nothing has been subscribed to it for a
+couple of seconds. The driver deliberately does NOT close it the instant the
+last port leaves: Rack rewrites a port's driver, device and channel count one
+after another while a patch loads, and each rewrite is an unsubscribe followed
+immediately by a subscribe. Closing in between cost three full stream
+open/close cycles per startup, each blocking ~170 ms in stop(). Call once per
+frame from the render thread.  */
+void audioReleaseIdleDevice();
+
 /** True if the live Oboe device's output stream was granted Shared sharing
 mode instead of the Exclusive mode requested -- see the "asked for Exclusive
 ... got Shared" warning in openStreams() (audio_oboe.cpp) for the full story.
