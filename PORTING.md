@@ -188,6 +188,20 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   retroazione. Ora la callback pubblica degli atomici e il ciclo dei frame
   scrive, una riga al secondo (a una riga per frame le prove si spingevano fuori
   dal file da 10 MB in cui devono essere trovate).
+- **ADPF c'è, ma quasi nessuno lo concede.** `port/adpf.cpp` dichiara al
+  sistema la scadenza della callback (block size ÷ sample rate) e le riporta la
+  durata reale, così le frequenze salgono *prima* dell'underrun invece che
+  dopo. La sessione copre la callback audio più tutti i worker — l'API la
+  descrive come "un gruppo di thread con carico correlato", che è esattamente
+  la nostra situazione. Risolta con `dlsym`: l'NDK marca quelle funzioni
+  `__INTRODUCED_IN(33)` e il minSdk è 29, e la flag dei simboli deboli
+  cambierebbe il link dell'intero modulo per sei funzioni. **Nessun beneficio
+  misurato**: l'S22 rifiuta la sessione e dice perché —
+  `perf_hint: PerformanceHint cannot create session. PowerHintSessions are not
+  supported!` — il servizio esiste su Android 16 ma il power HAL del vendor non
+  lo implementa. Stessa forma dell'allowlist audio di OnePlus: l'API c'è, il
+  produttore non l'ha fatta. Dove viene rifiutata costa zero: un dlopen, una
+  chiamata rifiutata, e la callback salta del tutto le sue due `clock_gettime`.
 - **Il core riservato si sceglie per frequenza, non per indice**: su SM8250
   cpu7 è il core *prime*, quindi la vecchia regola `cores-1` regalava via il
   core più veloce (`pickReservedCpu()` legge `cpuinfo_max_freq`).
