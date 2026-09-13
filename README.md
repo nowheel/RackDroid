@@ -31,7 +31,11 @@ audio engine, made native for your phone.
   designed for small screens, and a **cable-parking bar** that solves the "two
   modules never fit on screen at once" problem.
 - **Low native latency** (Oboe/AAudio, full-duplex) — it plays in real time,
-  not a toy.
+  not a toy. How low is partly the phone's decision, not the app's: some
+  manufacturers reserve the fast audio path for apps on a list of their own,
+  and refuse it to everything else (a OnePlus 8T refuses it even to commercial
+  synths). The engine measures what it actually got and tunes itself to it —
+  see [Performance](#performance).
 - **Grows with you**: start with the 66 built-in modules, then add whole
   packages (Bogaudio, Valley, Befaco, HetrickCV…) on the fly, without updating
   the app.
@@ -41,7 +45,7 @@ audio engine, made native for your phone.
 
 | | |
 |---|---|
-| 🎚️ **Native audio engine** | Oboe/AAudio, full-duplex, low latency |
+| 🎚️ **Native audio engine** | Oboe/AAudio, full-duplex, low latency where the device grants it — the engine measures what it got and tunes its own thread count to suit ([Performance](#performance)) |
 | 🧩 **66 built-in modules** | Core (Audio/MIDI), Fundamental (39 modules: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 original 808-style drum voices) |
 | 👆 **Touch interface** | one finger pans the rack, drag for cables/modules, pinch to zoom, long-press a knob to type a value |
 | 🪟 **Glass toolbar** | File/Edit/View/Engine/Help menus plus sixteen tools on two rows: palette, module manager, cable parking, theme, MIDI, keyboard, recording, info; undo/redo, multi-select, copy/paste, delete, the two padlocks — collapses into a tab |
@@ -76,6 +80,37 @@ Package format, the native loading mechanism, and instructions for
 **Android 10 (API 29)** or later on a 64-bit `arm64-v8a` or `x86_64`
 device. Requires OpenGL ES 3.0. `arm64-v8a` is the normal phone/tablet build;
 `x86_64` is intended mainly for emulators and compatible ChromeOS devices.
+
+## Performance
+
+**The engine tunes itself. There is no thread setting to get wrong**, which is
+why the Threads menu is not there on Android: the right number turned out to be
+8 on one phone and 2 on another, and 3 on the same phone once it was warm.
+
+It depends on which audio path the device grants. Where the fast (exclusive)
+path is available, the engine spreads work across every core it can use. Where
+it is refused — some manufacturers reserve that path for an approved list of
+apps — extra cores stop helping and start hurting, because the engine
+synchronises its worker threads twice per sample and that cost grows with the
+thread count rather than with the patch. On such a device, two threads can run
+a 76-module patch cleanly where seven crackle constantly, at a third of the CPU
+and far less heat. So the engine measures underruns and settles wherever they
+stop.
+
+If the audio breaks up:
+
+- **Check the log** — the ⓘ tool in the toolbar, then **Log** — for lines
+  starting `Engine:`. They say which path the device granted and where the
+  engine settled.
+- **Heat matters more than you would think.** A hot phone throttles, and the
+  best thread count moves; the engine follows it, but a phone that has been
+  rendering at full tilt for an hour has less to give.
+- **A patch can simply be too heavy.** The engine says so rather than leaving
+  you guessing.
+
+Zoom stops at 2×. Past that, every visible module is redrawn into a far larger
+buffer on each zoom step, and on a phone that competes with the audio callback
+for the same cores — it was breaking the sound up at maximum zoom.
 
 ## Build
 

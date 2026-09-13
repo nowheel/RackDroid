@@ -32,7 +32,11 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
   piccoli, e una **barra di parcheggio cavi** che risolve il problema dei "due
   moduli che non stanno mai insieme sullo schermo".
 - **Latenza nativa bassa** (Oboe/AAudio, full-duplex) — suona in tempo reale,
-  non un giocattolo.
+  non un giocattolo. Quanto bassa lo decide in parte il telefono, non l'app:
+  alcuni produttori riservano il percorso audio veloce alle app di una loro
+  lista e lo negano a tutte le altre (un OnePlus 8T lo nega perfino ai synth
+  commerciali). Il motore misura quello che ha davvero ottenuto e si regola di
+  conseguenza — vedi [Prestazioni](#prestazioni).
 - **Cresce con te**: parti con i 66 moduli inclusi, poi aggiungi pacchetti
   interi (Bogaudio, Valley, Befaco, HetrickCV…) al volo, senza aggiornare
   l'app.
@@ -42,7 +46,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 
 | | |
 |---|---|
-| 🎚️ **Motore audio nativo** | Oboe/AAudio, full-duplex, bassa latenza |
+| 🎚️ **Motore audio nativo** | Oboe/AAudio, full-duplex, bassa latenza dove il dispositivo la concede — il motore misura cosa ha ottenuto e regola da sé il numero di thread ([Prestazioni](#prestazioni)) |
 | 🧩 **66 moduli di base** | Core (Audio/MIDI), Fundamental (39 moduli: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 voci originali stile 808) |
 | 👆 **Interfaccia touch** | un dito fa scorrere il rack, trascini per cavi/moduli, pizzichi per zoom, tieni premuta una manopola per digitare un valore |
 | 🪟 **Barra strumenti a vetro** | menu File/Modifica/Visualizza/Motore/Aiuto più sedici strumenti su due righe: palette, gestore moduli, parcheggio cavi, tema, MIDI, tastiera, registrazione, info; annulla/ripeti, selezione multipla, copia/incolla, elimina, i due lucchetti — si richiude in una linguetta |
@@ -78,6 +82,38 @@ Formato del pacchetto, meccanismo di caricamento nativo e istruzioni per
 `x86_64`. Serve OpenGL ES 3.0. `arm64-v8a` è il build normale per telefoni e
 tablet; `x86_64` è pensato soprattutto per emulatori e dispositivi ChromeOS
 compatibili.
+
+## Prestazioni
+
+**Il motore si regola da solo. Non c'è un'impostazione dei thread da sbagliare**,
+ed è il motivo per cui il menu Thread su Android non c'è: il numero giusto è
+risultato 8 su un telefono e 2 su un altro, e 3 sullo stesso telefono una volta
+scaldato.
+
+Dipende da quale percorso audio concede il dispositivo. Dove quello veloce
+(esclusivo) è disponibile, il motore distribuisce il lavoro su tutti i core che
+può usare. Dove viene negato — alcuni produttori lo riservano a una lista di app
+approvate — i core in più smettono di aiutare e iniziano a nuocere, perché il
+motore sincronizza i suoi thread due volte per ogni sample e quel costo cresce
+col numero di thread, non con la patch. Su un dispositivo così, due thread
+suonano puliti una patch da 76 moduli dove sette crepitano di continuo, con un
+terzo della CPU e molto meno calore. Quindi il motore misura gli underrun e si
+ferma dove smettono.
+
+Se l'audio si rompe:
+
+- **Guarda il log** — il tasto ⓘ nella toolbar, poi **Log** — cercando le righe
+  che iniziano con `Engine:`. Dicono quale percorso ha concesso il dispositivo e
+  dove si è assestato il motore.
+- **Il calore conta più di quanto sembri.** Un telefono caldo riduce le
+  prestazioni e il numero di thread migliore si sposta; il motore lo segue, ma
+  un telefono che ha lavorato a pieno regime per un'ora ha meno da dare.
+- **Una patch può semplicemente essere troppo pesante.** Il motore lo dice,
+  invece di lasciarti indovinare.
+
+Lo zoom si ferma a 2×. Oltre, ogni modulo visibile viene ridisegnato in un
+buffer molto più grande a ogni passo di zoom, e su un telefono questo compete
+con la callback audio per gli stessi core — spezzava il suono allo zoom massimo.
 
 ## Build
 

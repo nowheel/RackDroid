@@ -119,6 +119,48 @@ Obiettivo: vedere il rack renderizzato e interagirci.
 - [x] Niente store/account VCV su Android per scelta progettuale
       (`network_stub` resta e ogni richiesta fallisce in modo controllato)
 
+## Audio e prestazioni (misurato su hardware)
+
+- **Il percorso audio veloce non lo decide l'app.** Oboe chiede
+  `SharingMode::Exclusive` e su alcuni firmware riceve `Shared` senza errore: il
+  motivo compare solo nel log di sistema (`getListValueByUid(aaudio-compatible-apps)
+  but return null` → `aaudio denied with imcompatible policy`). È una allowlist
+  per-app del vendor (Oplus/OnePlus), non AOSP: sul OnePlus 8T nega anche a un
+  synth Oboe commerciale. Non esiste API, flag di manifest o impostazione per
+  entrarci. Escluse come cause: Bluetooth, altre app che tengono il device,
+  audio focus, capacità MMAP del device (`isMMapSupported()` = 1), Dolby Atmos.
+- **Con `Shared`, più thread peggiorano l'audio.** `Engine_stepFrame()`
+  sincronizza ogni worker a due barriere di spin **per sample**: il costo cresce
+  col numero di thread, non con la patch. Sull'8T, stessa patch: 1–2 thread
+  0 underrun/60 s, 4 thread ~8,4/s, 7 thread ~9,2/s a ~515% di 800% di CPU. Una
+  patch da 76 moduli converge comunque a 2 thread. Sull'S22 con Exclusive
+  concesso l'ordine si inverte: 224 moduli, 1 thread 1522 underrun, 8 thread 22.
+  Nessuna formula su `cores` è giusta su entrambi.
+- **Quindi i thread non sono più un'impostazione utente.** La riga sparisce dal
+  menu Engine (filtrata in `menu_native.cpp` per etichetta tradotta; upstream
+  intatto) e una sola funzione (`checkThreadCount()` in `main_android.cpp`)
+  possiede il numero. La prima ipotesi viene dallo sharing mode (Exclusive →
+  ceiling, Shared → 2), poi sale e scende in base agli underrun misurati. Le
+  finestre che contengono un tocco vengono scartate, e così i primi cinque
+  secondi: caricare una patch o riaprire lo stream non è una misura.
+- **Il core riservato si sceglie per frequenza, non per indice**: su SM8250
+  cpu7 è il core *prime*, quindi la vecchia regola `cores-1` regalava via il
+  core più veloce (`pickReservedCpu()` legge `cpuinfo_max_freq`).
+- **Il block size non può superare la capacità del buffer dello stream**: 4096
+  frame in un buffer da 1536 è una callback in ritardo per costruzione
+  (misurati 225 underrun/30 s). La scala è limitata da
+  `audioMaxUsefulBlockSize()`, con una riparazione all'avvio per un valore
+  persistito troppo grande.
+- **Zoom limitato a 2×** (`MAX_RACK_ZOOM`): a 4× ogni modulo visibile viene
+  rasterizzato in un framebuffer con sedici volte i pixel **e** quel framebuffer
+  viene riallocato a ogni passo di zoom. Quella tempesta di allocazioni sul
+  render thread spezzava l'audio allo zoom massimo. Limite applicato in due
+  punti: `touch_input.cpp` non chiede più del muro, `checkZoomCeiling()` copre
+  ogni altra via (menu View, patch salvata su desktop a 4×).
+- **Niente inerzia dopo un pinch**: due dita non si alzano mai insieme, il
+  centroide salta su quella rimasta e produce una velocità che nessuna mano ha
+  fatto. Il pan mantiene la sua inerzia, lo zoom no.
+
 ## Debiti tecnici correnti
 
 - `minSdk 29` (Android 10): risolto lo shim `<execinfo.h>` che teneva il
