@@ -143,6 +143,51 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   ceiling, Shared → 2), poi sale e scende in base agli underrun misurati. Le
   finestre che contengono un tocco vengono scartate, e così i primi cinque
   secondi: caricare una patch o riaprire lo stream non è una misura.
+- **Il regolatore deve diffidare delle proprie misure.** Ogni difetto trovato
+  testando su S22 era della stessa natura: credeva a finestre che non erano
+  misure. Ora ne scarta quattro tipi — quelle con un tocco, con un cambio di
+  superficie, con una riapertura dello stream, e i primi cinque secondi dopo
+  l'avvio. La rotazione ha richiesto un percorso suo: l'activity dichiara
+  `configChanges="orientation|screenSize|..."`, quindi non passa **mai** da
+  `APP_CMD_TERM_WINDOW` — arriva solo un resize, che nessuno ascoltava, e i
+  suoi underrun finivano addebitati alla patch. Senza questo, un ciclo di
+  background/ritorno/rotazione lo faceva vagare 2 → 1 → 2 → 5 → 3 → 4 in
+  venticinque secondi.
+- **La manutenzione non può fermarsi con il rendering.** Il ciclo dei frame
+  faceva `ALooper_pollOnce(-1)` e saltava tutto quando la superficie spariva,
+  ma l'audio in background continua per scelta: un telefono che scalda mentre
+  l'app è in secondo piano andava in underrun senza nessuno sveglio a
+  correggere. Ora il ciclo gira a 10 Hz senza superficie e la manutenzione è
+  divisa — ciò che regola motore e audio gira sempre, ciò che tocca la scena,
+  un dialogo o un riavvio aspetta la superficie.
+- **Salire è facile, scendere no.** La scala si muove solo quando fa underrun,
+  quindi qualunque cosa transitoria la spinga in alto ce la lascia per il resto
+  della sessione: un S22 portato a 7 thread da un carico artificiale ci restava
+  a carico finito, 712% di 800% su una patch che girava pulita a 4 (422%). Ora
+  un conteggio che regge pulito per un minuto spende una finestra a provare
+  quello sotto, e l'intervallo raddoppia dopo ogni sonda fallita (max 10 min).
+- **Pavimento a 2 thread.** Su nessun dispositivo 1 è mai risultato il gradino
+  migliore: sull'8T 1 e 2 erano entrambi puliti, sull'S22 1 ha prodotto 78
+  underrun in una finestra dove 2 ne faceva 7. Provarlo non guadagna mai nulla.
+- **Tolleranza proporzionata alla fiducia**: un gradino già dimostrato pulito
+  regge fino a 4 underrun isolati per finestra (max 3 finestre), uno mai
+  provato solo 1. Un underrun isolato è tanto probabilmente una notifica quanto
+  la patch, e scappare da un gradino buono costa più di quanto risolva.
+- **Il block size è l'ultima risorsa, non la prima.** Raddoppiarlo compra
+  respiro pagando in latenza e non viene mai annullato (il messaggio dice
+  all'utente di rimetterlo a mano). Scattava al primo underrun al soffitto, che
+  cadeva nei secondi in cui il regolatore sta scendendo di proposito: su S22 la
+  scala risultava esaurita 6 secondi dopo il lancio. Ora aspetta che il
+  regolatore non abbia più niente da provare, e **mai durante una
+  registrazione** — riaprire lo stream toglie la callback per ~0,7 s, che in un
+  WAV è un buco muto senza niente che lo segnali.
+- **Niente log dalla callback audio.** `WARN` di Rack prende un mutex che anche
+  il render thread tiene e finisce in `fflush()`; `logger.cpp` di upstream lo
+  dice da sé: *"logging is not used in performance critical code"*. Era chiamato
+  a ogni underrun, cioè quando la callback era già in ritardo: un anello di
+  retroazione. Ora la callback pubblica degli atomici e il ciclo dei frame
+  scrive, una riga al secondo (a una riga per frame le prove si spingevano fuori
+  dal file da 10 MB in cui devono essere trovate).
 - **Il core riservato si sceglie per frequenza, non per indice**: su SM8250
   cpu7 è il core *prime*, quindi la vecchia regola `cores-1` regalava via il
   core più veloce (`pickReservedCpu()` legge `cpuinfo_max_freq`).
@@ -157,6 +202,27 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   render thread spezzava l'audio allo zoom massimo. Limite applicato in due
   punti: `touch_input.cpp` non chiede più del muro, `checkZoomCeiling()` copre
   ogni altra via (menu View, patch salvata su desktop a 4×).
+- **Tenuta termica misurata (S22, 12 minuti di carico continuo + churn di
+  lifecycle):** picco AP 49,0 °C, picco SKIN 38,9 °C, throttling mai oltre il
+  livello 1, batteria in salita con un alimentatore da ~10 W. Dopo il primo
+  minuto la curva è piatta: l'S22 regge questo carico indefinitamente.
+  L'unico sensore che va in allarme è SKIN (la superficie), non il SoC — è un
+  limite al tatto, non di silicio, quindi una ventola sul retro agisce proprio
+  sul sensore che causa il throttling. Per contrasto, l'8T si è riavviato due
+  volte sotto lo stesso tipo di test.
+- **NEON c'è già, verificato nel binario.** Rack usa intrinseche SSE che SIMDE
+  traduce in NEON su arm64; `libplugin_fundamental.so` contiene 228 `fmla v.4s`,
+  277 `fmul v.4s`, 140 `fadd v.4s` contro 270 `fmul` scalari. Anche `-O3` e
+  `-funsafe-math-optimizations` sono già in `native/CMakeLists.txt`. E
+  `cpuPause()` emette davvero `YIELD` nello spin loop: `ARCH_ARM64` arriva da
+  `arch.hpp` via `__aarch64__`, che l'NDK imposta da sé (verificato
+  disassemblando `Engine::stepBlock`, due `yield`, uno per barriera).
+- **Perché la barriera per-sample non si tocca.** `Engine_stepFrameCables()`
+  copia i valori dei cavi *tra* un sample e l'altro: è così che un segnale
+  attraversa un cavo in 20 µs. Sincronizzare per blocco (96.000 barriere/s →
+  375) farebbe attraversare ogni cavo in 5,3 ms e cambierebbe il suono delle
+  patch con retroazione a frequenza audio. Non è uno spreco: è portante. La
+  strada praticabile resta usare meno thread, non sincronizzarli meglio.
 - **Niente inerzia dopo un pinch**: due dita non si alzano mai insieme, il
   centroide salta su quella rimasta e produce una velocità che nessuna mano ha
   fatto. Il pan mantiene la sua inerzia, lo zoom no.

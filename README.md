@@ -97,6 +97,18 @@ a 76-module patch cleanly where seven crackle constantly, at a third of the CPU
 and far less heat. So the engine measures underruns and settles wherever they
 stop.
 
+It also comes back down. Anything transient — a heavy moment, another app, a
+warm spell — pushes the count up, and if nothing ever brought it back the
+engine would spend the rest of the session on cores it no longer needs. So
+once a count has held clean for a minute, it spends one window asking whether
+a smaller one would do, and keeps the answer. It remembers where it settled,
+too, so the next launch starts there instead of walking the whole ladder
+again.
+
+None of this counts a measurement it should not trust: a window containing a
+touch, a rotation, a trip to the home screen or a reopened audio stream is
+thrown away rather than blamed on the patch.
+
 If the audio breaks up:
 
 - **Check the log** — the ⓘ tool in the toolbar, then **Log** — for lines

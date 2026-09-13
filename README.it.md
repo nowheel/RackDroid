@@ -100,6 +100,19 @@ suonano puliti una patch da 76 moduli dove sette crepitano di continuo, con un
 terzo della CPU e molto meno calore. Quindi il motore misura gli underrun e si
 ferma dove smettono.
 
+E poi riscende. Qualunque cosa passeggera — un momento pesante, un'altra app,
+una scaldata — spinge il numero verso l'alto, e se nulla lo riportasse giù il
+motore passerebbe il resto della sessione su core che non gli servono più.
+Così, quando un numero regge pulito per un minuto, spende una finestra a
+chiedersi se ne bastino di meno, e si tiene la risposta. Si ricorda anche dove
+si era assestato, così l'avvio successivo parte da lì invece di ripercorrere
+tutta la scala.
+
+Niente di tutto questo dà retta a una misura di cui non deve fidarsi: una
+finestra che contiene un tocco, una rotazione, un passaggio alla schermata
+principale o una riapertura dello stream audio viene buttata, non addebitata
+alla patch.
+
 Se l'audio si rompe:
 
 - **Guarda il log** — il tasto ⓘ nella toolbar, poi **Log** — cercando le righe
