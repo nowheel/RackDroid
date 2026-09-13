@@ -63,6 +63,9 @@ static const float LONG_PRESS_SLOP_PX = 16.f; // in scene units
 // timer. Small, so any real drag resets it; a resting finger's jitter does not.
 static const float LONG_PRESS_STILL_PX = 5.f;
 static const float PINCH_DETECT_RATIO = 0.02f;
+/** How long after the last pinch movement a lift still counts as "ending a
+zoom" rather than "flicking a pan", and so starts no inertia. */
+static const double PINCH_COAST_BLOCK_SEC = 0.25;
 static const float PINCH_ZOOM_SPEED = 8.f;
 // Inertia (momentum) for one- and two-finger panning
 static const float INERTIA_MIN_SPEED = 80.f;   // scene units/s to start coasting
@@ -161,6 +164,9 @@ struct TouchState {
 	float lastDist = 0.f;
 	double lastMoveTime = 0.0;
 	rack::math::Vec panVelocity; // scene units/s, smoothed
+	/** When the fingers were last moving relative to each other, i.e. pinching
+	rather than panning together. Lifting after a pinch must not coast. */
+	double lastPinchTime = 0.0;
 
 	// One-finger drag on empty rack pans the view (instead of the selection
 	// marquee, which now needs the toolbar's multi-select mode).
@@ -500,10 +506,16 @@ int touchHandleEvent(AInputEvent* event) {
 					// gesture once per frame. Zooming out is always fine.
 					bool atCap = ratio > 0.f && APP->scene && APP->scene->rackScroll
 						&& APP->scene->rackScroll->getZoom() >= MAX_RACK_ZOOM;
-					if (std::fabs(ratio) > PINCH_DETECT_RATIO && !atCap) {
-						windowSetMods(GLFW_MOD_CONTROL);
-						APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
-						windowSetMods(0);
+					if (std::fabs(ratio) > PINCH_DETECT_RATIO) {
+						// Noted even when the zoom is refused at the cap: the
+						// fingers are still pinching, and it is the pinching
+						// that must not turn into coasting when they lift.
+						st.lastPinchTime = now;
+						if (!atCap) {
+							windowSetMods(GLFW_MOD_CONTROL);
+							APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
+							windowSetMods(0);
+						}
 					}
 				}
 				// Two-finger pan → scroll
@@ -546,6 +558,17 @@ int touchHandleEvent(AInputEvent* event) {
 				// Back to single-finger mode; don't resume the left drag.
 				st.gesture = false;
 				st.lastDist = 0.f;
+				// A pinch must not coast. Two fingers never leave the glass at
+				// the same instant, so the centroid jumps to whichever one is
+				// still down -- a large delta over a tiny dt, which is a
+				// velocity no hand produced. Panning wants inertia and gets it;
+				// zooming does not, and letting it through is what sends the
+				// rack off on a tangent when the fingers come off. More visible
+				// since the 2x zoom cap: at the ceiling the fingers keep
+				// spreading, that movement no longer becomes zoom, and all of
+				// it lands in the pan velocity instead.
+				if (rack::system::getTime() - st.lastPinchTime < PINCH_COAST_BLOCK_SEC)
+					st.panVelocity = rack::math::Vec();
 				startInertia();
 			}
 			return 1;
