@@ -176,8 +176,8 @@ android {
 		// A fourth component marks a fix release over 0.1.2 rather than new
 		// work. The updater compares versionName numerically component by
 		// component, padding the shorter side, so 0.1.2.1 beats 0.1.2.
-		versionCode = 7
-		versionName = "0.1.2.4"
+		versionCode = 8
+		versionName = "0.1.2.5"
 
 		ndk {
 			// Default remains the physical-device release. Build emulator /
