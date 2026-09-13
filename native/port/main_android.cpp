@@ -850,7 +850,23 @@ static void checkThreadCount() {
 			scores[i] = -1;
 		bool shared = rackdroid::audioIsSharedMode();
 		int remembered = rememberedThreadCount(ceiling);
-		int want = remembered > 0 ? remembered : (shared ? 2 : ceiling);
+		int opening = shared ? 2 : ceiling;
+		int want = remembered > 0 ? remembered : opening;
+		const char* why = remembered > 0 ? "where it settled last time" : "first guess";
+
+		// On a Shared stream the memo does not get to raise the opening guess.
+		// The two mistakes are not equally priced there: guessing too high
+		// costs seconds of audible crackle -- an 8T opened at seven threads on
+		// a remembered count and took 28 underruns in the first window --
+		// while guessing too low costs one quiet window before the ladder
+		// climbs. And the memo carries no patch with it: a count that ran
+		// clean on a fifteen-module patch says nothing about the next one.
+		// Where Exclusive was granted the cliff is not there and the memo
+		// stands as written.
+		if (shared && want > opening) {
+			want = opening;
+			why = "capped for the Shared path, ignoring a higher memo";
+		}
 		if (want > ceiling)
 			want = ceiling;
 		if (want < 2 && ceiling >= 2)
@@ -859,12 +875,12 @@ static void checkThreadCount() {
 		// it starts trusted rather than on probation. Without this the first
 		// couple of stray underruns after a launch knocked the engine off the
 		// very count it had just been told was right, and it spent ten seconds
-		// walking back to it -- seen doing exactly that on the S22.
-		if (remembered > 0 && want >= 1 && want <= MAX_TRACKED_THREADS)
+		// walking back to it -- seen doing exactly that on the S22. Only where
+		// the memo was actually taken: a capped guess has proved nothing.
+		if (remembered > 0 && want == remembered && want <= MAX_TRACKED_THREADS)
 			provenClean[want] = true;
 		LOGI("Engine: starting at %d threads (%s, %s audio path, %d-thread ceiling)",
-			want, remembered > 0 ? "where it settled last time" : "first guess",
-			shared ? "Shared" : "Exclusive", ceiling);
+			want, why, shared ? "Shared" : "Exclusive", ceiling);
 		settings::threadCount = want;
 		initialised = true;
 		windowStartedAt = now;
