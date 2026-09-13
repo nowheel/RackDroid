@@ -43,6 +43,12 @@ never has. The seconds right after a reopen underrun whatever the patch is
 doing; they are not a measurement of anything. */
 double audioSecondsSinceStreamOpen();
 
+/** True while a master WAV recording is running. Reopening the stream costs
+roughly half a second of callbacks, which in a recording is a hole in the file
+with nothing to mark it -- so the block-size ladder waits for the recording to
+finish rather than spending the user's take on headroom. */
+bool audioIsRecording();
+
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
 itself (see CLAUDE.md). */

@@ -54,8 +54,12 @@ namespace {
 struct WavRecorder {
 	static const size_t RING_FLOATS = 1 << 20; // ~5.5s stereo @48k
 	std::vector<float> ring;
-	std::atomic<size_t> head{0}; // producer (audio thread)
-	std::atomic<size_t> tail{0}; // consumer (writer thread)
+	// One cache line each. Adjacent, they share one, and every push from the
+	// audio thread then invalidates the line the writer thread is reading --
+	// false sharing, paid on the one thread in the process that must never
+	// wait. Sixty-four bytes of padding is a cheap price for that.
+	alignas(64) std::atomic<size_t> head{0}; // producer (audio thread)
+	alignas(64) std::atomic<size_t> tail{0}; // consumer (writer thread)
 	std::atomic<bool> active{false};
 	std::thread writer;
 	FILE* file = NULL;
@@ -703,6 +707,11 @@ void audioReleaseIdleDevice() {
 }
 
 
+bool audioIsRecording() {
+	return gRecorder.active.load();
+}
+
+
 bool audioIsSharedMode() {
 	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
 		return false;
@@ -723,14 +732,14 @@ Java_org_rackdroid_MainActivity_nativeRecordStart(JNIEnv* env, jobject thiz, jst
 	if (APP && APP->engine)
 		sr = (int) APP->engine->getSampleRate();
 	bool ok = gRecorder.start(path, sr, NUM_OUTPUTS);
-	__android_log_print(ANDROID_LOG_INFO, "rackdroid", "record start %s: %d", path.c_str(), ok);
+	AUDIO_WARN("record start %s: %d", path.c_str(), ok);
 	return ok;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_rackdroid_MainActivity_nativeRecordStop(JNIEnv* env, jobject thiz) {
 	gRecorder.stop();
-	__android_log_print(ANDROID_LOG_INFO, "rackdroid", "record stop");
+	AUDIO_WARN("record stop");
 }
 
 

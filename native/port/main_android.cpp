@@ -654,6 +654,10 @@ scheduler already behaved would see no difference from the affinity mask,
 and a manual thread-count override still can't undo it. */
 static const int RESERVED_CORES = 1;
 
+/** Highest thread count checkThreadCount() keeps a score for. */
+static const int MAX_TRACKED_THREADS = 64;
+
+
 /** How long after the last touch the engine keeps its hands off the thread
 count. Covers the gesture itself and the moment after it, so a pinch or a drag
 is never mistaken for the patch outgrowing its threads. */
@@ -688,7 +692,14 @@ device's core count, so Android always has one no Worker will claim. A 1-core
 device has nothing to spare and is left alone entirely. */
 static int engineThreadCeiling() {
 	int cores = system::getLogicalCoreCount();
-	return cores <= 1 ? cores : cores - RESERVED_CORES;
+	int ceiling = cores <= 1 ? cores : cores - RESERVED_CORES;
+	// checkThreadCount() indexes scores[] by thread count and reads one rung
+	// above the current one, so the ceiling has to stay inside that array. No
+	// phone has anything like this many cores; a desktop-class tablet one day
+	// might, and a buffer overrun is not how it should find out.
+	if (ceiling > MAX_TRACKED_THREADS - 1)
+		ceiling = MAX_TRACKED_THREADS - 1;
+	return ceiling;
 }
 /** Holds the rack to rackdroid::MAX_RACK_ZOOM however it got past it -- the
 View menu's zoom slider, or a patch saved on desktop at 4x and opened here.
@@ -746,7 +757,6 @@ Windows the user's fingers were in are thrown away rather than scored. A
 pinch-zoom or a drag makes the render thread crowd the audio callback for
 exactly as long as the gesture lasts (436 underruns, in the report that
 prompted this), and none of that says anything about the patch. */
-static const int MAX_TRACKED_THREADS = 64;
 
 /** Set by checkThreadCount() when it is underrunning and has nothing left to
 try: every neighbouring count has been measured and none is clearly better.
@@ -819,6 +829,8 @@ static void checkThreadCount() {
 		int want = remembered > 0 ? remembered : (shared ? 2 : ceiling);
 		if (want > ceiling)
 			want = ceiling;
+		if (want < 2 && ceiling >= 2)
+			want = 2; // same floor the ladder keeps; covers a memo written before it
 		LOGI("Engine: starting at %d threads (%s, %s audio path, %d-thread ceiling)",
 			want, remembered > 0 ? "where it settled last time" : "first guess",
 			shared ? "Shared" : "Exclusive", ceiling);
@@ -875,45 +887,108 @@ static void checkThreadCount() {
 		return; // measured the disturbance, not the patch
 	}
 
-	// A single underrun in five seconds is as likely to be the phone as the
-	// patch -- a notification, a rotation, another app waking up. Acting on
-	// one meant leaving a rung that was doing its job, and the rung it moved
-	// to could be audibly worse for the next five seconds. So tolerate an
-	// isolated one; a rung that keeps producing them is a different matter and
-	// is not tolerated forever.
+	// A few underruns in five seconds are as likely to be the phone as the
+	// patch -- a notification, another app waking up, the governor moving a
+	// core. Acting on them means leaving a rung that was doing its job, and
+	// the rung it moves to can be far worse: measured here, a rung that had
+	// just been declared clean was abandoned over two underruns and the walk
+	// down reached 1 thread, which produced seventy-eight in one window.
+	// So a rung that has proved itself gets the benefit of the doubt, and an
+	// unproven one still gets a little. Neither gets it forever.
+	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static int toleratedRuns = 0;
-	static const int32_t TOLERANCE = 1;
 	static const int TOLERATED_RUNS_MAX = 3;
-	bool tolerated = underruns > 0 && underruns <= TOLERANCE
-		&& toleratedRuns < TOLERATED_RUNS_MAX;
-	if (tolerated) {
+	bool proven = current >= 1 && current <= MAX_TRACKED_THREADS && provenClean[current];
+	int32_t tolerance = proven ? 4 : 1;
+	if (underruns > 0 && underruns <= tolerance && toleratedRuns < TOLERATED_RUNS_MAX) {
 		toleratedRuns++;
-		LOGI("Engine: %d underrun in %.0fs at %d threads; ignoring (%d of %d)",
-			underruns, WINDOW_SEC, current, toleratedRuns, TOLERATED_RUNS_MAX);
+		LOGI("Engine: %d underruns in %.0fs at %d threads; ignoring (%d of %d, %s)",
+			underruns, WINDOW_SEC, current, toleratedRuns, TOLERATED_RUNS_MAX,
+			proven ? "this count has run clean before" : "too few to act on");
 		return; // and do not record it as this rung's score
 	}
-	if (underruns == 0)
-		toleratedRuns = 0;
 
 	if (current >= 1 && current <= MAX_TRACKED_THREADS)
 		scores[current] = underruns;
 
+	// Never walk down to one. One thread is no parallelism at all, and no
+	// measurement taken on any device has ever made it the best rung: on the
+	// 8T one and two were both clean, on the S22 one produced seventy-eight
+	// underruns in a window where two produced seven. Trying it gains nothing
+	// and occasionally costs five seconds of ruined audio, so the ladder
+	// stops at two wherever there are two to have.
+	int floorCount = (ceiling >= 2) ? 2 : 1;
+
+	// Clean at a count that is more than it needs is not a happy ending. The
+	// ladder only ever moves when it underruns, so once something transient --
+	// a heavy moment, another app, a thermal dip -- has pushed the count up,
+	// nothing brings it back down again. Measured here: an S22 driven to seven
+	// threads by an artificial load stayed at seven when the load went away,
+	// burning 712% of 800% on a patch that had run clean at four. That is
+	// battery and heat spent on nothing, which is the very thing this whole
+	// mechanism exists to avoid.
+	//
+	// So when a count has held clean for a while, spend one window asking
+	// whether a smaller one would do. Only downward, only towards a rung that
+	// is unmeasured or was clean itself, and with the interval doubling after
+	// a probe that fails, so a device that genuinely needs its cores is not
+	// poked at forever.
+	static double probeAfter = 60.0;
+	static const double PROBE_AFTER_MIN = 60.0;
+	static const double PROBE_AFTER_MAX = 600.0;
+	static double cleanSince = 0.0;
+	static int probedFrom = -1;
+
 	if (underruns == 0) {
+		toleratedRuns = 0;
+		if (current >= 1 && current <= MAX_TRACKED_THREADS)
+			provenClean[current] = true;
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean", current);
 			settledAt = current;
+			cleanSince = now;
 		}
 		rememberThreadCount(current);
+		if (probedFrom >= 0) {
+			// The probe held: the smaller count is doing the job.
+			LOGI("Engine: %d threads is enough after all; staying here instead "
+				"of %d", current, probedFrom);
+			probedFrom = -1;
+			probeAfter = PROBE_AFTER_MIN;
+		}
+		int lower = current - 1;
+		if (cleanSince > 0.0 && now - cleanSince >= probeAfter
+				&& lower >= floorCount && scores[lower] <= 0) {
+			LOGI("Engine: clean at %d threads for %.0fs; trying %d to see if "
+				"fewer will do", current, now - cleanSince, lower);
+			probedFrom = current;
+			cleanSince = 0.0;
+			settledAt = -1;
+			settings::threadCount = lower;
+		}
 		return;
 	}
 	settledAt = -1;
+	cleanSince = 0.0;
+	if (probedFrom >= 0) {
+		// The probe cost us a window. Go straight back rather than letting the
+		// ladder wander, and wait longer before asking again.
+		LOGW("Engine: %d underruns in %.0fs at %d threads; %d it is, then",
+			underruns, WINDOW_SEC, current, probedFrom);
+		if (current >= 1 && current <= MAX_TRACKED_THREADS)
+			scores[current] = underruns;
+		settings::threadCount = probedFrom;
+		probedFrom = -1;
+		probeAfter = (probeAfter * 2.0 > PROBE_AFTER_MAX) ? PROBE_AFTER_MAX : probeAfter * 2.0;
+		return;
+	}
 	toleratedRuns = 0;
 
 	// An unmeasured neighbour first -- nearest, and downward before upward,
 	// since the barrier cost is the commoner problem on a phone. Exploration
 	// terminates because each count is only unmeasured once.
 	int candidate = -1;
-	if (current - 1 >= 1 && scores[current - 1] < 0)
+	if (current - 1 >= floorCount && scores[current - 1] < 0)
 		candidate = current - 1;
 	else if (current + 1 <= ceiling && scores[current + 1] < 0)
 		candidate = current + 1;
@@ -923,7 +998,7 @@ static void checkThreadCount() {
 		// little would swap places every window forever.
 		int best = current;
 		int32_t bestScore = underruns;
-		for (int i = 1; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
+		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
 			if (scores[i] >= 0 && scores[i] < bestScore) {
 				bestScore = scores[i];
 				best = i;
@@ -1018,6 +1093,13 @@ static void checkBlockSizeOverload() {
 	// measures best rather than climbing to the ceiling, so "wait until we are
 	// at the ceiling" would wait forever on a Shared path.
 	if (!g_threadTunerExhausted)
+		return;
+	// And never during a recording. Changing the block size reopens the
+	// stream, which takes the callback away for the best part of a second --
+	// in a WAV that is a silent hole with nothing in the file to mark it, and
+	// the take is the one thing here the user cannot simply redo. Headroom can
+	// wait until they have stopped.
+	if (rackdroid::audioIsRecording())
 		return;
 	if (current >= cap) {
 		g_blockSizeTried = true; // ladder fully spent
