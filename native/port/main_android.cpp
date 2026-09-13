@@ -756,6 +756,41 @@ opening guess it is underrunning on purpose, and the answer is usually three
 rungs away. */
 static bool g_threadTunerExhausted = false;
 
+/* Where the tuner settled last time. Without it every launch re-walks the
+same ladder from the core ceiling, and on a device that grants Exclusive that
+is ten to fifteen seconds of audible crackle before each session starts --
+paid again on every launch, to rediscover an answer that had not changed.
+Only a count that ran a full window clean is written, and it is only ever an
+opening guess: the tuner measures from there like anywhere else, so a patch
+that has grown heavier since, or a phone that is warmer, moves off it. */
+static std::string threadMemoPath() {
+	return asset::user("engine-threads");
+}
+
+static int rememberedThreadCount(int ceiling) {
+	FILE* f = std::fopen(threadMemoPath().c_str(), "r");
+	if (!f)
+		return 0;
+	int v = 0;
+	bool ok = std::fscanf(f, "%d", &v) == 1;
+	std::fclose(f);
+	if (!ok || v < 1 || v > ceiling)
+		return 0; // absent, corrupt, or from a phone with different cores
+	return v;
+}
+
+static void rememberThreadCount(int n) {
+	static int lastWritten = 0;
+	if (n == lastWritten)
+		return; // settling is checked every window; the flash write is not
+	FILE* f = std::fopen(threadMemoPath().c_str(), "w");
+	if (!f)
+		return;
+	std::fprintf(f, "%d\n", n);
+	std::fclose(f);
+	lastWritten = n;
+}
+
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
 	static int scores[MAX_TRACKED_THREADS + 1];
@@ -780,11 +815,13 @@ static void checkThreadCount() {
 		for (int i = 0; i <= MAX_TRACKED_THREADS; i++)
 			scores[i] = -1;
 		bool shared = rackdroid::audioIsSharedMode();
-		int want = shared ? 2 : ceiling;
+		int remembered = rememberedThreadCount(ceiling);
+		int want = remembered > 0 ? remembered : (shared ? 2 : ceiling);
 		if (want > ceiling)
 			want = ceiling;
-		LOGI("Engine: starting at %d threads (%s audio path, %d-thread ceiling)",
-			want, shared ? "Shared" : "Exclusive", ceiling);
+		LOGI("Engine: starting at %d threads (%s, %s audio path, %d-thread ceiling)",
+			want, remembered > 0 ? "where it settled last time" : "first guess",
+			shared ? "Shared" : "Exclusive", ceiling);
 		settings::threadCount = want;
 		initialised = true;
 		windowStartedAt = now;
@@ -866,6 +903,7 @@ static void checkThreadCount() {
 			LOGI("Engine: %d threads is running clean", current);
 			settledAt = current;
 		}
+		rememberThreadCount(current);
 		return;
 	}
 	settledAt = -1;
@@ -970,9 +1008,17 @@ static void checkBlockSizeOverload() {
 		return;
 	if (!startupSettled())
 		return; // the patch is still loading; those underruns are not the workload
-	// No thread-count gate: checkThreadCount() picks whatever count measures
-	// best rather than climbing to the ceiling, so "wait until we are at the
-	// ceiling" would mean waiting forever on a Shared path.
+	// Last resort, and only once the thread tuner has none left. Doubling the
+	// block size buys headroom with latency and is never undone -- the user is
+	// told to put it back by hand -- so it must not be spent on the underruns
+	// the tuner makes on purpose while it walks down from the core ceiling. It
+	// was: on an S22 the ladder was already spent six seconds after launch, on
+	// a patch that played cleanly at four threads a moment later.
+	// Not a thread-COUNT gate: checkThreadCount() picks whatever count
+	// measures best rather than climbing to the ceiling, so "wait until we are
+	// at the ceiling" would wait forever on a Shared path.
+	if (!g_threadTunerExhausted)
+		return;
 	if (current >= cap) {
 		g_blockSizeTried = true; // ladder fully spent
 		return;
