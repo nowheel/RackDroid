@@ -877,15 +877,44 @@ void audioTrimBuffer() {
 	if (now - quietSince < 20.0)
 		return;
 
+	// A device that keeps growing the buffer back from a size is telling us
+	// that size does not suit it, one underrun at a time -- too few at a time
+	// to trip the cluster rule above, but plainly and repeatedly. Trimming to
+	// it again after each is not persistence, it is not listening: an 8T sat
+	// at 384 frames and had Oboe's tuner regrow it twice in three minutes,
+	// and this undid both. After a third time, believe it and settle a step
+	// higher.
+	static int32_t lastTrimmedTo = 0;
+	static int regrowths = 0;
+	static int32_t learnedFloor = 0;
+	if (lastTrimmedTo > 0 && size > lastTrimmedTo) {
+		regrowths++;
+		if (regrowths >= 3) {
+			learnedFloor = lastTrimmedTo * 2;
+			regrowths = 0;
+			AUDIO_WARN("Oboe: the buffer keeps being grown back from %d frames; "
+				"settling at %d instead", lastTrimmedTo, learnedFloor);
+		}
+	}
+
 	// Two bursts is the hard floor -- below that a callback has nowhere to be
 	// late -- and one step above whatever already failed is the learned one.
 	int32_t floorFrames = burst * 2;
+	if (learnedFloor > floorFrames)
+		floorFrames = learnedFloor;
 	if (tooSmall > 0 && now - tooSmallAt > TOO_SMALL_TTL)
 		tooSmall = 0; // old news; worth asking again
 	if (tooSmall > 0 && tooSmall * 2 > floorFrames)
 		floorFrames = tooSmall * 2;
-	if (size <= floorFrames)
+	if (size <= floorFrames) {
+		// Already where it belongs. Record that and restart the clock, or the
+		// regrowth counter above keeps climbing every frame and re-announces
+		// the same conclusion a few times a second -- which it did, four times
+		// in a hundred and fifty milliseconds.
+		lastTrimmedTo = size;
+		quietSince = now;
 		return;
+	}
 	int32_t want = size / 2;
 	if (want < floorFrames)
 		want = floorFrames;
@@ -895,6 +924,7 @@ void audioTrimBuffer() {
 	AUDIO_WARN("Oboe: quiet for %.0fs; buffer %d -> %d frames (%.1f ms less "
 		"latency, no gap)", now - quietSince, size, result.value(),
 		rate > 0.f ? (size - result.value()) / rate * 1000.f : 0.f);
+	lastTrimmedTo = result.value();
 	quietSince = now;
 }
 
