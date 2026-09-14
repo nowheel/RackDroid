@@ -1679,7 +1679,15 @@ class MainActivity : NativeActivity() {
 	not the text; this resolves and localizes it, then reuses the Toast
 	above to show it. */
 	fun showEngineNoticeFromNative(kind: Int) {
-		val res = if (kind == 1) R.string.engine_thermal_throttled else R.string.engine_maxed_out
+		// 1 = the phone is throttling itself, 2 = another app is eating the CPU,
+		// 0 = the patch really is heavier than this device can manage. Telling
+		// the last two apart matters: "simplify your patch" is bad advice when
+		// the patch is fine and something else is the load.
+		val res = when (kind) {
+			1 -> R.string.engine_thermal_throttled
+			2 -> R.string.engine_cpu_contended
+			else -> R.string.engine_maxed_out
+		}
 		showToastFromNative(getString(res))
 	}
 

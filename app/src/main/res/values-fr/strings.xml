@@ -135,6 +135,7 @@
 	<string name="modules_loaded">%1$d paquet(s) de modules supplémentaires chargé(s)</string>
 	<string name="engine_maxed_out">Ce patch demande plus de CPU que votre appareil ne peut en fournir, même à pleine puissance. Essayez de le simplifier ou de baisser la fréquence d\'échantillonnage.</string>
 	<string name="engine_thermal_throttled">Votre appareil a chauffé et ralentit de lui-même, c\'est pourquoi le patch saccade. Laissez-le refroidir.</string>
+	<string name="engine_cpu_contended">Une autre application utilise presque tout le processeur de ton téléphone, et c\'est pour cela que le son saccade. Ton patch va bien : ferme ce qui tourne à côté.</string>
 	<string name="installing_modules">Installation des modules…</string>
 	<string name="install_failed">Impossible d\'installer les modules</string>
 	<string name="cable_tension">Tension des câbles</string>

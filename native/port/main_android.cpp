@@ -1182,7 +1182,107 @@ asks for more than this device has even at full tilt and cooled; no amount
 of waiting fixes that, and the honest answer is to simplify the patch or
 lower the sample rate. Once per session: this is a diagnosis, not a
 running commentary. */
+/** How much of their time the engine's worker threads spend ready to run but
+not running, 0..1, or -1 while there is not yet enough history to say.
+
+This exists to tell two very different situations apart. If the engine cannot
+keep up and nothing is holding it back, the patch really is heavier than the
+device. If it cannot keep up because its threads are being kept off the CPU --
+a game, a video call, a download -- then the patch is fine, and telling the
+user to simplify it is wrong and costly: it asks them to throw away work to fix
+someone else's problem.
+
+/proc/stat, the obvious source, is denied to apps -- it reads back empty, which
+cost a debugging round trip here. The runqueue wait in /proc/self/task/N/
+schedstat is ours to read and is the better signal anyway: it says directly
+that our threads were ready and something else had the core. Measured on an
+S22: 0.19% idle against 29% with seven competing processes.
+
+Workers only, not the audio callback thread: that one carries URGENT_AUDIO
+priority and wins its core against ordinary work, so it shows nothing. It is
+the workers arriving late at the barrier that produce the underruns. Threads
+are matched by id between samples, because the tuner recreates them whenever it
+changes the count and a fresh thread's counters start at zero. */
+static float workerRunqueueWait() {
+	static const int MAX_TRACKED = MAX_TRACKED_THREADS;
+	struct Sample { int tid; unsigned long long run, wait; };
+	static Sample prev[MAX_TRACKED];
+	static int prevCount = 0;
+	static double sampledAt = 0.0;
+	static float ratio = -1.f;
+
+	double now = system::getTime();
+	if (sampledAt > 0.0 && now - sampledAt < 2.0)
+		return ratio;
+
+	Sample cur[MAX_TRACKED];
+	int count = 0;
+	if (DIR* dir = opendir("/proc/self/task")) {
+		while (dirent* e = readdir(dir)) {
+			if (count >= MAX_TRACKED)
+				break;
+			int tid = atoi(e->d_name);
+			if (tid <= 0)
+				continue;
+			char path[80];
+			std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", tid);
+			FILE* f = std::fopen(path, "r");
+			if (!f)
+				continue;
+			char name[32] = {0};
+			bool worker = std::fgets(name, sizeof(name), f)
+				&& std::strncmp(name, "Worker ", 7) == 0;
+			std::fclose(f);
+			if (!worker)
+				continue;
+			std::snprintf(path, sizeof(path), "/proc/self/task/%d/schedstat", tid);
+			f = std::fopen(path, "r");
+			if (!f)
+				continue;
+			unsigned long long run = 0, wait = 0;
+			// "<ns on cpu> <ns waiting on the runqueue> <timeslices>"
+			bool ok = std::fscanf(f, "%llu %llu", &run, &wait) == 2;
+			std::fclose(f);
+			if (ok)
+				cur[count++] = {tid, run, wait};
+		}
+		closedir(dir);
+	}
+
+	unsigned long long dRun = 0, dWait = 0;
+	for (int i = 0; i < count; i++) {
+		for (int j = 0; j < prevCount; j++) {
+			if (prev[j].tid != cur[i].tid)
+				continue;
+			if (cur[i].run >= prev[j].run && cur[i].wait >= prev[j].wait) {
+				dRun += cur[i].run - prev[j].run;
+				dWait += cur[i].wait - prev[j].wait;
+			}
+			break;
+		}
+	}
+	if (dRun + dWait > 0)
+		ratio = (float) ((double) dWait / (double) (dRun + dWait));
+	else if (prevCount > 0 && count == 0)
+		ratio = -1.f; // no workers at all: nothing to say
+
+	for (int i = 0; i < count; i++)
+		prev[i] = cur[i];
+	prevCount = count;
+	sampledAt = now;
+	return ratio;
+}
+
+
 static void checkMaxedOutOverload() {
+	// Sample first and unconditionally: the share is a delta between two
+	// readings a couple of seconds apart, so it has to be taken while nothing
+	// is wrong. Asking for it only at the moment the notice fires gets the
+	// first reading ever and therefore no answer at all -- which is exactly
+	// what happened the first time this was tested: "-1% of the phone's busy
+	// CPU". Cheap enough to leave running: two small reads every two seconds.
+	float waiting = workerRunqueueWait();
+
 	static bool shown = false;
 	static int32_t lastCeilingCount = 0;
 
@@ -1207,11 +1307,21 @@ static void checkMaxedOutOverload() {
 	int thermal = rackdroid::thermalStatus();
 	// PowerManager.THERMAL_STATUS_SEVERE = 3.
 	bool throttled = thermal >= 3;
+	// Less than half of the phone's busy time being ours, while we cannot keep
+	// up, means the shortage is not the patch's doing. Half is a deliberately
+	// loose line: the engine is by far the heaviest thing on a phone when it
+	// runs at all, so anything near half already means real company.
+	// Measured on an S22: 0.19% with the phone to itself, 29% against seven
+	// competing processes. Ten per cent sits far from both.
+	bool contended = !throttled && waiting >= 0.10f;
 	LOGW("Engine: underrunning at %d threads with nothing left to raise "
-		"(ceiling %d of %d cores); thermal status %d (%s)",
+		"(ceiling %d of %d cores); thermal status %d (%s); workers spent %.1f%% "
+		"of their time waiting for a core (%s)",
 		settings::threadCount, ceiling, ceiling + RESERVED_CORES,
-		thermal, throttled ? "throttled" : "not throttled");
-	rackdroid::showEngineNotice(throttled ? 1 : 0);
+		thermal, throttled ? "throttled" : "not throttled",
+		waiting >= 0.f ? waiting * 100.f : -1.f,
+		contended ? "something else is competing" : "the engine is the main load");
+	rackdroid::showEngineNotice(throttled ? 1 : (contended ? 2 : 0));
 }
 
 static void checkLanguageChanged() {

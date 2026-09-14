@@ -135,6 +135,7 @@
 	<string name="modules_loaded">追加のモジュールパックを%1$d個読み込みました</string>
 	<string name="engine_maxed_out">このパッチはデバイスが全力を出しても足りないCPU性能を必要としています。パッチを簡略化するか、サンプルレートを下げてみてください。</string>
 	<string name="engine_thermal_throttled">デバイスが熱くなり自ら速度を落としています。そのためパッチがカクついています。冷めるまでお待ちください。</string>
+	<string name="engine_cpu_contended">他のアプリが端末のプロセッサをほぼ占有しているため、音が途切れています。パッチに問題はありません。他のアプリを閉じてください。</string>
 	<string name="installing_modules">モジュールをインストール中…</string>
 	<string name="install_failed">モジュールをインストールできませんでした</string>
 	<string name="cable_tension">ケーブルの張り</string>

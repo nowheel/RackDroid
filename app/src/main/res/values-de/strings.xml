@@ -135,6 +135,7 @@
 	<string name="modules_loaded">%1$d zusätzliche Modulpakete geladen</string>
 	<string name="engine_maxed_out">Dieses Patch benötigt mehr Rechenleistung, als dein Gerät selbst mit voller Leistung bieten kann. Vereinfache es oder senke die Abtastrate.</string>
 	<string name="engine_thermal_throttled">Dein Gerät ist heiß gelaufen und drosselt sich selbst – deshalb stockt das Patch. Lass es abkühlen.</string>
+	<string name="engine_cpu_contended">Eine andere App beansprucht gerade fast den gesamten Prozessor deines Telefons – deshalb stottert der Ton. Dein Patch ist in Ordnung: Schließe, was sonst noch läuft.</string>
 	<string name="installing_modules">Module werden installiert…</string>
 	<string name="install_failed">Module konnten nicht installiert werden</string>
 	<string name="cable_tension">Kabelspannung</string>

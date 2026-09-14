@@ -525,6 +525,7 @@
 	<string name="modules_loaded">Caricati %1$d pack di moduli extra</string>
 	<string name="engine_maxed_out">Questa patch richiede più CPU di quanta il tuo device possa dare, anche al massimo. Prova a semplificarla o ad abbassare la frequenza di campionamento.</string>
 	<string name="engine_thermal_throttled">Il tuo device si è scaldato e sta rallentando da solo: è per questo che la patch scatta. Lascialo raffreddare.</string>
+	<string name="engine_cpu_contended">Un\'altra app sta usando quasi tutto il processore del telefono, ed è per questo che il suono scatta. La tua patch va bene: chiudi quello che hai aperto.</string>
 	<string name="installing_modules">Installazione moduli…</string>
 	<string name="install_failed">Impossibile installare i moduli</string>
 	<string name="cable_tension">Tensione dei cavi</string>
