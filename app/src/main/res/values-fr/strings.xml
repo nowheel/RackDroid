@@ -534,4 +534,13 @@
 	<string name="t30_s4">Verrouille le patch (🔒), baisse la lumière, laisse tourner. Toutes les quelques minutes, UN potentiomètre, UN millimètre.</string>
 	<string name="t30_s5">Enregistre 10 minutes (⏺). Quelque part là-dedans se trouve l\'intro de ton album.</string>
 	<string name="t30_s6">Le drone enseigne la leçon la plus profonde : le modulaire, c\'est écouter, pas jouer.</string>
+
+	<string name="menu_response">Réponse</string>
+	<string name="latency_explain">L\'application garde un peu de son prêt avant le haut-parleur. Une avance plus grande est plus sûre ; une plus petite répond plus vite à tes doigts. Rien d\'autre à régler : l\'application s\'occupe du reste.</string>
+	<string name="latency_play">Je joue</string>
+	<string name="latency_play_note">Répond tout de suite. Un clic occasionnel est possible.</string>
+	<string name="latency_balanced">Équilibré</string>
+	<string name="latency_balanced_note">Le réglage par défaut. Convient à la plupart des téléphones.</string>
+	<string name="latency_listen">J\'écoute</string>
+	<string name="latency_listen_note">Aucun clic. Le son arrive un peu plus tard.</string>
 </resources>

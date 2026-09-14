@@ -173,4 +173,13 @@
 	<string name="palette_no_matches">この条件に合うモジュールはありません</string>
 	<string name="palette_all_brands">すべてのブランド</string>
 	<string name="module_no_description">このモジュールの説明はありません。上のタグが用途の手がかりになります。</string>
+
+	<string name="menu_response">応答</string>
+	<string name="latency_explain">アプリはスピーカーに送る前に、音を少し先に用意しています。余裕が多いほど安全で、少ないほど指の動きにすぐ応えます。ほかに設定は要りません。残りはアプリが判断します。</string>
+	<string name="latency_play">演奏する</string>
+	<string name="latency_play_note">すぐ応答します。ときどきノイズが入ることがあります。</string>
+	<string name="latency_balanced">バランス</string>
+	<string name="latency_balanced_note">既定値。ほとんどの端末に適しています。</string>
+	<string name="latency_listen">聴く</string>
+	<string name="latency_listen_note">ノイズは出ません。音は少し遅れて届きます。</string>
 </resources>

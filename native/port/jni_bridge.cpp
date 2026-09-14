@@ -44,6 +44,7 @@ static jmethodID midMenuDismiss;
 static jmethodID midBrowserShow;
 static jmethodID midSharePatch;
 static jmethodID midShowHelp;
+static jmethodID midShowLatencyPicker;
 static jmethodID midLoadUserPlugins;
 static jmethodID midPatchReady;
 static jmethodID midLanguageChanged;
@@ -144,6 +145,9 @@ void jniInit(ANativeActivity* activity) {
 	midBrowserShow = env->GetMethodID(activityCls, "showNativeBrowser", "()V");
 	midSharePatch = env->GetMethodID(activityCls, "sharePatchFromNative", "(Ljava/lang/String;)V");
 	midShowHelp = env->GetMethodID(activityCls, "showHelpFromNative", "(I)V");
+	midShowLatencyPicker = env->GetMethodID(activityCls, "showLatencyPickerFromNative", "()V");
+	if (!midShowLatencyPicker)
+		LOGE("jni: showLatencyPickerFromNative not found");
 	midLoadUserPlugins = env->GetMethodID(activityCls, "loadUserPluginsFromNative", "()V");
 	midPatchReady = env->GetMethodID(activityCls, "patchReadyFromNative", "()V");
 	midLanguageChanged = env->GetMethodID(activityCls, "languageChangedFromNative", "(Ljava/lang/String;)V");
@@ -247,6 +251,16 @@ void nativeShowHelp(int which) {
 	if (!env || !midShowHelp)
 		return;
 	env->CallVoidMethod(activityObj, midShowHelp, (jint) which);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+}
+
+
+void nativeShowLatencyPicker() {
+	JNIEnv* env = getEnv();
+	if (!env || !midShowLatencyPicker)
+		return;
+	env->CallVoidMethod(activityObj, midShowLatencyPicker);
 	if (env->ExceptionCheck())
 		env->ExceptionClear();
 }

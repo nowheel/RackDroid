@@ -568,4 +568,13 @@
 	<string name="palette_no_matches">Nessun modulo corrisponde ai filtri</string>
 	<string name="palette_all_brands">Tutte le marche</string>
 	<string name="module_no_description">Nessuna descrizione disponibile per questo modulo. Le etichette qui sopra suggeriscono cosa fa.</string>
+
+	<string name="menu_response">Risposta</string>
+	<string name="latency_explain">L\'app tiene un po\' di suono già pronto prima dell\'altoparlante. Un anticipo grande è più sicuro; uno piccolo risponde prima alle tue dita. Non devi impostare altro: al resto pensa l\'app.</string>
+	<string name="latency_play">Sto suonando</string>
+	<string name="latency_play_note">Risponde subito. Può capitare qualche tic.</string>
+	<string name="latency_balanced">Equilibrato</string>
+	<string name="latency_balanced_note">Il predefinito. Va bene sulla maggior parte dei telefoni.</string>
+	<string name="latency_listen">Sto ascoltando</string>
+	<string name="latency_listen_note">Nessun tic. Il suono arriva un po\' dopo.</string>
 </resources>

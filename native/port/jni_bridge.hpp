@@ -42,6 +42,11 @@ void nativeSharePatch(const std::string& path);
 /** Open the Java help UI: 0 = guide sheet, 1 = step-by-step wizard. */
 void nativeShowHelp(int which);
 
+/** Opens the response/latency picker (the Engine menu row). Java owns the
+dialog and the stored preference; native only asks for it and is told the
+result through nativeSetLatencyMode. */
+void nativeShowLatencyPicker();
+
 /** Tells Java the patch is restored and the engine is running, so it can
 build the model list and raise the palette. Non-blocking. */
 void nativePatchReady();

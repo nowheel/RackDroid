@@ -798,6 +798,44 @@ safety net away without putting another one up is not a trade, it is a
 regression. So this owns both directions now, and remembers the size that did
 not hold so it stops one step above it rather than rediscovering it in a
 loop. */
+/* How much delay the user is willing to trade for safety. Everything else the
+audio side decides is measured; this one cannot be, because it is not a
+question about the device. Someone playing a keyboard wants the sound now and
+will forgive an occasional click; someone building a patch and listening wants
+silence and does not care about a few tens of milliseconds. The engine has no
+way to tell which of the two is holding the phone, so it asks once and then
+stays out of it.
+
+The setting does not fix a number. It fixes how low the automatic tuning is
+allowed to go -- everything else in this file keeps doing its job inside that
+band. */
+static std::atomic<int> g_latencyMode{1}; // 0 = play, 1 = balanced, 2 = listen
+
+void audioSetLatencyMode(int mode) {
+	if (mode < 0 || mode > 2)
+		return;
+	int was = g_latencyMode.exchange(mode);
+	if (was != mode)
+		AUDIO_WARN("Oboe: response setting is now %s",
+			mode == 0 ? "playing (lowest delay)"
+			: mode == 2 ? "listening (safest)" : "balanced");
+}
+
+int audioLatencyMode() {
+	return g_latencyMode.load(std::memory_order_relaxed);
+}
+
+/** Bursts of buffer the trim may not go below, by setting. Two is the hardware
+floor -- under that a callback has nowhere to be late at all. */
+static int32_t latencyFloorBursts() {
+	switch (g_latencyMode.load(std::memory_order_relaxed)) {
+		case 0: return 2;
+		case 2: return 8;
+		default: return 4;
+	}
+}
+
+
 void audioTrimBuffer() {
 	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
 		return;
@@ -899,7 +937,7 @@ void audioTrimBuffer() {
 
 	// Two bursts is the hard floor -- below that a callback has nowhere to be
 	// late -- and one step above whatever already failed is the learned one.
-	int32_t floorFrames = burst * 2;
+	int32_t floorFrames = burst * latencyFloorBursts();
 	if (learnedFloor > floorFrames)
 		floorFrames = learnedFloor;
 	if (tooSmall > 0 && now - tooSmallAt > TOO_SMALL_TTL)
@@ -986,6 +1024,11 @@ Java_org_rackdroid_MainActivity_nativeRecordStart(JNIEnv* env, jobject thiz, jst
 	bool ok = gRecorder.start(path, sr, NUM_OUTPUTS);
 	AUDIO_WARN("record start %s: %d", path.c_str(), ok);
 	return ok;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rackdroid_MainActivity_nativeSetLatencyMode(JNIEnv*, jobject, jint mode) {
+	rackdroid::audioSetLatencyMode((int) mode);
 }
 
 extern "C" JNIEXPORT void JNICALL

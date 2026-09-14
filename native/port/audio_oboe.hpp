@@ -48,6 +48,14 @@ never gives that latency back. Changing it does NOT reopen the stream, so this
 costs no gap -- and if it goes too far the tuner grows it again by itself. */
 void audioTrimBuffer();
 
+/** How much delay the user is willing to trade for safety: 0 playing (lowest
+delay, an occasional click forgiven), 1 balanced, 2 listening (safest). It sets
+how low the automatic tuning may go, not a fixed size -- everything else keeps
+working inside that band. The one audio decision here that is a preference
+rather than a measurement, which is why it is the one that is asked. */
+void audioSetLatencyMode(int mode);
+int audioLatencyMode();
+
 /** The audio callback thread's id, or 0 before the first callback has run.
 Only that thread can read it, so it publishes it the first time round. */
 int audioCallbackThreadTid();

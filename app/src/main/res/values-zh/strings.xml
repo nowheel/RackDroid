@@ -173,4 +173,13 @@
 	<string name="palette_no_matches">没有模块符合这些筛选条件</string>
 	<string name="palette_all_brands">全部品牌</string>
 	<string name="module_no_description">该模块暂无说明。上面的标签可以看出它的用途。</string>
+
+	<string name="menu_response">响应</string>
+	<string name="latency_explain">应用会在声音送到扬声器之前先准备一小段。准备得多更稳妥，准备得少则对你的手指反应更快。其余无需设置，应用会自行判断。</string>
+	<string name="latency_play">我在演奏</string>
+	<string name="latency_play_note">立即响应。偶尔可能出现爆音。</string>
+	<string name="latency_balanced">平衡</string>
+	<string name="latency_balanced_note">默认选项。适合大多数手机。</string>
+	<string name="latency_listen">我在聆听</string>
+	<string name="latency_listen_note">不会爆音。声音会稍晚一点到达。</string>
 </resources>

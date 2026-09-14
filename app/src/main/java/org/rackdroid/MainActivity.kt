@@ -178,6 +178,10 @@ class MainActivity : NativeActivity() {
 		// while backgrounded.
 		RackService.start(this)
 
+		// The audio side starts on its balanced default; tell it what this
+		// install actually chose before anything is played through it.
+		applyLatencyMode()
+
 		addMidiButton()
 		initMidi()
 		handleImportIntent(intent)
@@ -1482,6 +1486,107 @@ class MainActivity : NativeActivity() {
 	 * 0 = guide sheet, 1 = tutorial library, 3 = the interface tour again.
 	 * Re-running the tour passes no done-flag: it is an explicit request, and
 	 * must not re-arm or clear the first-run state either way. */
+	/** The one audio question the engine cannot answer by measuring: how much
+	 * delay is worth trading for how much safety. It cannot know whether the
+	 * person holding the phone is playing a keyboard or building a patch and
+	 * listening, and those two want opposite things. Everything else about the
+	 * audio path is measured and decided automatically -- this is the
+	 * exception, which is why it is the only one that asks.
+	 *
+	 * The answer does not fix a size: it fixes how low the automatic tuning is
+	 * allowed to go. The engine keeps finding the best point inside the band
+	 * the user chose. */
+	fun showLatencyPickerFromNative() {
+		uiHandler.post { runCatching { showLatencyPicker() } }
+	}
+
+	private fun latencyMode(): Int =
+		getSharedPreferences(LATENCY_PREFS, Context.MODE_PRIVATE).getInt(LATENCY_KEY, 1)
+
+	/** Pushes the stored choice down to the audio side. Called at startup and
+	 * whenever it changes -- the native side keeps it in memory only, so Java
+	 * stays the single place it is remembered. */
+	fun applyLatencyMode() {
+		runCatching { nativeSetLatencyMode(latencyMode()) }
+	}
+
+	private fun showLatencyPicker() {
+		val current = latencyMode()
+		val labels = arrayOf(
+			getString(R.string.latency_play),
+			getString(R.string.latency_balanced),
+			getString(R.string.latency_listen))
+		val notes = arrayOf(
+			getString(R.string.latency_play_note),
+			getString(R.string.latency_balanced_note),
+			getString(R.string.latency_listen_note))
+		val col = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(20), dp(18), dp(20), dp(8))
+		}
+		col.addView(TextView(this).apply {
+			text = getString(R.string.menu_response)
+			setTextColor(AppTheme.current.accent)
+			textSize = 17f
+			setTypeface(AppFont.get(this@MainActivity), Typeface.BOLD)
+			setPadding(0, 0, 0, dp(10))
+		})
+		col.addView(TextView(this).apply {
+			text = getString(R.string.latency_explain)
+			setTextColor(AppTheme.current.textSecondary)
+			textSize = 14f
+			typeface = AppFont.get(this@MainActivity)
+			setPadding(0, 0, 0, dp(14))
+		})
+		lateinit var dlg: AlertDialog
+		for (i in labels.indices) {
+			col.addView(LinearLayout(this).apply {
+				orientation = LinearLayout.VERTICAL
+				setPadding(dp(6), dp(10), dp(6), dp(10))
+				background = amberRippleRounded()
+				addView(TextView(this@MainActivity).apply {
+					text = (if (i == current) "✔  " else "     ") + labels[i]
+					setTextColor(if (i == current) AppTheme.current.accent
+						else AppTheme.current.textPrimary)
+					textSize = 16f
+					setTypeface(AppFont.get(this@MainActivity),
+						if (i == current) Typeface.BOLD else Typeface.NORMAL)
+				})
+				addView(TextView(this@MainActivity).apply {
+					text = notes[i]
+					setTextColor(AppTheme.current.textSecondary)
+					textSize = 13f
+					typeface = AppFont.get(this@MainActivity)
+					setPadding(dp(28), dp(2), 0, 0)
+				})
+				setOnClickListener {
+					getSharedPreferences(LATENCY_PREFS, Context.MODE_PRIVATE)
+						.edit().putInt(LATENCY_KEY, i).apply()
+					applyLatencyMode()
+					Toast.makeText(this@MainActivity, labels[i], Toast.LENGTH_SHORT).show()
+					dlg.dismiss()
+				}
+			})
+		}
+		// Same glass card the theme picker uses. A default AlertDialog comes up
+		// white here, which put pale text on a pale background and made the
+		// third option unreadable; and in landscape the card has to scroll, or
+		// the last choice sits below the screen edge where it cannot be
+		// reached at all.
+		dlg = AlertDialog.Builder(this).create()
+		dlg.setView(ScrollView(this).apply { addView(col) })
+		trackTopWindow(dlg)
+		dlg.window?.apply {
+			setBackgroundDrawable(GradientDrawable().apply {
+				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
+				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+			})
+			setDimAmount(0.4f)
+		}
+		glassify(dlg.window)
+		dlg.show()
+	}
+
 	fun showHelpFromNative(which: Int) {
 		uiHandler.post {
 			runCatching {
@@ -1870,6 +1975,7 @@ class MainActivity : NativeActivity() {
 	private val ROW_PRESET_COPY = 2048
 	private val ROW_PRESET_PASTE = 4096
 	private val ROW_TOUR = 8192
+	private val ROW_LATENCY = 16384
 	// Rack's own fixed, non-localized markers (ui/common.hpp) for a
 	// submenu's current-value display and a checkbox's checked state.
 	private val RIGHT_ARROW = "▸"
@@ -2173,6 +2279,7 @@ class MainActivity : NativeActivity() {
 			text = when {
 				back -> "‹   " + getString(R.string.menu_back)
 				flags and ROW_SHARE != 0 -> getString(R.string.menu_share_patch)
+				flags and ROW_LATENCY != 0 -> getString(R.string.menu_response)
 				flags and ROW_GUIDE != 0 -> getString(R.string.menu_guide)
 				flags and ROW_WIZARD != 0 -> getString(R.string.menu_wizard)
 					flags and ROW_TOUR != 0 -> getString(R.string.menu_tour)
@@ -2313,6 +2420,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeRecordStop()
 	private external fun nativeHistoryAction(action: Int)
 	private external fun nativeSetLockMode(mode: Int)
+	private external fun nativeSetLatencyMode(mode: Int)
 	private external fun nativeSetMultiSelect(on: Boolean)
 	private external fun nativeCopySelection()
 	private external fun nativePasteSelection()
@@ -2484,6 +2592,8 @@ class MainActivity : NativeActivity() {
 	private external fun nativeMidiDeviceRemoved(id: Int)
 
 	companion object {
+		private const val LATENCY_PREFS = "audio"
+		private const val LATENCY_KEY = "latencyMode"
 		private const val MAX_PATCH_IMPORT_BYTES = 256L * 1024 * 1024
 		private const val MAX_MODULE_PACK_BYTES = 256L * 1024 * 1024
 		@Volatile private var activeActivity: WeakReference<MainActivity>? = null

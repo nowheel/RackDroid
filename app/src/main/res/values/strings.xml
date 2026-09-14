@@ -573,4 +573,13 @@
 	<string name="palette_no_matches">No module matches these filters</string>
 	<string name="palette_all_brands">All brands</string>
 	<string name="module_no_description">No description available for this module. The tags above hint at what it does.</string>
+
+	<string name="menu_response">Response</string>
+	<string name="latency_explain">The app keeps a little sound ready ahead of the speaker. A bigger head start is safer; a smaller one answers your fingers sooner. Nothing else needs setting — the app works out the rest on its own.</string>
+	<string name="latency_play">Playing</string>
+	<string name="latency_play_note">Answers immediately. An occasional click is possible.</string>
+	<string name="latency_balanced">Balanced</string>
+	<string name="latency_balanced_note">The default. Sensible on most phones.</string>
+	<string name="latency_listen">Listening</string>
+	<string name="latency_listen_note">Never clicks. The sound arrives a little later.</string>
 </resources>

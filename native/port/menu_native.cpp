@@ -84,6 +84,14 @@ enum RowFlag {
 	ROW_PRESET_PASTE = 4096,
 	// Synthetic Help row: run the first-run interface tour again.
 	ROW_TOUR = 8192,
+	// Synthetic Engine row: how much delay the user is willing to trade for
+	// safety. This is the one audio decision the engine cannot make for them
+	// -- everything else here is measured, but whether an occasional click
+	// matters more than the delay on every note is a preference, not a fact.
+	// It takes the place the Threads row used to occupy, which was the
+	// opposite case: a question with one right answer that the user had no
+	// way to know.
+	ROW_LATENCY = 16384,
 };
 
 
@@ -124,6 +132,7 @@ struct NativeMenu {
 	// present() appends the synthetic Share row to it.
 	bool fileMenuPending = false;
 	bool helpMenuPending = false;
+	bool engineMenuPending = false;
 	bool viewMenuPending = false;
 	bool sharePending = false;
 };
@@ -252,6 +261,16 @@ static void present(ui::Menu* menu) {
 		rights.push_back("");
 		flags.push_back(ROW_SHARE);
 	}
+	if (g.engineMenuPending && !menu->parentMenu) {
+		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
+		labels.push_back("");
+		rights.push_back("");
+		flags.push_back(ROW_SEPARATOR);
+		g.rows.push_back(Row(NULL, ROW_LATENCY));
+		labels.push_back("Response"); // localized in Java
+		rights.push_back("");
+		flags.push_back(ROW_LATENCY);
+	}
 	if (g.helpMenuPending && !menu->parentMenu) {
 		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
 		labels.push_back("");
@@ -320,6 +339,11 @@ static void handleSelect(int idx) {
 	if (row.flags & ROW_SHARE) {
 		g.sharePending = true;
 		closeAll();
+		return;
+	}
+	if (row.flags & ROW_LATENCY) {
+		closeAll();
+		nativeShowLatencyPicker();
 		return;
 	}
 	if (row.flags & (ROW_GUIDE | ROW_WIZARD | ROW_WIZARD_PRO | ROW_TOUR)) {
@@ -407,6 +431,7 @@ static void processToolbarTap(app::Scene* scene) {
 		return;
 	g.fileMenuPending = (index == 0);
 	g.viewMenuPending = (index == 2);
+	g.engineMenuPending = (index == 3);
 	g.helpMenuPending = (index == 5);
 	// A toolbar menu is not a module's, whatever the last long press opened.
 	g.moduleMenuActive = false;

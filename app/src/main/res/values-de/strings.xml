@@ -534,4 +534,13 @@
 	<string name="t30_s4">Sperr das Patch (🔒), dimm das Licht, lass es laufen. Alle paar Minuten EIN Regler, EIN Millimeter.</string>
 	<string name="t30_s5">Nimm 10 Minuten auf (⏺). Irgendwo darin steckt das Intro deines Albums.</string>
 	<string name="t30_s6">Der Drone lehrt die tiefste Lektion: im Modularen geht es ums Hören, nicht ums Spielen.</string>
+
+	<string name="menu_response">Reaktion</string>
+	<string name="latency_explain">Die App hält etwas Ton bereit, bevor er zum Lautsprecher geht. Ein größerer Vorlauf ist sicherer, ein kleinerer reagiert schneller auf deine Finger. Mehr musst du nicht einstellen — den Rest macht die App.</string>
+	<string name="latency_play">Ich spiele</string>
+	<string name="latency_play_note">Reagiert sofort. Gelegentliches Knacken möglich.</string>
+	<string name="latency_balanced">Ausgewogen</string>
+	<string name="latency_balanced_note">Die Vorgabe. Auf den meisten Geräten sinnvoll.</string>
+	<string name="latency_listen">Ich höre zu</string>
+	<string name="latency_listen_note">Kein Knacken. Der Ton kommt etwas später.</string>
 </resources>

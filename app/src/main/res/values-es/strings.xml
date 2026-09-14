@@ -534,4 +534,13 @@
 	<string name="t30_s4">Bloquea el parche (🔒), baja las luces y déjalo correr. Cada pocos minutos, UN mando, UN milímetro.</string>
 	<string name="t30_s5">Graba 10 minutos (⏺). En algún punto de ahí está la intro de tu disco.</string>
 	<string name="t30_s6">El drone enseña la lección más profunda: lo modular va de escuchar, no de tocar.</string>
+
+	<string name="menu_response">Respuesta</string>
+	<string name="latency_explain">La app mantiene algo de sonido listo antes del altavoz. Una reserva grande es más segura; una pequeña responde antes a tus dedos. No hay que ajustar nada más: del resto se encarga la app.</string>
+	<string name="latency_play">Estoy tocando</string>
+	<string name="latency_play_note">Responde al instante. Puede haber algún clic.</string>
+	<string name="latency_balanced">Equilibrado</string>
+	<string name="latency_balanced_note">La opción predeterminada. Va bien en casi todos los móviles.</string>
+	<string name="latency_listen">Estoy escuchando</string>
+	<string name="latency_listen_note">Sin clics. El sonido llega un poco más tarde.</string>
 </resources>
