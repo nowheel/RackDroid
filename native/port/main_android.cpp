@@ -141,40 +141,60 @@ struct RackDroidApp {
 			LOGE("settings corrupted, resetting: %s", e.what());
 		}
 		// Rack's own menus and dialogs -- File, Edit, View, every confirm --
-		// come from the translation files, which we ship for all seven
-		// languages. But settings::language starts at "en" and the only thing
-		// that ever changes it is Help > Language, buried two taps in. On an
-		// Italian phone that left the app half translated: our strings in
-		// Italian, Rack's in English, which is a mixture nobody chose.
+		// come from the translation files, which we ship for all seven languages.
+		// But settings::language starts at "en", and the only thing that ever
+		// changes it is Help > Language, buried two taps in. That left the app
+		// half translated on an Italian phone: our strings in Italian, Rack's in
+		// English, a mixture nobody chose. Seen on a real 8T, whose menu button
+		// said MOTORE while the rows inside it said "Performance meters".
 		//
-		// Default it from the device, once. The marker is written whatever
-		// happens -- including when the device speaks a language we do not
-		// ship -- so that Help > Language stays the last word ever after: a
-		// user who deliberately picks English must not be overruled on the
-		// next launch, and "the settings file has a language key" cannot tell
-		// us anything, since save() always writes one.
+		// The two halves follow different masters -- ours the Android resource
+		// locale, Rack's this setting -- so keeping them together means deciding
+		// which wins. Java knows, and nothing else does: it writes ui/lang if and
+		// only if the user picked a language from that menu. Empty therefore means
+		// no choice has ever been made, and following the device is not overruling
+		// anybody. A real choice is left alone -- and since making one moves BOTH
+		// halves, they cannot disagree afterwards.
+		//
+		// This replaces a one-shot marker file that recorded only THAT a default
+		// had been attempted, never what it found. A launch where the device
+		// language could not be read wrote the marker anyway and gave up for
+		// good, which is how a phone ends up permanently half-translated.
 		{
-			std::string marker = asset::user("language-defaulted");
-			// Only ever over the default. Existing installs have no marker, so
-			// without this the update would flip somebody who had gone and
-			// picked French on an English phone back to English, once.
-			if (!system::isFile(marker) && settings::language == "en") {
-				char code[3] = {0, 0, 0};
-				if (app->config)
-					AConfiguration_getLanguage(app->config, code);
-				std::string want(code);
+			std::string chosen = rackdroid::startupChosenLanguage();
+			char code[3] = {0, 0, 0};
+			if (app->config)
+				AConfiguration_getLanguage(app->config, code);
+			std::string device(code);
+			if (!chosen.empty()) {
+				if (settings::language != chosen) {
+					LOGI("Interface language: following the choice made in Help > "
+						"Language ('%s')", chosen.c_str());
+					settings::language = chosen;
+				}
+			}
+			else if (!device.empty()) {
+				bool shipped = false;
 				for (const std::string& have : string::getLanguages()) {
-					if (have == want) {
-						settings::language = want;
-						LOGI("Interface language defaulted to '%s' from the device",
-							want.c_str());
+					if (have == device) {
+						shipped = true;
 						break;
 					}
 				}
-				if (FILE* f = std::fopen(marker.c_str(), "w")) {
-					std::fputc('\n', f);
-					std::fclose(f);
+				if (shipped && settings::language != device) {
+					LOGI("Interface language: nobody has chosen one, following the "
+						"device ('%s')", device.c_str());
+					settings::language = device;
 				}
+				else if (!shipped) {
+					LOGI("Interface language: the device speaks '%s', which is not "
+						"one of the seven shipped; staying on '%s'",
+						device.c_str(), settings::language.c_str());
+				}
+			}
+			else {
+				LOGW("Interface language: could not read the device's own; staying "
+					"on '%s' and asking again next launch", settings::language.c_str());
 			}
 		}
 

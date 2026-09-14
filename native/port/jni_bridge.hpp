@@ -23,6 +23,11 @@ void setStartupOptions(bool safeMode, bool skipUserPlugins);
 bool startupSafeModeRequested();
 bool userPluginsDisabled();
 
+/** The language code the user explicitly picked in Help > Language, or empty
+if they never did. Only that menu ever writes it, so empty means "no choice",
+and the engine is then free to follow the device's own language. */
+std::string startupChosenLanguage();
+
 /** Shows the native (Android bottom-sheet) menu with the given rows.
 Non-blocking: taps are delivered back via the nativeMenuSelect JNI callback. */
 void nativeMenuShow(const std::vector<std::string>& labels,

@@ -232,6 +232,14 @@ class MainActivity : NativeActivity() {
 			.putInt("failures", failures)
 			.commit()
 		nativeSetStartupOptions(startupRecoveryActive, startupRecoveryActive)
+		// Only Help > Language ever writes this, so an empty value tells the
+		// engine that nobody has chosen and it may follow the device. Pushed
+		// here because startRack() reads it, and that runs on the render
+		// thread once the first window arrives -- well after this.
+		runCatching {
+			nativeSetChosenLanguage(
+				getSharedPreferences("ui", Context.MODE_PRIVATE).getString("lang", "") ?: "")
+		}
 	}
 
 	private fun markStartupReady() {
@@ -2381,6 +2389,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeUserPluginsLoaded()
 	private external fun nativeSetCableParkVisible(visible: Boolean)
 	private external fun nativeSetStartupOptions(safeMode: Boolean, skipUserPlugins: Boolean)
+	private external fun nativeSetChosenLanguage(code: String)
 
 	/** Called from native once the patch has been restored and the engine is
 	 * running. Building the model list needs every plugin registered, and the

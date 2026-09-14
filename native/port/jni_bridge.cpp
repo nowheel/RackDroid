@@ -256,6 +256,18 @@ void nativeShowHelp(int which) {
 }
 
 
+/** The language the user picked in Help > Language, or empty if they never
+picked one. Java is the only place that knows: it writes that preference and
+nothing else does, so an empty value here means "no choice has ever been
+made", which is exactly what startRack() needs in order to follow the device
+without ever overruling somebody. */
+static std::string g_chosenLanguage;
+
+std::string startupChosenLanguage() {
+	return g_chosenLanguage;
+}
+
+
 void nativeShowLatencyPicker() {
 	JNIEnv* env = getEnv();
 	if (!env || !midShowLatencyPicker)
@@ -528,6 +540,19 @@ extern "C" JNIEXPORT void JNICALL
 Java_org_rackdroid_MainActivity_nativeSetStartupOptions(JNIEnv* env, jobject thiz,
 		jboolean safeMode, jboolean skipUserPlugins) {
 	setStartupOptions(safeMode, skipUserPlugins);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rackdroid_MainActivity_nativeSetChosenLanguage(JNIEnv* env, jobject,
+		jstring jCode) {
+	if (!jCode) {
+		g_chosenLanguage.clear();
+		return;
+	}
+	const char* chars = env->GetStringUTFChars(jCode, NULL);
+	g_chosenLanguage = chars ? chars : "";
+	if (chars)
+		env->ReleaseStringUTFChars(jCode, chars);
 }
 
 /** MainActivity signals that loadUserPlugins() has finished, so the startup
