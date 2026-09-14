@@ -172,8 +172,16 @@ void adpfSetTargetNanos(int64_t nanos) {
 		return;
 	g_targetNanos = nanos;
 	if (!g_session) {
-		// Remembered; the session is created once threads arrive too.
-		openLocked();
+		// Remembered; the session is created once threads arrive too -- and
+		// this is a path that can create it, so it has to say so. It did not,
+		// and on the first device ever seen to grant a session (a Samsung A16,
+		// MediaTek MT6789, Android 16) the log recorded no refusal and no
+		// opening either: the fact had to be inferred from a later "deadline
+		// now" line, which only prints when a session exists. Inferring is not
+		// the same as being told.
+		if (openLocked())
+			ADPF_LOG("ADPF: hint session open for %zu threads, deadline %.2f ms",
+				g_tids.size(), g_targetNanos / 1e6);
 		return;
 	}
 	api().updateTarget(g_session, nanos);
