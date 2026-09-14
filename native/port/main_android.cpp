@@ -1318,6 +1318,105 @@ static float workerRunqueueWait() {
 }
 
 
+/** The other half of the block-size ladder: the way back down.
+
+checkBlockSizeOverload() doubles the block when nothing else is left, buying
+headroom with latency, and until now nothing ever undid it. So a block raised
+once -- possibly to compensate for a thread count we have since learned was
+wrong -- stayed raised for the life of the patch, because Rack saves the value
+into the .vcv. Both test phones were found sitting at 1024 frames for exactly
+that reason.
+
+What it costs is not small. Measured on an S22 at 1024 against 256, same patch,
+same moment: 38.5 ms of stream latency against 6.4, plus 21.3 ms of engine
+block against 5.3. Sixty milliseconds down to twelve, for no measurable CPU
+(223% against 215%) and three minutes without a single underrun. That is more
+latency than the fast audio path itself is worth on the devices that deny it.
+
+Unlike a thread change this is not free to try: changing the block closes and
+reopens the stream, roughly three quarters of a second of silence. So it is
+attempted only after a long quiet spell, never during a recording, and the wait
+doubles after each attempt that fails, so a device that genuinely needs a big
+block is asked at most a few times a session. */
+static void checkBlockSizeUnderload() {
+	static const int BLOCK_FLOOR = 128;
+	static double quietSince = 0.0;
+	static int32_t lastUnderruns = -1;
+	static double waitFor = 120.0;
+	static const double WAIT_MAX = 1800.0;
+	static int probedFrom = 0;
+
+	int current = rackdroid::audioBlockSize();
+	if (current <= 0)
+		return;
+	double now = system::getTime();
+	int32_t underruns = rackdroid::audioUnderrunCount();
+
+	// "Quiet" means not one underrun, not a tolerable few: this is the wrong
+	// thing to gamble a stream reopen on.
+	// Changing the block reopens the stream, and a reopen always costs a few
+	// underruns of its own. Judging the new size on those is judging it on the
+	// act of trying it -- the same mistake the thread tuner made with its own
+	// moves. Give the stream a few seconds to settle before believing anything
+	// it says. Without this the step down was condemned four seconds in, every
+	// time, and could never succeed.
+	if (rackdroid::audioSecondsSinceStreamOpen() < 5.0) {
+		lastUnderruns = underruns;
+		quietSince = now;
+		return;
+	}
+
+	if (underruns != lastUnderruns || !startupSettled()) {
+		lastUnderruns = underruns;
+		quietSince = now;
+		if (probedFrom > 0) {
+			// The step down did not hold. Go back, and ask less often.
+			LOGW("Engine: %d-frame block underran; back to %d", current, probedFrom);
+			rackdroid::audioSetBlockSize(probedFrom);
+			probedFrom = 0;
+			waitFor = (waitFor * 2.0 > WAIT_MAX) ? WAIT_MAX : waitFor * 2.0;
+			quietSince = 0.0;
+		}
+		return;
+	}
+
+	if (quietSince <= 0.0) {
+		quietSince = now;
+		return;
+	}
+	if (now - quietSince < waitFor)
+		return;
+
+	if (probedFrom > 0) {
+		// It held through a whole quiet spell. Keep it, and allow the next
+		// step down to be considered at the normal interval again.
+		LOGI("Engine: %d-frame block is holding; keeping the lower latency",
+			current);
+		probedFrom = 0;
+		waitFor = 120.0;
+		quietSince = now;
+		return;
+	}
+
+	if (current / 2 < BLOCK_FLOOR)
+		return; // as low as this is willing to go
+	if (rackdroid::audioIsRecording())
+		return; // a reopen is a hole in the take; latency can wait
+	if (!g_threadTunerExhausted && settings::threadCount > 0) {
+		// Only while the thread side is settled, so two mechanisms are not
+		// moving at once and neither can read the other's cost as its own.
+		if (rackdroid::audioUnderrunsRecently())
+			return;
+	}
+	LOGI("Engine: quiet for %.0fs at a %d-frame block; trying %d for lower "
+		"latency", now - quietSince, current, current / 2);
+	probedFrom = current;
+	rackdroid::audioSetBlockSize(current / 2);
+	quietSince = 0.0;
+	lastUnderruns = rackdroid::audioUnderrunCount();
+}
+
+
 static void checkMaxedOutOverload() {
 	// Sample first and unconditionally: the share is a delta between two
 	// readings a couple of seconds apart, so it has to be taken while nothing
@@ -1438,10 +1537,12 @@ void android_main(android_app* app) {
 				checkWorkerPriority();
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
+				rackdroid::audioReportLatency();
 				checkAdpfTarget();
 				rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 				checkThreadCount();
 				checkBlockSizeOverload();
+				checkBlockSizeUnderload();
 
 				// The rest needs a surface: input, the scene, a dialog to
 				// show, or a restart the user would not see coming.

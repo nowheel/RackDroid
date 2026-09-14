@@ -742,6 +742,43 @@ void audioReleaseIdleDevice() {
 }
 
 
+/** Logs the stream's real round-trip latency, once per stream, a few seconds
+after it opens. Everything said about latency here until now has been arithmetic
+on block sizes; Oboe can ask the stream itself, and a timestamp needs the stream
+to have been running a moment to be available. Worth knowing precisely, because
+the two terms are not the same kind of problem: the sharing mode is the
+device's decision and nothing here can change it, while the block size is ours
+and is the larger of the two on every device measured so far. */
+void audioReportLatency() {
+	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
+		return;
+	static double reportedFor = -1.0;
+	if (g_lastStreamOpen <= 0.0 || reportedFor == g_lastStreamOpen)
+		return;
+	if (rack::system::getTime() - g_lastStreamOpen < 4.0)
+		return; // no timestamps yet
+	auto result = g_driver->device->outputStream->calculateLatencyMillis();
+	if (!result) {
+		reportedFor = g_lastStreamOpen; // do not ask again for this stream
+		AUDIO_WARN("Oboe: the stream will not report its latency (%s)",
+			oboe::convertToText(result.error()));
+		return;
+	}
+	reportedFor = g_lastStreamOpen;
+	int block = g_driver->device->getBlockSize();
+	float rate = g_driver->device->getSampleRates().empty()
+		? 48000.f : (float) g_driver->device->getSampleRate();
+	// Two separate terms, not one inside the other: the stream's own latency
+	// is what Oboe measures, and the engine's block is time spent before a
+	// sample ever reaches it. Saying "of which" here was wrong, and on this
+	// hardware obviously so -- the block alone came out larger than the whole
+	// stream latency it was supposed to be part of.
+	AUDIO_WARN("Oboe: measured stream latency %.1f ms; the engine's %d-frame "
+		"block adds %.1f ms on top of it",
+		result.value(), block, rate > 0.f ? block / rate * 1000.f : 0.f);
+}
+
+
 bool audioIsRecording() {
 	return gRecorder.active.load();
 }

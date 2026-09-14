@@ -38,6 +38,10 @@ the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */
 void audioReportUnderruns();
 
+/** Logs the stream's real round-trip latency once per stream, a few seconds
+after it opens (a timestamp is not available before then). Frame loop only. */
+void audioReportLatency();
+
 /** The audio callback thread's id, or 0 before the first callback has run.
 Only that thread can read it, so it publishes it the first time round. */
 int audioCallbackThreadTid();
