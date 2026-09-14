@@ -925,13 +925,21 @@ void audioTrimBuffer() {
 	static int32_t lastTrimmedTo = 0;
 	static int regrowths = 0;
 	static int32_t learnedFloor = 0;
+	static int32_t observedRegrowth = 0;
 	if (lastTrimmedTo > 0 && size > lastTrimmedTo) {
 		regrowths++;
+		// Settle at the size the device itself grew to, not at double the one
+		// that failed. Oboe's tuner picks what it actually needs; doubling
+		// overshoots it -- on an 8T that meant 1536 frames where 1152 was
+		// enough, eight milliseconds thrown away for nothing.
+		if (size > observedRegrowth)
+			observedRegrowth = size;
 		if (regrowths >= 3) {
-			learnedFloor = lastTrimmedTo * 2;
+			learnedFloor = observedRegrowth;
 			regrowths = 0;
 			AUDIO_WARN("Oboe: the buffer keeps being grown back from %d frames; "
-				"settling at %d instead", lastTrimmedTo, learnedFloor);
+				"settling at the %d this device asks for", lastTrimmedTo,
+				learnedFloor);
 		}
 	}
 
