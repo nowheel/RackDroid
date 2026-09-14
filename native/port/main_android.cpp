@@ -827,6 +827,14 @@ static void checkAdpfTarget() {
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
 	static int scores[MAX_TRACKED_THREADS + 1];
+	// When each score was taken. A measurement describes the conditions it was
+	// made under, and those expire: scores collected while another app was
+	// eating the phone become lies the moment it stops. Without this the engine
+	// could park for good on a rung chosen under conditions that no longer
+	// exist -- seen doing exactly that on an S22, stuck at seven threads and
+	// thirty underruns a second for four minutes after an artificial load was
+	// removed, because every alternative had been scored during it.
+	static double scoreAt[MAX_TRACKED_THREADS + 1];
 	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static bool initialised = false;
 	static int settledAt = -1;
@@ -855,8 +863,10 @@ static void checkThreadCount() {
 	int32_t total = rackdroid::audioUnderrunCount();
 
 	if (!initialised) {
-		for (int i = 0; i <= MAX_TRACKED_THREADS; i++)
+		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {
 			scores[i] = -1;
+			scoreAt[i] = 0.0;
+		}
 		bool shared = rackdroid::audioIsSharedMode();
 		int want;
 		const char* why;
@@ -926,6 +936,16 @@ static void checkThreadCount() {
 		windowTouched = true;
 	if (rackdroid::audioSecondsSinceStreamOpen() < WINDOW_SEC)
 		windowTouched = true;
+	// The fourth disturbance is the tuner itself. Changing the count makes
+	// Engine::stepBlock relaunch its workers, and that costs underruns of its
+	// own -- so the window right after a move carries the price of the move.
+	// A settled engine never notices; a moving one measures nothing else, and
+	// feeds on it: it moves, the move underruns, the underruns move it again.
+	// Measured on an S22 with the ladder thrashing, the same rung scored 10 in
+	// one window and 451 in the next. So each move marks the window that
+	// follows it (the flag is set beside every write to threadCount below),
+	// which costs one window of patience per rung and buys a number that means
+	// something.
 
 	if (now - windowStartedAt < WINDOW_SEC)
 		return;
@@ -965,8 +985,19 @@ static void checkThreadCount() {
 		return; // and do not record it as this rung's score
 	}
 
-	if (current >= 1 && current <= MAX_TRACKED_THREADS)
+	if (current >= 1 && current <= MAX_TRACKED_THREADS) {
 		scores[current] = underruns;
+		scoreAt[current] = now;
+	}
+
+	// A score is only evidence while the conditions that produced it still
+	// hold. Past this, treat the rung as never measured and let the search go
+	// and look again -- which is what breaks the deadlock described above.
+	static const double SCORE_TTL_SEC = 60.0;
+	auto known = [&](int i) {
+		return i >= 1 && i <= MAX_TRACKED_THREADS && scores[i] >= 0
+			&& now - scoreAt[i] < SCORE_TTL_SEC;
+	};
 
 	// Clean at a count that is more than it needs is not a happy ending. The
 	// ladder only ever moves when it underruns, so once something transient --
@@ -1006,14 +1037,22 @@ static void checkThreadCount() {
 			probeAfter = PROBE_AFTER_MIN;
 		}
 		int lower = current - 1;
+		// Same staleness rule as the search: a rung is worth probing if it was
+		// never measured, measured clean, or measured so long ago that the
+		// conditions have moved on. Reading scores[] raw here instead cost a
+		// real bug -- a rung scored badly while another app was hogging the
+		// phone stayed "known bad" for the rest of the session, and the engine
+		// sat a rung higher than it needed to, for ever.
+		bool worthProbing = !known(lower) || scores[lower] == 0;
 		if (cleanSince > 0.0 && now - cleanSince >= probeAfter
-				&& lower >= floorCount && scores[lower] <= 0) {
+				&& lower >= floorCount && worthProbing) {
 			LOGI("Engine: clean at %d threads for %.0fs; trying %d to see if "
 				"fewer will do", current, now - cleanSince, lower);
 			probedFrom = current;
 			cleanSince = 0.0;
 			settledAt = -1;
 			settings::threadCount = lower;
+			windowTouched = true;
 		}
 		return;
 	}
@@ -1024,9 +1063,12 @@ static void checkThreadCount() {
 		// ladder wander, and wait longer before asking again.
 		LOGW("Engine: %d underruns in %.0fs at %d threads; %d it is, then",
 			underruns, WINDOW_SEC, current, probedFrom);
-		if (current >= 1 && current <= MAX_TRACKED_THREADS)
+		if (current >= 1 && current <= MAX_TRACKED_THREADS) {
 			scores[current] = underruns;
+			scoreAt[current] = now;
+		}
 		settings::threadCount = probedFrom;
+		windowTouched = true;
 		probedFrom = -1;
 		probeAfter = (probeAfter * 2.0 > PROBE_AFTER_MAX) ? PROBE_AFTER_MAX : probeAfter * 2.0;
 		return;
@@ -1035,11 +1077,12 @@ static void checkThreadCount() {
 
 	// An unmeasured neighbour first -- nearest, and downward before upward,
 	// since the barrier cost is the commoner problem on a phone. Exploration
-	// terminates because each count is only unmeasured once.
+	// terminates because each count is only unmeasured once, until its score
+	// goes stale.
 	int candidate = -1;
-	if (current - 1 >= floorCount && scores[current - 1] < 0)
+	if (current - 1 >= floorCount && !known(current - 1))
 		candidate = current - 1;
-	else if (current + 1 <= ceiling && scores[current + 1] < 0)
+	else if (current + 1 <= ceiling && !known(current + 1))
 		candidate = current + 1;
 	else {
 		// Everything nearby is known: go to the best of it, but only if it is
@@ -1048,7 +1091,7 @@ static void checkThreadCount() {
 		int best = current;
 		int32_t bestScore = underruns;
 		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
-			if (scores[i] >= 0 && scores[i] < bestScore) {
+			if (known(i) && scores[i] < bestScore) {
 				bestScore = scores[i];
 				best = i;
 			}
@@ -1065,6 +1108,7 @@ static void checkThreadCount() {
 		underruns, WINDOW_SEC, current, candidate);
 	g_threadTunerExhausted = false;
 	settings::threadCount = candidate;
+	windowTouched = true; // see below
 	// Setting it is all that is needed: Engine::stepBlock relaunches its
 	// workers from settings::threadCount on every block (Engine.cpp:572).
 }
