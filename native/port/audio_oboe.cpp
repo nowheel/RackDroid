@@ -803,7 +803,14 @@ void audioTrimBuffer() {
 		return;
 	static double quietSince = 0.0;
 	static int32_t lastUnderruns = -1;
-	static int32_t tooSmall = 0; // smallest size seen to underrun
+	// The smallest size seen to underrun, and when. It has to expire: a single
+	// underrun can come from anywhere -- a thread change, a patch edit, another
+	// app -- and treating one as a permanent verdict locked an 8T's buffer at
+	// its full 1536-frame capacity, 32 ms, for the rest of the session. Same
+	// lesson the thread tuner's scores had to learn.
+	static int32_t tooSmall = 0;
+	static double tooSmallAt = 0.0;
+	static const double TOO_SMALL_TTL = 300.0;
 
 	auto* stream = g_driver->device->outputStream.get();
 	int32_t burst = stream->getFramesPerBurst();
@@ -816,16 +823,36 @@ void audioTrimBuffer() {
 
 	if (underruns != lastUnderruns) {
 		bool first = lastUnderruns < 0;
+		int32_t added = first ? 0 : underruns - lastUnderruns;
 		lastUnderruns = underruns;
 		quietSince = now;
+
+		// One underrun is not evidence that the buffer is too small. On a
+		// device denied the fast audio path they arrive in ones and twos even
+		// when everything is fine -- an 8T does it about once a minute -- and
+		// treating each one as a verdict pinned its buffer at the full
+		// capacity within half a minute of every launch, twice over. Count
+		// them instead, and only act on a cluster. Same rule the thread tuner
+		// uses on its own windows.
+		static int32_t burstCount = 0;
+		static double burstSince = 0.0;
+		if (now - burstSince > 10.0) {
+			burstSince = now;
+			burstCount = 0;
+		}
+		burstCount += added;
+		if (burstCount < 4)
+			return;
+		burstCount = 0;
 		// Something went wrong at this size. Give the room back at once --
 		// this is the half that used to be missing -- and do not come below
 		// one step above it again.
-		if (!first && size > burst * 2 && rackdroid::audioSecondsSinceStreamOpen() > 5.0) {
-			if (tooSmall == 0 || size < tooSmall)
-				tooSmall = size;
-		}
-		if (!first && rackdroid::audioSecondsSinceStreamOpen() > 5.0) {
+		// Thirty seconds, not five. A stream that has just opened underruns
+		// while the patch loads and the thread tuner finds its feet, and on an
+		// 8T that turbulence outlasted a five-second guard: the growth path
+		// fired twenty seconds in and pinned the buffer at the full capacity
+		// before the engine had settled at all.
+		if (!first && rackdroid::audioSecondsSinceStreamOpen() > 30.0) {
 			int32_t want = size * 2;
 			int32_t cap = stream->getBufferCapacityInFrames();
 			if (want > cap)
@@ -833,8 +860,8 @@ void audioTrimBuffer() {
 			if (want > size) {
 				auto grown = stream->setBufferSizeInFrames(want);
 				if (grown) {
-					if (tooSmall == 0 || size < tooSmall)
-						tooSmall = size;
+					tooSmall = size;
+					tooSmallAt = now;
 					AUDIO_WARN("Oboe: underran at a %d-frame buffer; back up to "
 						"%d and no lower from here", size, grown.value());
 				}
@@ -853,6 +880,8 @@ void audioTrimBuffer() {
 	// Two bursts is the hard floor -- below that a callback has nowhere to be
 	// late -- and one step above whatever already failed is the learned one.
 	int32_t floorFrames = burst * 2;
+	if (tooSmall > 0 && now - tooSmallAt > TOO_SMALL_TTL)
+		tooSmall = 0; // old news; worth asking again
 	if (tooSmall > 0 && tooSmall * 2 > floorFrames)
 		floorFrames = tooSmall * 2;
 	if (size <= floorFrames)

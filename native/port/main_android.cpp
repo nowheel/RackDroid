@@ -1527,7 +1527,10 @@ void android_main(android_app* app) {
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
 				rackdroid::audioReportLatency();
-				rackdroid::audioTrimBuffer();
+				// Only once the engine has stopped thrashing about: the
+				// buffer means nothing while the patch is still loading.
+				if (startupSettled())
+					rackdroid::audioTrimBuffer();
 				checkAdpfTarget();
 				rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 				checkThreadCount();
