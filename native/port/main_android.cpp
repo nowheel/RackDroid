@@ -839,6 +839,15 @@ static void checkThreadCount() {
 	int ceiling = engineThreadCeiling();
 	if (ceiling <= 1)
 		return; // a single-core device has no choice to make
+
+	// Never walk down to one. One thread is no parallelism at all, and no
+	// measurement taken on any device has ever made it the best rung: on the
+	// 8T one and two were both clean, on the S22 one produced seventy-eight
+	// underruns in a window where two produced seven. Trying it gains nothing
+	// and occasionally costs five seconds of ruined audio, so the ladder
+	// stops at two wherever there are two to have.
+	int floorCount = (ceiling >= 2) ? 2 : 1;
+
 	if (rackdroid::audioBlockSize() <= 0)
 		return; // no audio device open yet: nothing to measure with
 
@@ -849,36 +858,38 @@ static void checkThreadCount() {
 		for (int i = 0; i <= MAX_TRACKED_THREADS; i++)
 			scores[i] = -1;
 		bool shared = rackdroid::audioIsSharedMode();
-		int remembered = rememberedThreadCount(ceiling);
-		int opening = shared ? 2 : ceiling;
-		int want = remembered > 0 ? remembered : opening;
-		const char* why = remembered > 0 ? "where it settled last time" : "first guess";
-
-		// On a Shared stream the memo does not get to raise the opening guess.
-		// The two mistakes are not equally priced there: guessing too high
-		// costs seconds of audible crackle -- an 8T opened at seven threads on
-		// a remembered count and took 28 underruns in the first window --
-		// while guessing too low costs one quiet window before the ladder
-		// climbs. And the memo carries no patch with it: a count that ran
-		// clean on a fifteen-module patch says nothing about the next one.
-		// Where Exclusive was granted the cliff is not there and the memo
-		// stands as written.
-		if (shared && want > opening) {
-			want = opening;
-			why = "capped for the Shared path, ignoring a higher memo";
+		int want;
+		const char* why;
+		if (shared) {
+			// A Shared stream opens low, always, whatever last time said. The
+			// two mistakes are not equally priced here: too high costs seconds
+			// of audible crackle -- an 8T opened at seven threads on a
+			// remembered count and took 28 underruns in the first window --
+			// while too low costs one quiet window before the ladder climbs.
+			// And a memo carries no patch with it: the count it recorded ran
+			// clean on whatever was loaded then, which on that device was a
+			// fifteen-module patch, and says nothing about the next one.
+			// So the memo gets no say at all on this path, rather than a say
+			// that is then taken away by a cap -- same result, but the code
+			// and the log then agree on what happened.
+			want = floorCount;
+			why = "the Shared path always opens low";
 		}
-		if (want > ceiling)
-			want = ceiling;
-		if (want < 2 && ceiling >= 2)
-			want = 2; // same floor the ladder keeps; covers a memo written before it
-		// A remembered count is one that ran a full window clean last time, so
-		// it starts trusted rather than on probation. Without this the first
-		// couple of stray underruns after a launch knocked the engine off the
-		// very count it had just been told was right, and it spent ten seconds
-		// walking back to it -- seen doing exactly that on the S22. Only where
-		// the memo was actually taken: a capped guess has proved nothing.
-		if (remembered > 0 && want == remembered && want <= MAX_TRACKED_THREADS)
-			provenClean[want] = true;
+		else {
+			// Exclusive: no such cliff, and walking the whole ladder from the
+			// ceiling costs ten to fifteen seconds of crackle at every launch.
+			// The memo is worth having here, and a count written there ran a
+			// full window clean, so it starts trusted rather than on probation.
+			int remembered = rememberedThreadCount(ceiling);
+			want = remembered > 0 ? remembered : ceiling;
+			why = remembered > 0 ? "where it settled last time" : "first guess";
+			if (want > ceiling)
+				want = ceiling;
+			if (want < floorCount)
+				want = floorCount;
+			if (want == remembered && want <= MAX_TRACKED_THREADS)
+				provenClean[want] = true;
+		}
 		LOGI("Engine: starting at %d threads (%s, %s audio path, %d-thread ceiling)",
 			want, why, shared ? "Shared" : "Exclusive", ceiling);
 		settings::threadCount = want;
@@ -956,14 +967,6 @@ static void checkThreadCount() {
 
 	if (current >= 1 && current <= MAX_TRACKED_THREADS)
 		scores[current] = underruns;
-
-	// Never walk down to one. One thread is no parallelism at all, and no
-	// measurement taken on any device has ever made it the best rung: on the
-	// 8T one and two were both clean, on the S22 one produced seventy-eight
-	// underruns in a window where two produced seven. Trying it gains nothing
-	// and occasionally costs five seconds of ruined audio, so the ladder
-	// stops at two wherever there are two to have.
-	int floorCount = (ceiling >= 2) ? 2 : 1;
 
 	// Clean at a count that is more than it needs is not a happy ending. The
 	// ladder only ever moves when it underruns, so once something transient --
