@@ -279,15 +279,40 @@ static std::string blockSizeMemoPath() {
 	return rack::asset::user("audio-blocksize");
 }
 
+/** Sizes below this one are known not to have held, so the step-down at
+startup does not try them again every launch. Zero means nothing is known.
+Stored beside the block size, cleared whenever the block size itself changes
+for any other reason -- a different patch, or the ladder moving -- because what
+failed was this size on that workload, not for ever. */
+static int g_driverBlockSize = 0;
+static int g_knownTooSmall = 0;
+
+int audioKnownTooSmallBlock() {
+	return g_knownTooSmall;
+}
+
+void audioNoteBlockTooSmall(int bs) {
+	g_knownTooSmall = bs;
+	if (g_driverBlockSize > 0) {
+		FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
+		if (f) {
+			std::fprintf(f, "%d %d\n", g_driverBlockSize, bs);
+			std::fclose(f);
+		}
+	}
+}
+
 static int rememberedBlockSize() {
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "r");
 	if (!f)
 		return DEFAULT_BLOCK_SIZE;
-	int v = 0;
-	bool ok = std::fscanf(f, "%d", &v) == 1;
+	int v = 0, tooSmall = 0;
+	int n = std::fscanf(f, "%d %d", &v, &tooSmall);
 	std::fclose(f);
+	if (n >= 2 && tooSmall >= 64 && tooSmall <= 4096 && (tooSmall & (tooSmall - 1)) == 0)
+		g_knownTooSmall = tooSmall;
 	// Only sizes Rack itself offers; anything else is a stale or corrupt file.
-	if (!ok || v < 64 || v > 4096 || (v & (v - 1)) != 0)
+	if (n < 1 || v < 64 || v > 4096 || (v & (v - 1)) != 0)
 		return DEFAULT_BLOCK_SIZE;
 	return v;
 }
@@ -296,7 +321,7 @@ static void rememberBlockSize(int bs) {
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
 	if (!f)
 		return;
-	std::fprintf(f, "%d\n", bs);
+	std::fprintf(f, "%d %d\n", bs, g_knownTooSmall);
 	std::fclose(f);
 }
 
@@ -531,6 +556,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		AUDIO_WARN("Oboe: block size %d -> %d", blockSize, bs);
 		closeStreams();
 		blockSize = bs;
+		g_driverBlockSize = bs;
 		rememberBlockSize(bs);
 		openStreams("block size changed");
 	}
@@ -749,6 +775,101 @@ to have been running a moment to be available. Worth knowing precisely, because
 the two terms are not the same kind of problem: the sharing mode is the
 device's decision and nothing here can change it, while the block size is ours
 and is the larger of the two on every device measured so far. */
+/** Walks the stream's buffer back down while nothing is going wrong, and back
+up the moment something does.
+
+Oboe's LatencyTuner only ever grows the buffer, and it grows it for any
+underrun -- including the burst every patch load produces. Measured on an S22:
+47 underruns in the first second after launch took the buffer from 192 frames
+to 2976 of a 3072 capacity, and there it stayed for the whole session. Sixty-two
+milliseconds of latency, bought in one second of startup turbulence and paid for
+hours.
+
+Unlike the block size this costs nothing to change: the buffer is a live
+property of a running stream, not a construction parameter, so there is no
+reopen and no gap in either direction.
+
+The first version of this leaned on the LatencyTuner to grow the buffer back if
+the trim went too far. That was wrong, and the device said so: trimmed to two
+bursts, the S22 ran clean for three minutes and then underran twenty-eight
+times with the buffer still sitting at 192 -- the tuner had already reached the
+capacity ceiling earlier in the session and stopped tuning for good. Taking the
+safety net away without putting another one up is not a trade, it is a
+regression. So this owns both directions now, and remembers the size that did
+not hold so it stops one step above it rather than rediscovering it in a
+loop. */
+void audioTrimBuffer() {
+	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
+		return;
+	static double quietSince = 0.0;
+	static int32_t lastUnderruns = -1;
+	static int32_t tooSmall = 0; // smallest size seen to underrun
+
+	auto* stream = g_driver->device->outputStream.get();
+	int32_t burst = stream->getFramesPerBurst();
+	if (burst <= 0)
+		return;
+	int32_t size = stream->getBufferSizeInFrames();
+	int32_t underruns = g_totalUnderruns.load(std::memory_order_relaxed);
+	double now = rack::system::getTime();
+	float rate = (float) g_driver->device->getSampleRate();
+
+	if (underruns != lastUnderruns) {
+		bool first = lastUnderruns < 0;
+		lastUnderruns = underruns;
+		quietSince = now;
+		// Something went wrong at this size. Give the room back at once --
+		// this is the half that used to be missing -- and do not come below
+		// one step above it again.
+		if (!first && size > burst * 2 && rackdroid::audioSecondsSinceStreamOpen() > 5.0) {
+			if (tooSmall == 0 || size < tooSmall)
+				tooSmall = size;
+		}
+		if (!first && rackdroid::audioSecondsSinceStreamOpen() > 5.0) {
+			int32_t want = size * 2;
+			int32_t cap = stream->getBufferCapacityInFrames();
+			if (want > cap)
+				want = cap;
+			if (want > size) {
+				auto grown = stream->setBufferSizeInFrames(want);
+				if (grown) {
+					if (tooSmall == 0 || size < tooSmall)
+						tooSmall = size;
+					AUDIO_WARN("Oboe: underran at a %d-frame buffer; back up to "
+						"%d and no lower from here", size, grown.value());
+				}
+			}
+		}
+		return;
+	}
+
+	if (quietSince <= 0.0) {
+		quietSince = now;
+		return;
+	}
+	if (now - quietSince < 20.0)
+		return;
+
+	// Two bursts is the hard floor -- below that a callback has nowhere to be
+	// late -- and one step above whatever already failed is the learned one.
+	int32_t floorFrames = burst * 2;
+	if (tooSmall > 0 && tooSmall * 2 > floorFrames)
+		floorFrames = tooSmall * 2;
+	if (size <= floorFrames)
+		return;
+	int32_t want = size / 2;
+	if (want < floorFrames)
+		want = floorFrames;
+	auto result = stream->setBufferSizeInFrames(want);
+	if (!result)
+		return;
+	AUDIO_WARN("Oboe: quiet for %.0fs; buffer %d -> %d frames (%.1f ms less "
+		"latency, no gap)", now - quietSince, size, result.value(),
+		rate > 0.f ? (size - result.value()) / rate * 1000.f : 0.f);
+	quietSince = now;
+}
+
+
 void audioReportLatency() {
 	if (!g_driver || !g_driver->device || !g_driver->device->outputStream)
 		return;

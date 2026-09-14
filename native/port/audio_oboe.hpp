@@ -42,6 +42,12 @@ void audioReportUnderruns();
 after it opens (a timestamp is not available before then). Frame loop only. */
 void audioReportLatency();
 
+/** Walks the stream buffer back down while the stream is quiet. Oboe's tuner
+only ever grows it, including for the underruns every patch load makes, and
+never gives that latency back. Changing it does NOT reopen the stream, so this
+costs no gap -- and if it goes too far the tuner grows it again by itself. */
+void audioTrimBuffer();
+
 /** The audio callback thread's id, or 0 before the first callback has run.
 Only that thread can read it, so it publishes it the first time round. */
 int audioCallbackThreadTid();
@@ -56,6 +62,14 @@ roughly half a second of callbacks, which in a recording is a hole in the file
 with nothing to mark it -- so the block-size ladder waits for the recording to
 finish rather than spending the user's take on headroom. */
 bool audioIsRecording();
+
+/** A block size already found not to hold on this install, or 0. Kept beside
+the remembered block size so the step-down at startup does not spend a stream
+reopen rediscovering the same answer on every launch. */
+int audioKnownTooSmallBlock();
+
+/** Records that this block size did not hold. */
+void audioNoteBlockTooSmall(int bs);
 
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
