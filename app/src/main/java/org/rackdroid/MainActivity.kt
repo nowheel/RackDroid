@@ -221,7 +221,21 @@ class MainActivity : NativeActivity() {
 		val prefs = getSharedPreferences("startup_recovery", Context.MODE_PRIVATE)
 		val now = System.currentTimeMillis()
 		val previousIncomplete = prefs.getBoolean("in_progress", false)
-		val recent = now - prefs.getLong("started_at", 0L) <= 5 * 60 * 1000L
+		// A day, not five minutes. The window exists so that killing the app
+		// from the task switcher does not accumulate into a false "this keeps
+		// failing" verdict months later -- a real concern, and the reason it
+		// is bounded at all. Five minutes, though, is the rhythm of a crash
+		// loop, not the rhythm of a person: someone whose app hangs waits out
+		// the "isn't responding" dialog, closes it, goes to look something up,
+		// and tries again ten minutes later. At that pace the counter reset to
+		// zero on every attempt and the recovery launch never armed.
+		//
+		// That is what happened to the one tester whose device this has broken
+		// on: told to open it three times in a row, he reported it still would
+		// not open. The safety net was very probably never reached. A failure
+		// to arm the net is worse than the fault the net was built to cover,
+		// because it is the thing that was supposed to make faults survivable.
+		val recent = now - prefs.getLong("started_at", 0L) <= 24 * 60 * 60 * 1000L
 		val failures = if (previousIncomplete && recent)
 			(prefs.getInt("failures", 0) + 1).coerceAtMost(3)
 		else 0
@@ -243,10 +257,18 @@ class MainActivity : NativeActivity() {
 	}
 
 	private fun markStartupReady() {
+		// commit(), not apply(). apply() hands the write to a background thread
+		// and returns, and this particular write is the record that a launch
+		// reached the end -- so the moment it is most likely to be lost is a
+		// process that dies shortly after starting, which is exactly the case
+		// it exists to describe. A successful launch would then be counted as
+		// a failure on the next one. It is one small write on a thread that
+		// has just finished the whole of startup; the wait costs nothing worth
+		// having, and prepareStartupRecovery() already commits its own.
 		getSharedPreferences("startup_recovery", Context.MODE_PRIVATE).edit()
 			.putBoolean("in_progress", false)
 			.putInt("failures", 0)
-			.apply()
+			.commit()
 	}
 
 	private fun showStartupRecoveryDialog() {
