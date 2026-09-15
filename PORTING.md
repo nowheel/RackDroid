@@ -129,6 +129,18 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   synth Oboe commerciale. Non esiste API, flag di manifest o impostazione per
   entrarci. Escluse come cause: Bluetooth, altre app che tengono il device,
   audio focus, capacità MMAP del device (`isMMapSupported()` = 1), Dolby Atmos.
+- **Le callback vanno allineate alla raffica del dispositivo.** Rack offre i
+  block size in potenze di due perché è così che lavora l'hardware audio da
+  scrivania. I telefoni non sono d'accordo: sia un S22 sia un Nothing A024
+  dichiarano una raffica da **96 frame**, quindi una callback da 512 ne
+  attraversa 5,33 e cade sempre a metà. Ogni altro numero nel log dello stream è
+  un multiplo di 96 — il buffer da 192 con cui apre, i 2976 a cui cresce — e il
+  nostro era l'unico che non lo era. `alignToBurst()` in `audio_oboe.cpp` chiede
+  il numero intero di raffiche più vicino (512 → 480, 1024 → 1056); il motore
+  non se ne accorge, `onAudioReady()` processa qualunque conteggio riceva, e il
+  block size scelto dall'utente resta quello. La raffica è leggibile solo da uno
+  stream già aperto, quindi la prima apertura su un dispositivo mai visto paga
+  una riapertura e il valore finisce in un memo accanto al block size.
 - **Con `Shared`, più thread peggiorano l'audio.** `Engine_stepFrame()`
   sincronizza ogni worker a due barriere di spin **per sample**: il costo cresce
   col numero di thread, non con la patch. Sull'8T, stessa patch: 1–2 thread
@@ -139,10 +151,54 @@ Obiettivo: vedere il rack renderizzato e interagirci.
 - **Quindi i thread non sono più un'impostazione utente.** La riga sparisce dal
   menu Engine (filtrata in `menu_native.cpp` per etichetta tradotta; upstream
   intatto) e una sola funzione (`checkThreadCount()` in `main_android.cpp`)
-  possiede il numero. La prima ipotesi viene dallo sharing mode (Exclusive →
-  ceiling, Shared → 2), poi sale e scende in base agli underrun misurati. Le
-  finestre che contengono un tocco vengono scartate, e così i primi cinque
-  secondi: caricare una patch o riaprire lo stream non è una misura.
+  possiede il numero. Si parte dal memo se c'è, altrimenti **dal pavimento**,
+  e si sale solo se la patch lo richiede; poi si sale e si scende in base a
+  quanto misurato. Le finestre che contengono un tocco vengono scartate, e così
+  i primi cinque secondi: caricare una patch o riaprire lo stream non è una
+  misura.
+- **Partire in alto è un errore udibile, partire in basso no.** La prima
+  ipotesi era il ceiling con Exclusive. Su un Nothing A024 (SM8735, api 36)
+  appena installato questo significava aprire a 7 thread su una patch di sette
+  moduli: **885 underrun e quarantacinque secondi** di scricchiolio continuo
+  prima di arrivare ai 2 che voleva davvero. I due errori non costano uguale —
+  troppo in alto lo sente l'utente, troppo in basso è una finestra tranquilla
+  con meno core del possibile — e in basso è anche la risposta più probabile su
+  un telefono, per via della barriera per campione.
+- **Misurare la scadenza, non aspettare gli underrun.** Un underrun è un evento
+  raro: giudicarci sopra un gradino costa cinque secondi. La stessa domanda al
+  contrario è continua — ogni callback deve produrre i suoi frame in
+  `numFrames / sampleRate` e quanto ne ha usato si sa appena ritorna, 47 volte
+  al secondo. `audioEngineLoadPeak()` in `audio_oboe.cpp` pubblica il picco (il
+  cronometraggio c'era già per ADPF, semplicemente non è più condizionato a una
+  sessione). Oltre il **115%** i frame durano meno di quanto ci mettono a
+  nascere, e la finestra si chiude lì invece di aspettarne la prova. Le finestre
+  di ricerca passano da 5 s a 1,5 s e i punteggi si normalizzano a una durata
+  comune, altrimenti non sarebbero confrontabili. Misurato su S22 con otto
+  cicli occupati a contendere i core: **la scala si percorre tutta in 2,8 s
+  invece di 25**. A riposo la lettura è 15–22% su una patch leggera, che è
+  anche il primo numero che questo progetto abbia su quanto margine resta.
+- **Tre trappole nella lettura del carico**, tutte trovate su hardware. È tempo
+  reale attorno a una callback, quindi: un verdetto di carico non può essere
+  scusato da una finestra disturbata (la prima finestra di ogni candidato porta
+  sempre la mossa che l'ha creata, e la guardia esistente buttava via la
+  rilevazione veloce proprio lì); va ignorato nei primi 0,4 s di finestra
+  (misurato **139%** su un gradino che poi girava pulito al 20% — erano i worker
+  che ripartivano) e finché lo stream non è su da 1,5 s (misurato **42705%** su
+  un gradino con *un* underrun, mezzo secondo dopo un `closeStreams` da 722 ms);
+  e un verdetto senza speranza vale un punteggio fisso, non la percentuale
+  grezza, perché `scores[]` confronta i gradini fra loro e un numero a cinque
+  cifre accanto a un conteggio a due cifre rende il confronto privo di senso.
+- **Un regolatore alla volta.** `checkBlockSizeStepDown()` scatta una volta per
+  lancio, una decina di secondi dopo l'avvio, e riapre lo stream. Finché la
+  ricerca dei thread durava quaranta secondi la sonda cadeva dentro; resa
+  veloce la ricerca, cadeva comunque dentro, e i due si addebitavano a vicenda
+  le riaperture: su un A024 appena installato il conteggio ha fatto
+  2 → 3 → 4 → 5 → 6 → 7 → 3 → 2 in nove secondi senza imparare niente di vero,
+  e la sonda ha concluso che 256 frame "non tengono" su prove che erano
+  interamente del regolatore dei thread. Ora aspetta `g_threadTunerSettled`.
+  Con l'ordine giusto, lo stesso telefono appena installato: **zero underrun**,
+  pulito a 2 thread al 15% della scadenza dopo 10,4 s, blocco sceso a 256 e
+  **13,6 ms** di latenza totale.
 - **Il regolatore deve diffidare delle proprie misure.** Ogni difetto trovato
   testando su S22 era della stessa natura: credeva a finestre che non erano
   misure. Ora ne scarta quattro tipi — quelle con un tocco, con un cambio di
