@@ -846,6 +846,21 @@ static void checkAdpfTarget() {
 
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
+	/** The window used while the search has not yet found a rung that runs
+	clean. Long enough that the count has been asked to do real work through
+	several dozen callbacks, short enough that walking a ladder is over before
+	anyone has finished looking at the screen. */
+	static const double SEARCH_WINDOW_SEC = 1.5;
+	/** Nothing is judged on less than this, however bad the load looks -- the
+	first callbacks after a thread count changes are the engine relaunching
+	its workers, not the engine running. */
+	static const double MIN_WINDOW_SEC = 0.4;
+	/** Past this share of the callback's deadline the count is not slow, it is
+	failing: the frames take longer to produce than they last. Above 100 rather
+	than at it, because a single scheduling hiccup can put one callback over
+	and the buffer absorbs it. */
+	static const int32_t LOAD_HOPELESS_PERCENT = 115;
+	static int32_t windowLoadPeak = 0;
 	static int scores[MAX_TRACKED_THREADS + 1];
 	// When each score was taken. A measurement describes the conditions it was
 	// made under, and those expire: scores collected while another app was
@@ -910,9 +925,25 @@ static void checkThreadCount() {
 			// ceiling costs ten to fifteen seconds of crackle at every launch.
 			// The memo is worth having here, and a count written there ran a
 			// full window clean, so it starts trusted rather than on probation.
+			// With no memo, open low and climb -- not high and walk down. The
+			// two mistakes are not priced the same. Opening too high is
+			// audible: a Nothing A024 opened at its seven-thread ceiling on a
+			// seven-module patch and produced 885 underruns over the 45
+			// seconds it took to walk down to the 2 it actually wanted, and
+			// every one of those was a click the owner heard. Opening too low
+			// is inaudible -- a quiet window or two of using fewer cores than
+			// the patch could have had, and the search climbs out of it the
+			// moment anything underruns.
+			//
+			// It is also the likelier answer. Rack's engine synchronises every
+			// worker at two spin barriers per SAMPLE, so on a phone extra
+			// workers regularly cost more in barrier traffic than they return
+			// in parallelism: measured on that A024, seven threads underran
+			// continuously and two ran clean at 14 ms.
 			int remembered = rememberedThreadCount(ceiling);
-			want = remembered > 0 ? remembered : ceiling;
-			why = remembered > 0 ? "where it settled last time" : "first guess";
+			want = remembered > 0 ? remembered : floorCount;
+			why = remembered > 0 ? "where it settled last time"
+				: "opening low and climbing if the patch needs it";
 			if (want > ceiling)
 				want = ceiling;
 			if (want < floorCount)
@@ -939,6 +970,8 @@ static void checkThreadCount() {
 		windowStartedAt = now;
 		windowStartCount = total;
 		windowTouched = false;
+		windowLoadPeak = 0;
+		rackdroid::audioEngineLoadPeak(); // discard; it measured the startup
 		return;
 	}
 
@@ -967,10 +1000,71 @@ static void checkThreadCount() {
 	// which costs one window of patience per rung and buys a number that means
 	// something.
 
-	if (now - windowStartedAt < WINDOW_SEC)
+	// How full the callback's deadline got during this window. Polled every
+	// frame and kept here rather than read once at the end, because reading it
+	// resets the peak: skipping a poll would throw away the spike it saw.
+	// Read every time regardless, so the peak never carries across windows --
+	// but only believe it once the window has had a moment to settle. The
+	// first callbacks of a window are the ones Engine::stepBlock spends
+	// relaunching its workers after the move that opened it, and one such
+	// callback reads well over its deadline: measured at 139% here, on a rung
+	// that was about to run clean at 20%. A peak remembers a single spike
+	// forever, so the spike has to be kept out rather than argued with.
+	int32_t loadNow = rackdroid::audioEngineLoadPeak();
+	if (loadNow > windowLoadPeak && now - windowStartedAt >= MIN_WINDOW_SEC)
+		windowLoadPeak = loadNow;
+
+	// Five seconds is the length of a window that has to prove a count is
+	// GOOD: underruns are rare events and a short quiet stretch proves
+	// nothing. Ruling a count OUT is a much easier question, and while the
+	// search is still looking for its first clean rung that is the only
+	// question being asked -- so ask it in a fraction of the time. This is
+	// what turns the A024's forty-five second walk into a few seconds.
+	double window = (settledAt < 0) ? SEARCH_WINDOW_SEC : WINDOW_SEC;
+
+	// And a count that cannot meet its deadline need not be waited out at all.
+	// Over 100% means the callback is already spending more time producing
+	// frames than the frames last: no quiet stretch is coming, whatever the
+	// underrun counter has managed to notice so far. One glance at this is
+	// worth a window of counting.
+	// Only ever used to rule a count OUT, never to declare one good, and that
+	// asymmetry is deliberate: the reading can come out too low (a stream that
+	// has just reopened barely calls back at all, and a peak of nothing was
+	// logged in exactly that state), and a too-low reading costs nothing --
+	// the window simply runs its full length and is judged on underruns, which
+	// is what every window did before this existed.
+	bool hopeless = settledAt < 0 && windowLoadPeak > LOAD_HOPELESS_PERCENT
+		&& now - windowStartedAt >= MIN_WINDOW_SEC;
+	if (!hopeless && now - windowStartedAt < window)
 		return;
 
-	int32_t underruns = total - windowStartCount;
+	double windowLen = now - windowStartedAt;
+	int32_t loadPeak = windowLoadPeak;
+	windowLoadPeak = 0;
+	int32_t rawUnderruns = total - windowStartCount;
+	// Scores from windows of different lengths are not comparable, and the
+	// search below does compare them. Carry them all in the same unit: what
+	// this window's rate would come to over a full-length one.
+	int32_t underruns = (windowLen > 0.01)
+		? (int32_t) (rawUnderruns * WINDOW_SEC / windowLen) : rawUnderruns;
+	// A window closed early on load alone can be genuinely free of underruns
+	// so far -- it was cut short precisely so nobody has to hear the ones that
+	// were coming. Score it on what the deadline said instead, or the rung
+	// records a clean sheet and the search comes straight back to it.
+	if (hopeless && underruns == 0) {
+		LOGW("Engine: %d threads used %d%% of the audio deadline -- it cannot "
+			"keep up; not waiting for the clicks to prove it",
+			settings::threadCount, loadPeak);
+		// Score it as plainly bad, not as the raw percentage. A blocked
+		// callback's wall time is unbounded -- 35153% was measured here, with
+		// eight busy loops fighting it for the cores -- and scores[] is
+		// compared rung against rung, so letting one rung carry a five-digit
+		// number while another carries a two-digit underrun count would make
+		// the comparison meaningless. All that needs preserving is the order:
+		// worse than any window that actually survived.
+		static const int32_t HOPELESS_SCORE = 1000;
+		underruns = HOPELESS_SCORE;
+	}
 	int current = settings::threadCount;
 	bool touched = windowTouched;
 	windowStartedAt = now;
@@ -985,18 +1079,28 @@ static void checkThreadCount() {
 	// single decision, crackling the whole time. A gesture cannot account for
 	// twenty-seven underruns in five seconds, so past that the window counts
 	// whatever else happened during it.
+	// A load verdict is never excused, however disturbed the window was. A
+	// touch, a rotation or the tuner's own last move all cost underruns; none
+	// of them makes the engine take longer to produce a block of frames than
+	// those frames last, for a second and a half without pause. And every
+	// candidate's first window carries the move that created it, so without
+	// this exemption the fast rejection would be thrown away exactly when it
+	// is most useful.
 	static const int32_t DISTURBANCE_EXCUSES = 10;
-	if (touched && underruns <= DISTURBANCE_EXCUSES) {
+	if (touched && !hopeless && underruns <= DISTURBANCE_EXCUSES) {
 		// Say so: a discarded window looks exactly like a tuner doing nothing,
 		// and telling those apart from a log file is otherwise guesswork.
 		if (underruns > 0)
-			LOGI("Engine: %d underruns in %.0fs at %d threads, but the window was "
-				"disturbed; not counting it", underruns, WINDOW_SEC, current);
+			LOGI("Engine: %d underruns in %.1fs at %d threads, but the window was "
+				"disturbed; not counting it", rawUnderruns, windowLen, current);
 		return; // measured the disturbance, not the patch
 	}
-	if (touched)
-		LOGW("Engine: %d underruns in %.0fs at %d threads -- too many to blame on "
-			"the disturbance in that window; counting it", underruns, WINDOW_SEC,
+	// Not when the verdict came from the deadline: the line above has already
+	// said why this window counts, and "0 underruns -- too many to blame on
+	// the disturbance" is a sentence that explains nothing to anybody.
+	if (touched && !hopeless)
+		LOGW("Engine: %d underruns in %.1fs at %d threads -- too many to blame on "
+			"the disturbance in that window; counting it", rawUnderruns, windowLen,
 			current);
 
 	// A few underruns in five seconds are as likely to be the phone as the
@@ -1013,8 +1117,8 @@ static void checkThreadCount() {
 	int32_t tolerance = proven ? 4 : 1;
 	if (underruns > 0 && underruns <= tolerance && toleratedRuns < TOLERATED_RUNS_MAX) {
 		toleratedRuns++;
-		LOGI("Engine: %d underruns in %.0fs at %d threads; ignoring (%d of %d, %s)",
-			underruns, WINDOW_SEC, current, toleratedRuns, TOLERATED_RUNS_MAX,
+		LOGI("Engine: %d underruns in %.1fs at %d threads; ignoring (%d of %d, %s)",
+			rawUnderruns, windowLen, current, toleratedRuns, TOLERATED_RUNS_MAX,
 			proven ? "this count has run clean before" : "too few to act on");
 		return; // and do not record it as this rung's score
 	}
@@ -1058,7 +1162,8 @@ static void checkThreadCount() {
 		if (current >= 1 && current <= MAX_TRACKED_THREADS)
 			provenClean[current] = true;
 		if (settledAt != current) {
-			LOGI("Engine: %d threads is running clean", current);
+			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
+				"at its worst)", current, loadPeak);
 			settledAt = current;
 			cleanSince = now;
 		}
@@ -1095,8 +1200,8 @@ static void checkThreadCount() {
 	if (probedFrom >= 0) {
 		// The probe cost us a window. Go straight back rather than letting the
 		// ladder wander, and wait longer before asking again.
-		LOGW("Engine: %d underruns in %.0fs at %d threads; %d it is, then",
-			underruns, WINDOW_SEC, current, probedFrom);
+		LOGW("Engine: %d underruns in %.1fs at %d threads; %d it is, then",
+			rawUnderruns, windowLen, current, probedFrom);
 		if (current >= 1 && current <= MAX_TRACKED_THREADS) {
 			scores[current] = underruns;
 			scoreAt[current] = now;
@@ -1138,8 +1243,8 @@ static void checkThreadCount() {
 		return; // nothing known to be better; stay where we are
 	}
 
-	LOGW("Engine: %d underruns in %.0fs at %d threads; trying %d",
-		underruns, WINDOW_SEC, current, candidate);
+	LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline); "
+		"trying %d", rawUnderruns, windowLen, current, loadPeak, candidate);
 	g_threadTunerExhausted = false;
 	settings::threadCount = candidate;
 	windowTouched = true; // see below

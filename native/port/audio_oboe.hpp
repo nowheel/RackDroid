@@ -33,6 +33,18 @@ to the narrower "the engine is out of CPU" signal above. Same threading
 contract: written by the audio thread, read by the render thread. */
 int32_t audioUnderrunCount();
 
+/** Peak percentage of the audio callback's deadline that producing its frames
+actually used, since this was last called -- reading it resets the peak, so
+there can only be one reader. 100 means a callback used every microsecond it
+had; above that the stream is already breaking.
+
+Unlike the underrun counters this is a continuous measurement, available 47
+times a second rather than whenever something goes wrong, which is what lets
+the thread search in main_android.cpp reject a count in a fraction of a second
+instead of waiting five for an underrun that may or may not arrive. Written by
+the audio thread, read by the render thread. */
+int32_t audioEngineLoadPeak();
+
 /** Writes any new underruns to the log. Call from the frame loop, never from
 the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */

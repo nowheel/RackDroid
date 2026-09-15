@@ -195,6 +195,31 @@ int32_t audioUnderrunCount() {
 	return g_totalUnderruns.load(std::memory_order_relaxed);
 }
 
+/** How full the callback's deadline was, as a percentage, peak since last read.
+
+An underrun is a rare event: to know whether a thread count works you have to
+wait long enough for one to happen, or not happen, and that is why the tuner's
+windows are five seconds and why walking down a ladder of them took an A024
+forty-five audible seconds to find its answer.
+
+This is the same question asked the other way round. Every callback has to
+produce `numFrames` frames in numFrames/sampleRate -- 21.3 ms at a 1024-frame
+block -- and how long it actually took is knowable the moment it finishes, 47
+times a second. 20% means four fifths of the budget was left over; 98% means
+the next jittery callback breaks; over 100% means the audio is already broken
+and no amount of waiting will make it otherwise. It answers in a single
+callback what counting underruns needs seconds to guess at.
+
+Peak, not mean: one late callback is what a listener hears, and an average
+over a window hides exactly the spikes that matter. Read-and-reset, so each
+reader gets the peak since it last looked -- there is only ever one reader,
+the tuner. */
+static std::atomic<int32_t> g_loadPeakPercent{0};
+
+int32_t audioEngineLoadPeak() {
+	return g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
+}
+
 /** When the last underrun happened, as rack::system::getTime(). */
 static std::atomic<double> g_lastUnderrunAt{0.0};
 
@@ -689,14 +714,14 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (g_audioThreadTid.load(std::memory_order_relaxed) == 0)
 			g_audioThreadTid.store(gettid(), std::memory_order_relaxed);
 
-		// Bracket the work ADPF is asked to make fit. CLOCK_MONOTONIC because
-		// that is what the API documents its durations against. Skipped
-		// entirely where no session exists -- most devices, as it turns out --
-		// so a refused session costs the callback nothing at all.
-		bool timing = adpfActive();
+		// Bracket the work ADPF is asked to make fit, and measure how much of
+		// the callback's own deadline it used. CLOCK_MONOTONIC because that is
+		// what the ADPF API documents its durations against, and because it is
+		// a vDSO read -- no syscall, no lock, nothing that can block -- which
+		// is the only reason it is allowed in here at all.
+		bool reportToAdpf = adpfActive();
 		timespec t0;
-		if (timing)
-			clock_gettime(CLOCK_MONOTONIC, &t0);
+		clock_gettime(CLOCK_MONOTONIC, &t0);
 
 		const float* input = NULL;
 		if (inputStream) {
@@ -716,11 +741,26 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		processBuffer(input, NUM_INPUTS, output, stream->getChannelCount(), numFrames);
 		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
 
-		if (timing) {
-			timespec t1;
-			clock_gettime(CLOCK_MONOTONIC, &t1);
-			adpfReportNanos((int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
-				+ (t1.tv_nsec - t0.tv_nsec));
+		timespec t1;
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		int64_t elapsed = (int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
+			+ (t1.tv_nsec - t0.tv_nsec);
+		if (reportToAdpf)
+			adpfReportNanos(elapsed);
+		// The deadline this callback had to meet. Taken from the frame count
+		// it was actually handed rather than from blockSize: the two differ
+		// wherever the callback is burst-aligned, and dividing by the wrong
+		// one would misreport the load by that ratio.
+		int32_t rate = stream->getSampleRate();
+		if (rate > 0 && numFrames > 0) {
+			int64_t deadline = (int64_t) numFrames * 1000000000LL / rate;
+			int32_t percent = (int32_t) (elapsed * 100 / deadline);
+			// Relaxed compare-exchange max: lock-free, and a lost race costs
+			// one sample of a peak that is sampled 47 times a second.
+			int32_t seen = g_loadPeakPercent.load(std::memory_order_relaxed);
+			while (percent > seen && !g_loadPeakPercent.compare_exchange_weak(
+					seen, percent, std::memory_order_relaxed))
+				;
 		}
 
 		return oboe::DataCallbackResult::Continue;
