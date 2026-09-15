@@ -788,6 +788,21 @@ opening guess it is underrunning on purpose, and the answer is usually three
 rungs away. */
 static bool g_threadTunerExhausted = false;
 
+/** Set the first time a thread count runs a window clean, and never cleared.
+Not a claim that the engine is settled NOW -- it is a claim that the opening
+search is over, which is the only thing anyone else needs to wait for.
+
+checkBlockSizeStepDown() below is the reader, and it learned this the hard way.
+It fires once per launch, roughly ten seconds in, and reopens the audio stream
+to try a smaller block. That used to land after the thread search had finished;
+now the search takes a couple of seconds, and on a freshly installed A024 the
+block probe landed in the middle of it instead. Two tuners moving at once, each
+charging the other's stream reopens to its own candidate: the thread count went
+2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 3 -> 2 in nine seconds, learned nothing true
+about any of them, and the block probe concluded 256 frames "does not hold"
+on evidence that was entirely the thread tuner's. One tuner moves at a time. */
+static bool g_threadTunerSettled = false;
+
 /* Where the tuner settled last time. Without it every launch re-walks the
 same ladder from the core ceiling, and on a device that grants Exclusive that
 is ten to fifteen seconds of audible crackle before each session starts --
@@ -860,6 +875,12 @@ static void checkThreadCount() {
 	than at it, because a single scheduling hiccup can put one callback over
 	and the buffer absorbs it. */
 	static const int32_t LOAD_HOPELESS_PERCENT = 115;
+	/** The reading is wall time around one callback, so a stream that is being
+	torn down and rebuilt underneath it produces a number that describes the
+	reopen and nothing else: 42705% of the deadline was logged against a rung
+	that had taken exactly one underrun, half a second after closeStreams()
+	spent 722 ms. Ignore the load until the stream has been up this long. */
+	static const double STREAM_SETTLE_SEC = 1.5;
 	static int32_t windowLoadPeak = 0;
 	static int scores[MAX_TRACKED_THREADS + 1];
 	// When each score was taken. A measurement describes the conditions it was
@@ -1011,7 +1032,8 @@ static void checkThreadCount() {
 	// that was about to run clean at 20%. A peak remembers a single spike
 	// forever, so the spike has to be kept out rather than argued with.
 	int32_t loadNow = rackdroid::audioEngineLoadPeak();
-	if (loadNow > windowLoadPeak && now - windowStartedAt >= MIN_WINDOW_SEC)
+	if (loadNow > windowLoadPeak && now - windowStartedAt >= MIN_WINDOW_SEC
+			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC)
 		windowLoadPeak = loadNow;
 
 	// Five seconds is the length of a window that has to prove a count is
@@ -1161,6 +1183,7 @@ static void checkThreadCount() {
 		toleratedRuns = 0;
 		if (current >= 1 && current <= MAX_TRACKED_THREADS)
 			provenClean[current] = true;
+		g_threadTunerSettled = true;
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
 				"at its worst)", current, loadPeak);
@@ -1524,6 +1547,9 @@ static void checkBlockSizeStepDown() {
 	// Early, but after the patch has loaded and applied its own value, and
 	// after the first seconds of underruns that mean nothing.
 	if (!startupSettled() || rackdroid::audioSecondsSinceStreamOpen() < 5.0)
+		return;
+	// And not while the thread search is still moving: see g_threadTunerSettled.
+	if (!g_threadTunerSettled)
 		return;
 	done = true;
 
