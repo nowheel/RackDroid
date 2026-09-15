@@ -131,12 +131,15 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   audio focus, capacità MMAP del device (`isMMapSupported()` = 1), Dolby Atmos.
 - **Le callback vanno allineate alla raffica del dispositivo.** Rack offre i
   block size in potenze di due perché è così che lavora l'hardware audio da
-  scrivania. I telefoni non sono d'accordo: sia un S22 sia un Nothing A024
-  dichiarano una raffica da **96 frame**, quindi una callback da 512 ne
-  attraversa 5,33 e cade sempre a metà. Ogni altro numero nel log dello stream è
-  un multiplo di 96 — il buffer da 192 con cui apre, i 2976 a cui cresce — e il
-  nostro era l'unico che non lo era. `alignToBurst()` in `audio_oboe.cpp` chiede
-  il numero intero di raffiche più vicino (512 → 480, 1024 → 1056); il motore
+  scrivania. I telefoni non sono d'accordo, e **non sono d'accordo fra loro**:
+  S22 e Nothing A024 dichiarano una raffica da **96 frame**, il OnePlus 8T da
+  **192**. Nessuno dei due divide 512, che ne attraversa rispettivamente 5,33 e
+  2,67 cadendo sempre a metà. Ogni altro numero nel log dello stream è un
+  multiplo della raffica — il buffer con cui apre, quello a cui cresce — e il
+  nostro era l'unico che non lo era. Non esiste quindi un valore giusto da
+  scrivere nel codice: va letto dal dispositivo.
+  `alignToBurst()` in `audio_oboe.cpp` chiede il numero intero di raffiche più
+  vicino (512 → 480 a 96, 512 → 576 a 192, 1024 → 1056); il motore
   non se ne accorge, `onAudioReady()` processa qualunque conteggio riceva, e il
   block size scelto dall'utente resta quello. La raffica è leggibile solo da uno
   stream già aperto, quindi la prima apertura su un dispositivo mai visto paga
@@ -168,7 +171,10 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   raro: giudicarci sopra un gradino costa cinque secondi. La stessa domanda al
   contrario è continua — ogni callback deve produrre i suoi frame in
   `numFrames / sampleRate` e quanto ne ha usato si sa appena ritorna, 47 volte
-  al secondo. `audioEngineLoadPeak()` in `audio_oboe.cpp` pubblica il picco (il
+  al secondo, ed è anche la prima misura diretta di quanto costa il percorso
+  Shared: stessa patch, **15–22%** su S22 e Nothing con Exclusive concesso,
+  **40%** sull'8T che passa dal mixer di AudioFlinger.
+  `audioEngineLoadPeak()` in `audio_oboe.cpp` pubblica il picco (il
   cronometraggio c'era già per ADPF, semplicemente non è più condizionato a una
   sessione). Oltre il **115%** i frame durano meno di quanto ci mettono a
   nascere, e la finestra si chiude lì invece di aspettarne la prova. Le finestre
