@@ -1557,9 +1557,19 @@ static void checkBlockSizeStepDown() {
 	if (want < BLOCK_FLOOR)
 		return;
 	if (want == rackdroid::audioKnownTooSmallBlock()) {
-		LOGI("Engine: %d frames is where this device settled; a %d-frame block "
-			"has already been tried and did not hold", current, want);
-		return;
+		int waiting = rackdroid::audioTooSmallLaunchesLeft();
+		if (waiting > 0) {
+			LOGI("Engine: %d frames is where this device settled; a %d-frame "
+				"block did not hold when it was last tried, and is worth "
+				"asking about again in %d %s", current, want, waiting,
+				waiting == 1 ? "launch" : "launches");
+			return;
+		}
+		// The verdict has served its time. What condemned the size may have
+		// been a passing disturbance rather than the device, and the only way
+		// to find out is to spend one reopen asking.
+		LOGI("Engine: %d frames did not hold the last time it was tried, but "
+			"that was several launches ago; asking again", want);
 	}
 	if (rackdroid::audioIsRecording())
 		return;

@@ -308,37 +308,96 @@ static std::string blockSizeMemoPath() {
 startup does not try them again every launch. Zero means nothing is known.
 Stored beside the block size, cleared whenever the block size itself changes
 for any other reason -- a different patch, or the ladder moving -- because what
-failed was this size on that workload, not for ever. */
+failed was this size on that workload, not for ever.
+
+"Not for ever" was the intention and not the behaviour. The verdict was written
+once and then believed for the life of the install, so a single passing
+disturbance -- another app, a thermal moment, a phone answering a call --
+condemned a block size permanently and every launch after it opened at a higher
+latency than the device needed. Observed on an S22 during this session's own
+testing: an artificial CPU load made 512 frames fail once, and the device then
+opened at 1024 on every launch afterwards with nothing able to undo it.
+
+So the verdict expires, the same way the thread tuner's scores do, and with the
+same doubling backoff: it is skipped for a few launches, then asked again, and
+a size that keeps failing is asked about progressively less often rather than
+never again. Counted in launches, not seconds -- the probe happens once per
+launch, so that is the unit in which "ask again later" actually means
+something, and it needs no clock that the user can change. */
 static int g_driverBlockSize = 0;
 static int g_knownTooSmall = 0;
+/** Launches still to skip before the verdict above is worth re-testing. */
+static int g_tooSmallSkips = 0;
+/** How many were skipped last time, so the next failure can ask for twice as
+many. Doubling from four: a size that genuinely does not suit the device is
+retried four launches later, then eight, and so on, and the cost of being wrong
+about it stays bounded at one stream reopen per retry. */
+static int g_tooSmallPenalty = 0;
+static const int TOO_SMALL_SKIPS_MIN = 4;
+static const int TOO_SMALL_SKIPS_MAX = 64;
+
+static void writeBlockSizeMemo() {
+	if (g_driverBlockSize <= 0)
+		return;
+	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
+	if (!f)
+		return;
+	std::fprintf(f, "%d %d %d %d\n", g_driverBlockSize, g_knownTooSmall,
+		g_tooSmallSkips, g_tooSmallPenalty);
+	std::fclose(f);
+}
 
 int audioKnownTooSmallBlock() {
 	return g_knownTooSmall;
 }
 
+int audioTooSmallLaunchesLeft() {
+	if (g_tooSmallSkips <= 0)
+		return 0;
+	g_tooSmallSkips--;
+	writeBlockSizeMemo();
+	return g_tooSmallSkips + 1; // what this launch was told to wait out
+}
+
 void audioNoteBlockTooSmall(int bs) {
+	// Failing again doubles the wait; failing a different size starts over.
+	if (bs == g_knownTooSmall && g_tooSmallPenalty > 0)
+		g_tooSmallPenalty = (g_tooSmallPenalty * 2 > TOO_SMALL_SKIPS_MAX)
+			? TOO_SMALL_SKIPS_MAX : g_tooSmallPenalty * 2;
+	else
+		g_tooSmallPenalty = TOO_SMALL_SKIPS_MIN;
 	g_knownTooSmall = bs;
-	if (g_driverBlockSize > 0) {
-		FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
-		if (f) {
-			std::fprintf(f, "%d %d\n", g_driverBlockSize, bs);
-			std::fclose(f);
-		}
-	}
+	g_tooSmallSkips = g_tooSmallPenalty;
+	writeBlockSizeMemo();
 }
 
 static int rememberedBlockSize() {
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "r");
 	if (!f)
 		return DEFAULT_BLOCK_SIZE;
-	int v = 0, tooSmall = 0;
-	int n = std::fscanf(f, "%d %d", &v, &tooSmall);
+	int v = 0, tooSmall = 0, skips = -1, penalty = 0;
+	int n = std::fscanf(f, "%d %d %d %d", &v, &tooSmall, &skips, &penalty);
 	std::fclose(f);
-	if (n >= 2 && tooSmall >= 64 && tooSmall <= 4096 && (tooSmall & (tooSmall - 1)) == 0)
+	if (n >= 2 && tooSmall >= 64 && tooSmall <= 4096 && (tooSmall & (tooSmall - 1)) == 0) {
 		g_knownTooSmall = tooSmall;
+		// A memo written before the verdict could expire carries no counts.
+		// Treat it as one that has just been made rather than one that has
+		// already served its time: the size did fail, once, and the point of
+		// this is to re-ask eventually, not immediately.
+		g_tooSmallSkips = (n >= 3 && skips >= 0 && skips <= TOO_SMALL_SKIPS_MAX)
+			? skips : TOO_SMALL_SKIPS_MIN;
+		g_tooSmallPenalty = (n >= 4 && penalty >= TOO_SMALL_SKIPS_MIN
+				&& penalty <= TOO_SMALL_SKIPS_MAX) ? penalty : TOO_SMALL_SKIPS_MIN;
+	}
 	// Only sizes Rack itself offers; anything else is a stale or corrupt file.
 	if (n < 1 || v < 64 || v > 4096 || (v & (v - 1)) != 0)
-		return DEFAULT_BLOCK_SIZE;
+		v = DEFAULT_BLOCK_SIZE;
+	// The size in use from here, which is what the memo has to be written with.
+	// Only setBlockSize() used to publish this, so on a launch where nothing
+	// changed the block size it stayed zero and every write was silently
+	// dropped -- the launch countdown then read 4 for ever, six launches
+	// running, which is how this was found.
+	g_driverBlockSize = v;
 	return v;
 }
 
@@ -395,11 +454,8 @@ static int alignToBurst(int bs, int burst) {
 }
 
 static void rememberBlockSize(int bs) {
-	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
-	if (!f)
-		return;
-	std::fprintf(f, "%d %d\n", bs, g_knownTooSmall);
-	std::fclose(f);
+	g_driverBlockSize = bs;
+	writeBlockSizeMemo();
 }
 
 

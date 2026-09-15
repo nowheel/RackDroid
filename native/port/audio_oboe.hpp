@@ -88,7 +88,19 @@ the remembered block size so the step-down at startup does not spend a stream
 reopen rediscovering the same answer on every launch. */
 int audioKnownTooSmallBlock();
 
-/** Records that this block size did not hold. */
+/** How many more launches that verdict is to be taken on trust, counting this
+one; 0 means it has served its time and the size is worth trying again.
+
+Calling this SPENDS one launch of the wait, so call it once per launch and only
+where the answer is about to be acted on. The verdict expires because it used
+to be permanent: one passing disturbance -- another app, a thermal moment --
+condemned a block size for the life of the install, and every launch after it
+opened at a higher latency than the device needed. A size that keeps failing is
+re-asked at four launches, then eight, and so on to a cap. */
+int audioTooSmallLaunchesLeft();
+
+/** Records that this block size did not hold, and starts (or doubles) the wait
+before it is tried again. */
 void audioNoteBlockTooSmall(int bs);
 
 /** The live Oboe device's current block size (frames per callback), or 0 if
