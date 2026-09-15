@@ -317,6 +317,58 @@ static int rememberedBlockSize() {
 	return v;
 }
 
+/** The device's own burst, remembered across launches.
+
+Rack offers block sizes in powers of two -- 64, 128, 256, 512, 1024 -- because
+that is what desktop audio hardware works in. Phones do not all agree. A Nothing
+A024 reports a 96-frame burst, so a 512-frame callback straddles 5.33 of them
+and every single callback lands mid-burst; the stream's own numbers in the log
+(buffer 192, later 2976) are multiples of 96, and ours was the one number that
+was not. On that device the result was continuous underruns that no amount of
+thread tuning touched -- dropping from seven workers to two changed nothing,
+which is the signature of a cost paid per callback rather than per sample.
+
+So ask for the nearest whole number of bursts instead. The engine does not care:
+onAudioReady() processes whatever frame count it is handed. The burst is only
+knowable after a stream is open, hence the memo: the first open on a new device
+may be misaligned, every one after it is not. */
+static std::string burstMemoPath() {
+	return rack::asset::user("audio-burst");
+}
+
+static int g_framesPerBurst = 0;
+
+static int rememberedBurst() {
+	FILE* f = std::fopen(burstMemoPath().c_str(), "r");
+	if (!f)
+		return 0;
+	int v = 0;
+	int n = std::fscanf(f, "%d", &v);
+	std::fclose(f);
+	if (n < 1 || v < 8 || v > 4096)
+		return 0;
+	return v;
+}
+
+static void rememberBurst(int burst) {
+	FILE* f = std::fopen(burstMemoPath().c_str(), "w");
+	if (!f)
+		return;
+	std::fprintf(f, "%d\n", burst);
+	std::fclose(f);
+}
+
+/** Rounds a block size to a whole number of bursts, never below one burst.
+A burst we do not know yet leaves the size alone. */
+static int alignToBurst(int bs, int burst) {
+	if (burst <= 0 || bs <= 0)
+		return bs;
+	int bursts = (bs + burst / 2) / burst;
+	if (bursts < 1)
+		bursts = 1;
+	return bursts * burst;
+}
+
 static void rememberBlockSize(int bs) {
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
 	if (!f)
@@ -361,8 +413,32 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	the sample rate settling, the block size being repaired, or the HAL
 	disconnecting underneath. Saying which removes the guesswork. */
 	void openStreams(const char* why) {
+		openStreamsLocked(why);
+		// The burst is only readable from an open stream, so the very first
+		// open on a device it has never seen can be misaligned. Learn it and
+		// take the one reopen; the memo means it happens once per install, not
+		// once per launch. See alignToBurst() for why this matters.
+		if (!realignTo)
+			return;
+		int aligned = realignTo;
+		realignTo = 0;
+		AUDIO_WARN("Oboe: %d-frame callbacks do not fit this device's %d-frame "
+			"burst; reopening at %d", blockSize, g_framesPerBurst, aligned);
+		closeStreams();
+		openStreamsLocked("burst alignment");
+	}
+
+	/** Set by openStreamsLocked when the stream it just opened turned out to be
+	misaligned with the device's burst, naming the size to use instead. */
+	int realignTo = 0;
+
+	void openStreamsLocked(const char* why) {
 		double t0 = rack::system::getTime();
 		std::lock_guard<std::mutex> lock(streamMutex);
+		realignTo = 0;
+		if (!g_framesPerBurst)
+			g_framesPerBurst = rememberedBurst();
+		int callbackFrames = alignToBurst(blockSize, g_framesPerBurst);
 
 		oboe::AudioStreamBuilder outBuilder;
 		outBuilder.setDirection(oboe::Direction::Output)
@@ -380,7 +456,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			->setChannelCount(NUM_OUTPUTS)
 			->setSampleRate((int) sampleRate)
 			->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
-			->setFramesPerDataCallback(blockSize)
+			->setFramesPerDataCallback(callbackFrames)
 			->setDataCallback(this)
 			->setErrorCallback(this);
 
@@ -391,6 +467,14 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		}
 		// The stream may have been opened with a different rate than requested.
 		sampleRate = outputStream->getSampleRate();
+
+		int burst = outputStream->getFramesPerBurst();
+		if (burst >= 8 && burst <= 4096 && burst != g_framesPerBurst) {
+			g_framesPerBurst = burst;
+			rememberBurst(burst);
+		}
+		if (alignToBurst(blockSize, g_framesPerBurst) != callbackFrames)
+			realignTo = alignToBurst(blockSize, g_framesPerBurst);
 
 		oboe::AudioStreamBuilder inBuilder;
 		inBuilder.setDirection(oboe::Direction::Input)
@@ -419,9 +503,9 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// a log full of underruns with no way to tell which rung of
 		// checkBlockSizeOverload()'s ladder was in effect at the time.
 		AUDIO_WARN("Oboe: openStreams took %.0f ms", (rack::system::getTime() - t0) * 1000.0);
-		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d burst=%d buffer=%d "
+		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d callback=%d burst=%d buffer=%d "
 			"capacity=%d sharing=%s performance=%s api=%s",
-			why, sampleRate, blockSize, outputStream->getFramesPerBurst(),
+			why, sampleRate, blockSize, callbackFrames, outputStream->getFramesPerBurst(),
 			outputStream->getBufferSizeInFrames(), outputStream->getBufferCapacityInFrames(),
 			oboe::convertToText(outputStream->getSharingMode()),
 			oboe::convertToText(outputStream->getPerformanceMode()),
@@ -895,14 +979,32 @@ void audioTrimBuffer() {
 			int32_t cap = stream->getBufferCapacityInFrames();
 			if (want > cap)
 				want = cap;
+			// The ask can be granted and still change nothing: the stream caps
+			// the buffer a burst below its capacity, so once size is already
+			// at that ceiling setBufferSizeInFrames() returns the size it
+			// already had. That counts as success, and the old code took it as
+			// one -- reprinting "back up to 2976 and no lower from here"
+			// fifteen times in a hundred milliseconds on a device that was
+			// underrunning continuously at its ceiling. Only a size that
+			// actually moved is news; the ceiling is worth saying once.
+			static int32_t capacityLoggedAt = 0;
 			if (want > size) {
 				auto grown = stream->setBufferSizeInFrames(want);
-				if (grown) {
+				if (grown && grown.value() > size) {
 					tooSmall = size;
 					tooSmallAt = now;
+					capacityLoggedAt = 0;
 					AUDIO_WARN("Oboe: underran at a %d-frame buffer; back up to "
 						"%d and no lower from here", size, grown.value());
+					return;
 				}
+			}
+			if (capacityLoggedAt != size) {
+				capacityLoggedAt = size;
+				AUDIO_WARN("Oboe: still underrunning at %d frames with the buffer "
+					"already at this device's %d-frame ceiling -- there is no "
+					"more room left to give it here", size,
+					stream->getBufferCapacityInFrames());
 			}
 		}
 		return;
