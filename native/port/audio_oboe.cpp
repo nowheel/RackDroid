@@ -990,6 +990,15 @@ void audioReportLatency() {
 			oboe::convertToText(result.error()));
 		return;
 	}
+	// A stream that has only just started can hand back a timestamp pair that
+	// makes no sense -- a fresh install measured minus three point nine
+	// SECONDS -- and Oboe reports that as a success, so the result being "ok"
+	// is not enough. Anything outside what an audio device could plausibly do
+	// is not a measurement; wait and ask again rather than writing a number
+	// into the log that will send somebody the wrong way. Same lesson as the
+	// "-1% of the phone's busy CPU" line that shipped yesterday.
+	if (result.value() <= 0.0 || result.value() > 2000.0)
+		return;
 	reportedFor = g_lastStreamOpen;
 	int block = g_driver->device->getBlockSize();
 	float rate = g_driver->device->getSampleRates().empty()

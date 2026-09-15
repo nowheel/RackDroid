@@ -976,7 +976,17 @@ static void checkThreadCount() {
 	windowStartedAt = now;
 	windowStartCount = total;
 	windowTouched = false;
-	if (touched) {
+	// A disturbance excuses a handful of underruns, not a flood. Touching the
+	// screen, rotating, reopening the stream -- each of those costs a few, and
+	// that is what this guard was built for. It was written as an absolute,
+	// though, so on a phone whose owner was working through the menus every
+	// window carried a touch and every window was thrown away: a Nothing A024
+	// went six windows and hundreds of underruns without the tuner taking a
+	// single decision, crackling the whole time. A gesture cannot account for
+	// twenty-seven underruns in five seconds, so past that the window counts
+	// whatever else happened during it.
+	static const int32_t DISTURBANCE_EXCUSES = 10;
+	if (touched && underruns <= DISTURBANCE_EXCUSES) {
 		// Say so: a discarded window looks exactly like a tuner doing nothing,
 		// and telling those apart from a log file is otherwise guesswork.
 		if (underruns > 0)
@@ -984,6 +994,10 @@ static void checkThreadCount() {
 				"disturbed; not counting it", underruns, WINDOW_SEC, current);
 		return; // measured the disturbance, not the patch
 	}
+	if (touched)
+		LOGW("Engine: %d underruns in %.0fs at %d threads -- too many to blame on "
+			"the disturbance in that window; counting it", underruns, WINDOW_SEC,
+			current);
 
 	// A few underruns in five seconds are as likely to be the phone as the
 	// patch -- a notification, another app waking up, the governor moving a
