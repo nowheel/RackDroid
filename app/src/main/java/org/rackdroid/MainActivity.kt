@@ -2393,9 +2393,28 @@ class MainActivity : NativeActivity() {
 	 * prompt. That prompt blocks the UI thread, which is exactly the thread
 	 * that would have loaded the packs: the module the dialog calls missing is
 	 * the one whose loading the dialog itself is preventing. The patch then
-	 * loses those modules on every single launch. */
+	 * loses those modules on every single launch.
+	 *
+	 * That ordering is enforced by the BLOCKING WAIT on the native side, not by
+	 * which thread does the work -- a distinction this code got wrong. It ran
+	 * on the UI thread, and importing 21 packs for the first time measured 3958
+	 * ms there on a Galaxy S22, the fastest hardware this project has. Android
+	 * declares an app unresponsive at 5000. On a slower device -- a 2020 tablet
+	 * with eMMC storage rather than UFS, where the cost is dominated by
+	 * unpacking and dlopen rather than by CPU -- the same work is a multiple of
+	 * that, and the app is killed as not responding before it ever draws. One
+	 * tester's tablet does exactly that, and while this has not been reproduced
+	 * here for want of a slow enough device, a startup that CAN hang is a bug
+	 * whatever finally turns out to have hung it.
+	 *
+	 * So it runs on a worker thread now. The render thread is parked inside
+	 * pumpUntilFlag() for the whole of it, so nothing else is touching the
+	 * plugin registry, and the flag it waits on is a std::atomic set from here.
+	 * Its thirty-second leash then degrades to "no side-loaded packs" instead
+	 * of to a dead app: the UI thread stays free to draw and to answer, which
+	 * is the entire difference between a slow launch and a killed one. */
 	fun loadUserPluginsFromNative() {
-		runOnUiThread {
+		Thread({
 			try {
 				ModuleInstaller.loadUserPlugins(this)
 			} catch (t: Throwable) {
@@ -2405,7 +2424,7 @@ class MainActivity : NativeActivity() {
 				// native watchdog gives up.
 				runCatching { nativeUserPluginsLoaded() }
 			}
-		}
+		}, "rackdroid-plugin-load").start()
 	}
 
 	private external fun nativeUserPluginsLoaded()
