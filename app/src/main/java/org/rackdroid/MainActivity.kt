@@ -1042,7 +1042,12 @@ class MainActivity : NativeActivity() {
 	private fun exportLogs() {
 		val coll = android.provider.MediaStore.Files.getContentUri("external")
 		val prefs = getSharedPreferences("logexport", Context.MODE_PRIVATE)
-		for (name in listOf("log.txt", "java-log.txt")) {
+		// log-previous.txt is the session before this one, kept by startRack()
+		// because logger::init() opens log.txt for writing and would otherwise
+		// destroy it. It is the only copy of a launch that went wrong, since
+		// reaching this export at all requires reopening the app -- and that
+		// reopening is what used to overwrite the evidence.
+		for (name in listOf("log.txt", "log-previous.txt", "java-log.txt")) {
 			val src = File(filesDir, "user/$name")
 			if (!src.exists()) continue
 			// Remember the entry we created rather than looking it up by name.

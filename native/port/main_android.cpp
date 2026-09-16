@@ -107,6 +107,25 @@ struct RackDroidApp {
 		system::resetFpuFlags();
 		asset::init();
 		logger::logPath = asset::user("log.txt");
+		// Keep the session before this one. logger::init() opens the file for
+		// writing, so the log of a launch that went wrong is destroyed by the
+		// very next launch -- and the next launch is what the user does first,
+		// every time, before it occurs to anyone to ask for a log. That has
+		// now cost this project four separate investigations where the only
+		// copy of the interesting run had already been overwritten, including
+		// a startup hang that had to be chased on a screenshot of an "app
+		// isn't responding" dialog because the evidence was gone.
+		//
+		// One rename, on a file a few hundred kilobytes at most, before
+		// anything opens it. The previous log is exported beside the current
+		// one, so a user who reproduces a fault and then reopens the app --
+		// which is the only way they can reach the export at all -- still has
+		// the run that failed.
+		{
+			std::string prev = asset::user("log-previous.txt");
+			std::remove(prev.c_str());
+			std::rename(logger::logPath.c_str(), prev.c_str());
+		}
 		logger::init();
 		random::init();
 
