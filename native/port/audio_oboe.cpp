@@ -210,14 +210,36 @@ the next jittery callback breaks; over 100% means the audio is already broken
 and no amount of waiting will make it otherwise. It answers in a single
 callback what counting underruns needs seconds to guess at.
 
-Peak, not mean: one late callback is what a listener hears, and an average
-over a window hides exactly the spikes that matter. Read-and-reset, so each
-reader gets the peak since it last looked -- there is only ever one reader,
-the tuner. */
-static std::atomic<int32_t> g_loadPeakPercent{0};
+Both the peak and the mean, because they answer different questions and the
+first version published only the peak. A peak over the deadline is JITTER --
+one callback preempted by the system -- and absorbing jitter is precisely what
+the buffer is for; at a 96-frame callback the deadline is 2 ms and a single
+scheduling hiccup reads 300% while the audio is perfectly clean. A MEAN over
+the deadline is a production deficit: the engine is not making frames as fast
+as they are consumed, and no buffer depth saves that, it only postpones it.
 
-int32_t audioEngineLoadPeak() {
-	return g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
+Getting this wrong cost a real regression. The rule that rejects a thread count
+early was written against the peak, on the reasoning that one late callback is
+what a listener hears. That is true of underruns and false of load, and once
+the block-size ladder reached 64 frames the tuner began declaring perfectly
+clean configurations hopeless -- "0 underruns in 1.2s ... it cannot keep up" --
+and thrashing through every rung, which then caused the first real underruns of
+the session.
+
+Read-and-reset, so each reader gets the interval since it last looked; there is
+only ever one reader, the tuner. */
+static std::atomic<int32_t> g_loadPeakPercent{0};
+static std::atomic<int64_t> g_loadSumPercent{0};
+static std::atomic<int32_t> g_loadCount{0};
+
+void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
+	int32_t p = g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
+	int64_t sum = g_loadSumPercent.exchange(0, std::memory_order_relaxed);
+	int32_t n = g_loadCount.exchange(0, std::memory_order_relaxed);
+	if (peak)
+		*peak = p;
+	if (mean)
+		*mean = (n > 0) ? (int32_t) (sum / n) : 0;
 }
 
 /** When the last underrun happened, as rack::system::getTime(). */
@@ -817,6 +839,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			while (percent > seen && !g_loadPeakPercent.compare_exchange_weak(
 					seen, percent, std::memory_order_relaxed))
 				;
+			g_loadSumPercent.fetch_add(percent, std::memory_order_relaxed);
+			g_loadCount.fetch_add(1, std::memory_order_relaxed);
 		}
 
 		return oboe::DataCallbackResult::Continue;

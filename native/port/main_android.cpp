@@ -870,11 +870,20 @@ static void checkThreadCount() {
 	first callbacks after a thread count changes are the engine relaunching
 	its workers, not the engine running. */
 	static const double MIN_WINDOW_SEC = 0.4;
-	/** Past this share of the callback's deadline the count is not slow, it is
-	failing: the frames take longer to produce than they last. Above 100 rather
-	than at it, because a single scheduling hiccup can put one callback over
-	and the buffer absorbs it. */
-	static const int32_t LOAD_HOPELESS_PERCENT = 115;
+	/** Past this share of the callback's deadline ON AVERAGE the count is not
+	slow, it is failing: frames are not being produced as fast as they are
+	consumed, and no buffer depth fixes that -- it only postpones it. Slightly
+	under 100 to catch it just before it becomes audible.
+
+	Judged on the mean and never on the peak. A peak over the deadline is one
+	callback preempted by the system, which is exactly what the buffer is there
+	to absorb: at a 96-frame callback the deadline is 2 ms and an ordinary
+	hiccup reads several hundred percent while the audio stays clean. Reading
+	the peak here was a real regression -- once the block-size ladder reached
+	64 frames this rejected configurations producing ZERO underruns ("0
+	underruns in 1.2s ... it cannot keep up"), thrashed every rung from 2 to 7,
+	and caused the first genuine underruns of the session by doing so. */
+	static const int32_t LOAD_HOPELESS_PERCENT = 90;
 	/** The reading is wall time around one callback, so a stream that is being
 	torn down and rebuilt underneath it produces a number that describes the
 	reopen and nothing else: 42705% of the deadline was logged against a rung
@@ -882,6 +891,8 @@ static void checkThreadCount() {
 	spent 722 ms. Ignore the load until the stream has been up this long. */
 	static const double STREAM_SETTLE_SEC = 1.5;
 	static int32_t windowLoadPeak = 0;
+	static int64_t windowLoadSum = 0;
+	static int32_t windowLoadSamples = 0;
 	static int scores[MAX_TRACKED_THREADS + 1];
 	// When each score was taken. A measurement describes the conditions it was
 	// made under, and those expire: scores collected while another app was
@@ -992,7 +1003,9 @@ static void checkThreadCount() {
 		windowStartCount = total;
 		windowTouched = false;
 		windowLoadPeak = 0;
-		rackdroid::audioEngineLoadPeak(); // discard; it measured the startup
+		windowLoadSum = 0;
+		windowLoadSamples = 0;
+		rackdroid::audioEngineLoadTake(NULL, NULL); // discard; measured startup
 		return;
 	}
 
@@ -1031,10 +1044,19 @@ static void checkThreadCount() {
 	// callback reads well over its deadline: measured at 139% here, on a rung
 	// that was about to run clean at 20%. A peak remembers a single spike
 	// forever, so the spike has to be kept out rather than argued with.
-	int32_t loadNow = rackdroid::audioEngineLoadPeak();
-	if (loadNow > windowLoadPeak && now - windowStartedAt >= MIN_WINDOW_SEC
-			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC)
-		windowLoadPeak = loadNow;
+	int32_t peakNow = 0, meanNow = 0;
+	rackdroid::audioEngineLoadTake(&peakNow, &meanNow);
+	if (now - windowStartedAt >= MIN_WINDOW_SEC
+			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC) {
+		if (peakNow > windowLoadPeak)
+			windowLoadPeak = peakNow;
+		if (meanNow > 0) {
+			windowLoadSum += meanNow;
+			windowLoadSamples++;
+		}
+	}
+	int32_t windowLoadMean = (windowLoadSamples > 0)
+		? (int32_t) (windowLoadSum / windowLoadSamples) : 0;
 
 	// Five seconds is the length of a window that has to prove a count is
 	// GOOD: underruns are rare events and a short quiet stretch proves
@@ -1055,14 +1077,17 @@ static void checkThreadCount() {
 	// logged in exactly that state), and a too-low reading costs nothing --
 	// the window simply runs its full length and is judged on underruns, which
 	// is what every window did before this existed.
-	bool hopeless = settledAt < 0 && windowLoadPeak > LOAD_HOPELESS_PERCENT
+	bool hopeless = settledAt < 0 && windowLoadMean > LOAD_HOPELESS_PERCENT
 		&& now - windowStartedAt >= MIN_WINDOW_SEC;
 	if (!hopeless && now - windowStartedAt < window)
 		return;
 
 	double windowLen = now - windowStartedAt;
 	int32_t loadPeak = windowLoadPeak;
+	int32_t loadMean = windowLoadMean;
 	windowLoadPeak = 0;
+	windowLoadSum = 0;
+	windowLoadSamples = 0;
 	int32_t rawUnderruns = total - windowStartCount;
 	// Scores from windows of different lengths are not comparable, and the
 	// search below does compare them. Carry them all in the same unit: what
@@ -1074,9 +1099,9 @@ static void checkThreadCount() {
 	// were coming. Score it on what the deadline said instead, or the rung
 	// records a clean sheet and the search comes straight back to it.
 	if (hopeless && underruns == 0) {
-		LOGW("Engine: %d threads used %d%% of the audio deadline -- it cannot "
-			"keep up; not waiting for the clicks to prove it",
-			settings::threadCount, loadPeak);
+		LOGW("Engine: %d threads averaged %d%% of the audio deadline (peak %d%%) "
+			"-- it cannot keep up; not waiting for the clicks to prove it",
+			settings::threadCount, loadMean, loadPeak);
 		// Score it as plainly bad, not as the raw percentage. A blocked
 		// callback's wall time is unbounded -- 35153% was measured here, with
 		// eight busy loops fighting it for the cores -- and scores[] is
@@ -1186,7 +1211,7 @@ static void checkThreadCount() {
 		g_threadTunerSettled = true;
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
-				"at its worst)", current, loadPeak);
+				"on average, peak %d%%)", current, loadMean, loadPeak);
 			settledAt = current;
 			cleanSince = now;
 		}
@@ -1266,8 +1291,9 @@ static void checkThreadCount() {
 		return; // nothing known to be better; stay where we are
 	}
 
-	LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline); "
-		"trying %d", rawUnderruns, windowLen, current, loadPeak, candidate);
+	LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline, "
+		"peak %d%%); trying %d", rawUnderruns, windowLen, current, loadMean,
+		loadPeak, candidate);
 	g_threadTunerExhausted = false;
 	settings::threadCount = candidate;
 	windowTouched = true; // see below
