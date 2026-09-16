@@ -1765,19 +1765,50 @@ class MainActivity : NativeActivity() {
 		}
 	}
 
-	fun clipboardGet(): String {
-		var result = ""
+	/** Runs `work` on the UI thread and waits for the answer -- but never for
+	 * ever, which is the whole point of this existing.
+	 *
+	 * Every caller is a native thread: the glue thread during startup, or the
+	 * render thread later. An unbounded latch.await() there does not merely
+	 * make the caller slow, it starves NativeActivity's input queue, and a
+	 * starved input queue is an ANR -- black screen, "RackDroid isn't
+	 * responding". The comment on the async dialogs below records that lesson
+	 * being learned once already; these three synchronous helpers were simply
+	 * never brought in line with it.
+	 *
+	 * It surfaced on a Nothing A024 on the first launch after a clean install,
+	 * where the UI thread is busy enough (dexopt, asset extraction, the first
+	 * getSystemService of a process) that the wait outlasted the ANR timer.
+	 * The frozen launch's log stopped between "Engine: sample rate auto" and
+	 * "Loading Core plugin" -- which is exactly where requestAudioFocus() sits.
+	 *
+	 * On timeout the caller gets `fallback` and a log line. Every one of these
+	 * three answers is advisory: a focus request whose result is only logged, a
+	 * clipboard read, a thermal reading that is polled again seconds later.
+	 * None is worth an unresponsive app. */
+	private fun <T> onUiBlocking(what: String, timeoutMs: Long, fallback: T, work: () -> T): T {
+		var result = fallback
 		val latch = CountDownLatch(1)
 		uiHandler.post {
 			try {
-				val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-				result = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
+				result = work()
+			} catch (t: Throwable) {
+				jlog("$what failed on the UI thread: $t")
 			} finally {
 				latch.countDown()
 			}
 		}
-		latch.await()
+		if (!latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+			jlog("$what: the UI thread did not answer within $timeoutMs ms; " +
+				"carrying on without it")
+			return fallback
+		}
 		return result
+	}
+
+	fun clipboardGet(): String = onUiBlocking("clipboardGet", 2000L, "") {
+		val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+		cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
 	}
 
 	// ---- Thermal status (called from native, any thread) ----
@@ -1788,20 +1819,11 @@ class MainActivity : NativeActivity() {
 	wants no particular thread, but posting through uiHandler keeps every
 	Android API call in this file on the one thread, which is one fewer thing
 	to get wrong. */
-	fun currentThermalStatus(): Int {
-		var result = PowerManager.THERMAL_STATUS_NONE
-		val latch = CountDownLatch(1)
-		uiHandler.post {
-			try {
-				val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-				result = pm?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
-			} finally {
-				latch.countDown()
-			}
+	fun currentThermalStatus(): Int =
+		onUiBlocking("currentThermalStatus", 1000L, PowerManager.THERMAL_STATUS_NONE) {
+			val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+			pm?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
 		}
-		latch.await()
-		return result
-	}
 
 	/** A one-off, non-blocking notice from native -- the same Toast the
 	module installer already uses for "Loaded N extra module pack(s)", so a
@@ -1852,13 +1874,17 @@ class MainActivity : NativeActivity() {
 	surprising than it already was. Requested once and held for the process's
 	life; released in onDestroy(). Returns false (native logs it) if the
 	system denied focus outright -- the Oboe stream still opens either way. */
-	fun requestAudioFocusFromNative(): Boolean {
-		var granted = false
-		val latch = CountDownLatch(1)
-		uiHandler.post {
-			try {
-				val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-				if (am == null) return@post
+	fun requestAudioFocusFromNative(): Boolean =
+		// Two seconds, because the ordering this call exists for is real -- the
+		// audio policy service weighs focus state when deciding whether to
+		// grant Exclusive, so the request wants to be in before oboeInit() --
+		// but no ordering is worth hanging the app for. On a cold first launch
+		// this is the call that did: see onUiBlocking() above.
+		onUiBlocking("requestAudioFocus", 2000L, false) {
+			val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+			if (am == null) {
+				false
+			} else {
 				val attrs = AudioAttributes.Builder()
 					.setUsage(AudioAttributes.USAGE_MEDIA)
 					.setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -1869,16 +1895,15 @@ class MainActivity : NativeActivity() {
 						jlog("AudioManager focus change: $change (engine keeps running regardless -- see requestAudioFocusFromNative)")
 					}
 					.build()
-				granted = am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+				val granted = am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+				// Kept even if the wait above has already timed out and
+				// returned: the focus really was granted, and onPause has to be
+				// able to abandon it.
 				if (granted)
 					audioFocusRequest = request
-			} finally {
-				latch.countDown()
+				granted
 			}
 		}
-		latch.await()
-		return granted
-	}
 
 	// ---- Async dialogs (called from the native glue thread) ----
 	// The native caller does NOT block on a latch: it keeps pumping its
