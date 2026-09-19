@@ -179,6 +179,26 @@ android {
 		versionCode = 17
 		versionName = "0.1.2.14"
 
+		// -PtestBuild produces an app that installs BESIDE the release instead
+		// of replacing it: its own package name, its own name on the home
+		// screen and its own icon colour. A tester whose device the release
+		// works on should never have to give that up to try a fix, and one
+		// whose device it does NOT work on needs the working copy left alone
+		// while they test the broken case. Asked for by the tester on issue #3
+		// after a test build cost him an evening and a fight with Shizuku.
+		//
+		// Package name apart, it is the same build as the release: same code,
+		// same signing key, same everything. It is not a debuggable variant.
+		if (project.hasProperty("testBuild")) {
+			applicationIdSuffix = ".test"
+			manifestPlaceholders["appLabel"] = "RackDroid TEST"
+			manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_test"
+		}
+		else {
+			manifestPlaceholders["appLabel"] = "@string/app_name"
+			manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+		}
+
 		ndk {
 			// Default remains the physical-device release. Build emulator /
 			// Chromebook variants with -PtargetAbis=x86_64. AAB builds may

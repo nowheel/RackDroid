@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 	<color name="ic_launcher_background">#1B1B1E</color>
+	<!-- Only referenced by -PtestBuild, so a tester can tell a debug
+	     build apart from the release sitting next to it on the home screen. -->
+	<color name="ic_launcher_test_background">#C2410C</color>
 </resources>
