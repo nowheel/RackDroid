@@ -61,6 +61,14 @@ computing one from the block size understates it by the alignment ratio, which
 is how ADPF came to be told 1.3 ms for a callback that had 2.0. */
 int32_t audioCallbackFrames();
 
+/** What callback size a given engine block size would actually produce on this
+device, or 0 before the first stream has opened. Ask before spending a stream
+reopen on a block-size change: where the device's burst is larger than the
+block, every size at or below it collapses to the same single burst, so the
+change is a reopen that buys nothing and reports a latency it did not achieve.
+Seen on a Lenovo TB-X306X, whose burst is 960 frames. */
+int32_t audioAlignedCallbackFrames(int blockSize);
+
 /** Writes any new underruns to the log. Call from the frame loop, never from
 the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */

@@ -250,6 +250,7 @@ int32_t audioCallbackFrames() {
 	return g_callbackFrames.load(std::memory_order_relaxed);
 }
 
+
 void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
 	int32_t p = g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
 	int64_t sum = g_loadSumPercent.exchange(0, std::memory_order_relaxed);
@@ -491,6 +492,22 @@ static int alignToBurst(int bs, int burst) {
 	if (bursts < 1)
 		bursts = 1;
 	return bursts * burst;
+}
+/** What callback size a given engine block size would actually produce here,
+or 0 before the device's burst is known.
+
+Asked by the block-size ladder before it spends a stream reopen. On most phones
+the answer tracks the request, but a Lenovo TB-X306X reports a 960-FRAME burst
+-- ten times an S22's -- and there every block size at or below 960 aligns to
+the same single burst. The ladder could not tell: it stepped 512 down to 256,
+paid the reopen and an underrun, got the same 960-frame callback back, measured
+the latency as 9 ms WORSE than before, and then told the user "a 256-frame
+block holds; keeping the lower latency". Wasted work is forgivable; the app
+claiming an improvement it did not make is not. */
+int32_t audioAlignedCallbackFrames(int blockSize) {
+	if (g_framesPerBurst <= 0)
+		return 0;
+	return alignToBurst(blockSize, g_framesPerBurst);
 }
 
 static void rememberBlockSize(int bs) {

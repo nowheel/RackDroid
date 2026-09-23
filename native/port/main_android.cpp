@@ -1611,6 +1611,22 @@ static void checkBlockSizeStepDown() {
 	int want = current / 2;
 	if (want < BLOCK_FLOOR)
 		return;
+	// A smaller block only buys latency if it actually reaches the device as a
+	// smaller callback. Where the burst is larger than the block, it does not:
+	// on a Lenovo TB-X306X (burst 960) a step from 512 to 256 produced the same
+	// 960-frame callback, cost a reopen and an underrun, measured 9 ms WORSE
+	// than before, and then announced "a 256-frame block holds; keeping the
+	// lower latency". Wasted work is forgivable; claiming an improvement that
+	// did not happen is not.
+	int alignedNow = rackdroid::audioAlignedCallbackFrames(current);
+	int alignedWant = rackdroid::audioAlignedCallbackFrames(want);
+	if (alignedNow > 0 && alignedWant == alignedNow) {
+		LOGI("Engine: a %d-frame block would reach this device as the same "
+			"%d-frame callback as %d does -- its burst is %d, so there is no "
+			"lower latency to be had here", want, alignedWant, current,
+			alignedNow);
+		return;
+	}
 	if (want == rackdroid::audioKnownTooSmallBlock()) {
 		int waiting = rackdroid::audioTooSmallLaunchesLeft();
 		if (waiting > 0) {
