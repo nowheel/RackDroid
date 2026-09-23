@@ -232,6 +232,24 @@ static std::atomic<int32_t> g_loadPeakPercent{0};
 static std::atomic<int64_t> g_loadSumPercent{0};
 static std::atomic<int32_t> g_loadCount{0};
 
+/** Frames the last callback was actually asked to produce.
+
+Not the same number as the engine's block size, and the difference is the whole
+reason this exists: alignToBurst() rounds the request to a whole number of the
+device's bursts, so a 64-frame block becomes a 96-frame callback on a 96-burst
+phone and a 1024-frame block becomes 1056. Anything that needs to know how long
+a callback has must use this, not audioBlockSize() -- deriving a deadline from
+64 frames when 96 arrive understates it by a third.
+
+Read from the callback rather than from the builder because it is the only
+figure that cannot be wrong: it is what the stream handed us, after whatever
+the device decided to do with the request. Zero until the first callback. */
+static std::atomic<int32_t> g_callbackFrames{0};
+
+int32_t audioCallbackFrames() {
+	return g_callbackFrames.load(std::memory_order_relaxed);
+}
+
 void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
 	int32_t p = g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
 	int64_t sum = g_loadSumPercent.exchange(0, std::memory_order_relaxed);
@@ -752,6 +770,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 	oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* audioData, int32_t numFrames) override {
 		float* output = (float*) audioData;
+		// What the stream actually asks for, which is not the engine's block
+		// size wherever alignToBurst() has rounded the request. See
+		// audioCallbackFrames().
+		g_callbackFrames.store(numFrames, std::memory_order_relaxed);
 
 		// Non-blocking and callback-safe by design: this is what LatencyTuner
 		// is for. It only acts when the underrun count has moved.

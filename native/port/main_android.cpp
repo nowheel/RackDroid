@@ -864,7 +864,17 @@ because both halves move: the tuner can change the block size, and the device
 can open at a rate the engine did not ask for. */
 static void checkAdpfTarget() {
 	static int64_t lastNanos = 0;
-	int block = rackdroid::audioBlockSize();
+	// The frames the callback is actually handed, not the engine's block size.
+	// alignToBurst() rounds the request to a whole number of the device's
+	// bursts, so on a 96-burst phone a 64-frame block arrives as a 96-frame
+	// callback -- and deriving the deadline from 64 told ADPF 1.3 ms for work
+	// that had 2.0, a third tighter than the truth. Harmless in the sense that
+	// asking for more performance than needed does not break anything, but it
+	// is a wrong number handed to a system that acts on it. Falls back to the
+	// block size only before the first callback has run.
+	int block = rackdroid::audioCallbackFrames();
+	if (block <= 0)
+		block = rackdroid::audioBlockSize();
 	if (block <= 0 || !APP->engine)
 		return;
 	float rate = APP->engine->getSampleRate();

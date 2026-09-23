@@ -53,6 +53,14 @@ instead of waiting five for an underrun that may or may not arrive. Written by
 the audio thread, read by the render thread. Either pointer may be null. */
 void audioEngineLoadTake(int32_t* peak, int32_t* mean);
 
+/** Frames the last audio callback was actually asked to produce, or 0 before
+the first one. NOT the engine's block size: alignToBurst() rounds the request to
+a whole number of the device's bursts, so a 64-frame block arrives as a 96-frame
+callback on a 96-burst phone. Anything deriving a DEADLINE must use this --
+computing one from the block size understates it by the alignment ratio, which
+is how ADPF came to be told 1.3 ms for a callback that had 2.0. */
+int32_t audioCallbackFrames();
+
 /** Writes any new underruns to the log. Call from the frame loop, never from
 the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */
