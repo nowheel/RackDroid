@@ -115,6 +115,12 @@ static float clampPinchRatio(float ratio) {
 	return ratio;
 }
 
+/** How often a pinch may actually move the zoom, in seconds. Not a limit on
+how much it moves -- the ratios accumulate between applications, so the gesture
+arrives where the fingers put it, just in fewer steps. See the comment at the
+call site for why the step count is what matters. */
+static const double ZOOM_APPLY_INTERVAL = 1.0 / 30.0;
+
 // clampPinchRatio bounds a single MOVE callback's zoom change, which stops a
 // single glitched sample -- but not a BURST of them: a render/input thread
 // stalled by the engine underrunning (the far more common trigger here, per
@@ -162,6 +168,10 @@ struct TouchState {
 	bool gesture = false; // two-finger mode active
 	rack::math::Vec lastCentroid;
 	float lastDist = 0.f;
+	/** Pinch that has been measured but not yet handed to the engine, and when
+	the engine last took one. See ZOOM_APPLY_INTERVAL. */
+	float pendingZoom = 0.f;
+	double lastZoomApply = 0.0;
 	double lastMoveTime = 0.0;
 	rack::math::Vec panVelocity; // scene units/s, smoothed
 	/** When the fingers were last moving relative to each other, i.e. pinching
@@ -442,6 +452,7 @@ int touchHandleEvent(AInputEvent* event) {
 				rack::math::Vec p1 = scenePos(AMotionEvent_getX(event, 1), AMotionEvent_getY(event, 1));
 				st.lastCentroid = pos.plus(p1).mult(0.5f);
 				st.lastDist = pos.minus(p1).norm();
+				st.pendingZoom = 0.f;
 				st.lastMoveTime = rack::system::getTime();
 			}
 			return 1;
@@ -512,9 +523,35 @@ int touchHandleEvent(AInputEvent* event) {
 						// that must not turn into coasting when they lift.
 						st.lastPinchTime = now;
 						if (!atCap) {
-							windowSetMods(GLFW_MOD_CONTROL);
-							APP->event->handleScroll(centroid, rack::math::Vec(0.f, ratio * PINCH_ZOOM_SPEED * 50.f));
-							windowSetMods(0);
+							// Accumulate, and hand it over on a clock rather
+							// than on every touch sample.
+							//
+							// Every distinct zoom value makes Rack rebuild the
+							// framebuffer of EVERY module, and touch samples
+							// arrive far faster than frames -- this log shows
+							// several inside one millisecond. At 240 Hz that is
+							// 240 full rebuilds a second competing with the
+							// audio callback, and it is audible: reported as
+							// "the sound breaks up while zooming", with the
+							// underruns in the log clustered exactly on the
+							// pinch bursts. Panning goes through the same
+							// handleScroll and does NOT break the audio, which
+							// is what points at the rebuild rather than at the
+							// touch handling.
+							//
+							// Thirty a second keeps the gesture smooth to the
+							// eye and cuts the rebuilds by up to eightfold.
+							// Nothing is lost: the ratios add up, so the zoom
+							// still ends exactly where the fingers put it.
+							st.pendingZoom += ratio;
+							if (now - st.lastZoomApply >= ZOOM_APPLY_INTERVAL) {
+								st.lastZoomApply = now;
+								float apply = st.pendingZoom;
+								st.pendingZoom = 0.f;
+								windowSetMods(GLFW_MOD_CONTROL);
+								APP->event->handleScroll(centroid, rack::math::Vec(0.f, apply * PINCH_ZOOM_SPEED * 50.f));
+								windowSetMods(0);
+							}
 						}
 					}
 				}
@@ -555,6 +592,17 @@ int touchHandleEvent(AInputEvent* event) {
 
 		case AMOTION_EVENT_ACTION_POINTER_UP: {
 			if (st.gesture && pointerCount == 2) {
+				// Hand over whatever the clock had not got to yet, so the zoom
+				// ends exactly where the fingers left it rather than up to a
+				// thirtieth of a second short of it. The centroid is stale by
+				// one sample here, which for a zoom anchor nobody can see.
+				if (st.pendingZoom != 0.f && APP->event) {
+					windowSetMods(GLFW_MOD_CONTROL);
+					APP->event->handleScroll(st.lastCentroid,
+						rack::math::Vec(0.f, st.pendingZoom * PINCH_ZOOM_SPEED * 50.f));
+					windowSetMods(0);
+				}
+				st.pendingZoom = 0.f;
 				// Back to single-finger mode; don't resume the left drag.
 				st.gesture = false;
 				st.lastDist = 0.f;
