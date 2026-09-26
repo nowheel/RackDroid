@@ -596,7 +596,18 @@ int touchHandleEvent(AInputEvent* event) {
 				// ends exactly where the fingers left it rather than up to a
 				// thirtieth of a second short of it. The centroid is stale by
 				// one sample here, which for a zoom anchor nobody can see.
-				if (st.pendingZoom != 0.f && APP->event) {
+				// The cap applies here too. Without this check the flush
+				// poured the whole accumulation in regardless, pushing the
+				// zoom past 2x -- seen at 2.04x -- and checkZoomCeiling then
+				// clawed it back by calling setZoom every frame until the
+				// gesture stopped. That is a framebuffer invalidation per
+				// frame, from a path the rate limit above never sees: the one
+				// thing this change exists to prevent, reintroduced by its own
+				// tidying-up step.
+				bool flushAtCap = st.pendingZoom > 0.f && APP->scene
+					&& APP->scene->rackScroll
+					&& APP->scene->rackScroll->getZoom() >= MAX_RACK_ZOOM;
+				if (st.pendingZoom != 0.f && !flushAtCap && APP->event) {
 					windowSetMods(GLFW_MOD_CONTROL);
 					APP->event->handleScroll(st.lastCentroid,
 						rack::math::Vec(0.f, st.pendingZoom * PINCH_ZOOM_SPEED * 50.f));
