@@ -1106,7 +1106,18 @@ static void checkThreadCount() {
 	// logged in exactly that state), and a too-low reading costs nothing --
 	// the window simply runs its full length and is judged on underruns, which
 	// is what every window did before this existed.
+	// The mean has to rest on enough readings to be a mean at all. Each poll
+	// contributes the average of the callbacks since the last one, so a window
+	// in which the stream barely called back contributes one or two -- and the
+	// mean of one sample IS the peak, which is the very thing this rule was
+	// rewritten to stop trusting. A Nothing A024 logged "6 underruns in 0.9s
+	// at 5 threads (9002% of the deadline, peak 9002%)": identical numbers, one
+	// sample, and the tuner then thrashed 3 -> 4 -> 5 -> 6 -> 7 -> 3 -> 5 -> 7
+	// in ten seconds on the strength of it. Below the bar, fall back to
+	// counting underruns: slower, and right.
+	static const int32_t LOAD_MIN_SAMPLES = 4;
 	bool hopeless = settledAt < 0 && windowLoadMean > LOAD_HOPELESS_PERCENT
+		&& windowLoadSamples >= LOAD_MIN_SAMPLES
 		&& now - windowStartedAt >= MIN_WINDOW_SEC;
 	if (!hopeless && now - windowStartedAt < window)
 		return;
@@ -1576,6 +1587,14 @@ static void checkBlockSizeStepDown() {
 	double now = system::getTime();
 
 	if (probedFrom > 0) {
+		// Never while a recording is running. Reverting reopens the stream,
+		// which costs roughly half a second of callbacks -- in a WAV that is a
+		// silent hole with nothing to mark it. The step-down below already
+		// refuses to start during a recording; the revert did not, and on a
+		// Nothing A024 it fired 0.5 s after the user pressed record. Waiting
+		// costs only that this verdict is reached a little later.
+		if (rackdroid::audioIsRecording())
+			return;
 		// Give the reopen a few seconds -- it costs underruns of its own, and
 		// judging the new size on those judges it on the act of trying it --
 		// then a short spell to show whether it holds.
