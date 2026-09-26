@@ -115,6 +115,34 @@ static float clampPinchRatio(float ratio) {
 	return ratio;
 }
 
+/** The most zoom-in a pinch may still ask for before it hits MAX_RACK_ZOOM,
+expressed in the same ratio units the pinch works in. Negative (zoom-out)
+ratios pass through untouched.
+
+Rack turns a ctrl-scroll into zoom as  newZoom = zoom * 2^(scrollY / 200)
+(RackScrollWidget::onHoverScroll), and this file sends scrollY = ratio *
+PINCH_ZOOM_SPEED * 50. That inverts exactly, so the gesture can be stopped ON
+the ceiling instead of sailing past it.
+
+Which it was doing, worse than before the ratios were batched: a single
+application now carries up to a thirtieth of a second of pinch, and a fast one
+took the zoom from 1.99 straight to 2.40. checkZoomCeiling then hauls it back
+by calling setZoom EVERY FRAME until it lands -- and every setZoom invalidates
+every module's framebuffer, which is the exact cost all of this exists to
+avoid. Overshooting the cap was not a cosmetic problem; it was a burst of the
+thing being optimised away. */
+static float clampZoomInToCeiling(float ratio) {
+	if (ratio <= 0.f || !APP->scene || !APP->scene->rackScroll)
+		return ratio;
+	float zoom = APP->scene->rackScroll->getZoom();
+	if (zoom >= MAX_RACK_ZOOM)
+		return 0.f;
+	// headroom in zoomDelta terms, converted back to a pinch ratio
+	float maxDelta = std::log2(MAX_RACK_ZOOM / zoom);
+	float maxRatio = maxDelta * 4.f / PINCH_ZOOM_SPEED;
+	return (ratio > maxRatio) ? maxRatio : ratio;
+}
+
 /** How often a pinch may actually move the zoom, in seconds. Not a limit on
 how much it moves -- the ratios accumulate between applications, so the gesture
 arrives where the fingers put it, just in fewer steps. See the comment at the
@@ -546,11 +574,14 @@ int touchHandleEvent(AInputEvent* event) {
 							st.pendingZoom += ratio;
 							if (now - st.lastZoomApply >= ZOOM_APPLY_INTERVAL) {
 								st.lastZoomApply = now;
-								float apply = st.pendingZoom;
+								float apply = clampZoomInToCeiling(st.pendingZoom);
 								st.pendingZoom = 0.f;
-								windowSetMods(GLFW_MOD_CONTROL);
-								APP->event->handleScroll(centroid, rack::math::Vec(0.f, apply * PINCH_ZOOM_SPEED * 50.f));
-								windowSetMods(0);
+								if (apply != 0.f) {
+									windowSetMods(GLFW_MOD_CONTROL);
+									APP->event->handleScroll(centroid,
+										rack::math::Vec(0.f, apply * PINCH_ZOOM_SPEED * 50.f));
+									windowSetMods(0);
+								}
 							}
 						}
 					}
@@ -604,13 +635,11 @@ int touchHandleEvent(AInputEvent* event) {
 				// frame, from a path the rate limit above never sees: the one
 				// thing this change exists to prevent, reintroduced by its own
 				// tidying-up step.
-				bool flushAtCap = st.pendingZoom > 0.f && APP->scene
-					&& APP->scene->rackScroll
-					&& APP->scene->rackScroll->getZoom() >= MAX_RACK_ZOOM;
-				if (st.pendingZoom != 0.f && !flushAtCap && APP->event) {
+				float flush = clampZoomInToCeiling(st.pendingZoom);
+				if (flush != 0.f && APP->event) {
 					windowSetMods(GLFW_MOD_CONTROL);
 					APP->event->handleScroll(st.lastCentroid,
-						rack::math::Vec(0.f, st.pendingZoom * PINCH_ZOOM_SPEED * 50.f));
+						rack::math::Vec(0.f, flush * PINCH_ZOOM_SPEED * 50.f));
 					windowSetMods(0);
 				}
 				st.pendingZoom = 0.f;
