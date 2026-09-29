@@ -285,6 +285,28 @@ struct RackDroidApp {
 		// (right-click, Ctrl+drag, Enter). Never show it on launch.
 		settings::showTipsOnLaunch = false;
 
+		// On Android this ONE setting has one job, and it is not the frame
+		// rate: nothing in this port sleeps on it. Window::getFrameDurationRemaining()
+		// divides by it, and FramebufferWidget::draw() uses THAT to decide
+		// whether it still has time to re-render a module's framebuffer or
+		// should draw the one it already has, scaled. Upstream's own way of
+		// keeping a heavy frame from running long -- and we had never set it.
+		//
+		// FramebufferWidget keeps re-rendering while the frame is younger
+		// than 1/frameRateLimit plus a hardcoded 1/60 s allowance: 33 ms at
+		// the inherited 60, 25 ms at 120. So this trims a slow frame, it does
+		// not cap it at a budget -- no value below 16.7 ms is reachable, and
+		// past 120 the gain is a few milliseconds. With a seven-module patch
+		// every module fits inside either figure, so a pinch still rebuilds
+		// them all.
+		//
+		// Kept because it is the direction upstream intended and costs
+		// nothing. It did NOT fix "si interrompe mentre si fa lo zoom" on a
+		// Nothing A024: the log after it showed the audio callback stalled
+		// for up to a second, which no amount of drawing on another core
+		// explains. audioReportSlowCallbacks() is what looks for the cause.
+		settings::frameRateLimit = 120.f;
+
 		network::init();
 		audio::init();
 		// Before opening the Oboe stream, not after: AAudio's audio policy
