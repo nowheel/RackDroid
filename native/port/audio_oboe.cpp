@@ -9,6 +9,7 @@
  * device degrades to output-only.
  */
 #include "audio_oboe.hpp"
+#include "window_android.hpp"
 
 #include <vector>
 #include <memory>
@@ -24,6 +25,8 @@
 
 #include <unistd.h>
 #include <ctime>
+#include <sched.h>
+#include <sys/resource.h>
 
 #include <oboe/Oboe.h>
 #include <oboe/LatencyTuner.h>
@@ -260,6 +263,78 @@ void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
 	if (mean)
 		*mean = (n > 0) ? (int32_t) (sum / n) : 0;
 }
+
+/** Callbacks that ran badly late, kept for the frame loop to write down.
+
+The load figures above say THAT a block took a second; they cannot say why,
+and the two candidate answers call for opposite fixes. A callback that was
+computing the whole time (CPU time close to wall time -- spinning at the
+engine's barriers counts as computing) is short of cores or of workers. One
+that was not (CPU time far below wall time) was waiting: blocked on something,
+or runnable and not given a core, which the context-switch counts tell apart --
+voluntary switches are waits, involuntary ones are preemption. Beside that goes
+what the render thread was doing when the callback started and when it ended,
+since that is the other party in almost every theory of a stall here.
+
+Single producer (the callback), single consumer (the frame loop). The callback
+never waits: it overwrites the oldest record, and the reader counts what it
+missed. A record overwritten mid-read can come out garbled; that is the price
+of never making the callback wait, and it takes a thirty-two-deep backlog. */
+struct SlowCallback {
+	double at;          // rack::system::getTime() when the callback ended
+	int32_t wallUs;
+	int32_t cpuUs;      // this thread's CPU time over the same stretch
+	int32_t percent;    // of the callback's deadline
+	int16_t volSwitches;
+	int16_t involSwitches;
+	int8_t cpuStart, cpuEnd;
+	int8_t phaseStart, phaseEnd;
+	int32_t threads;    // settings::threadCount at the time
+};
+static const int SLOW_RING = 32;
+static SlowCallback g_slowRing[SLOW_RING];
+static std::atomic<uint32_t> g_slowWrite{0};
+/** Twice the deadline: one late block is absorbed by the buffer, and below
+this the log would fill with scheduling noise at small block sizes. */
+static const int32_t SLOW_CALLBACK_PERCENT = 200;
+
+void audioReportSlowCallbacks() {
+	static uint32_t read = 0;
+	uint32_t write = g_slowWrite.load(std::memory_order_acquire);
+	uint32_t dropped = 0;
+	if (write - read > (uint32_t) SLOW_RING) {
+		dropped = write - read - SLOW_RING; // lapped; keep the newest
+		read = write - SLOW_RING;
+	}
+	// Same log-budget reasoning as audioReportUnderruns(): a stall is a run of
+	// these, and the first few of each second carry the story.
+	static double budgetFrom = 0.0;
+	static int budget = 0;
+	double now = rack::system::getTime();
+	if (now - budgetFrom >= 1.0) {
+		budgetFrom = now;
+		budget = 8;
+	}
+	int skipped = 0;
+	for (; read != write; read++) {
+		const SlowCallback& c = g_slowRing[read % SLOW_RING];
+		if (budget <= 0) {
+			skipped++;
+			continue;
+		}
+		budget--;
+		AUDIO_WARN("Oboe: slow callback at %.3f: %.1f ms wall (%d%% of the deadline), "
+			"%.1f ms cpu, switches %d voluntary / %d involuntary, cpu%d->cpu%d, "
+			"render %s->%s, %d threads",
+			c.at, c.wallUs / 1000.0, c.percent, c.cpuUs / 1000.0,
+			c.volSwitches, c.involSwitches, c.cpuStart, c.cpuEnd,
+			windowPhaseName(c.phaseStart), windowPhaseName(c.phaseEnd), c.threads);
+	}
+	if (skipped > 0 || dropped > 0)
+		AUDIO_WARN("Oboe: %d more slow callbacks not written (%u lost to a full ring)",
+			skipped + (int) dropped, dropped);
+}
+
 
 /** When the last underrun happened, as rack::system::getTime(). */
 static std::atomic<double> g_lastUnderrunAt{0.0};
@@ -785,6 +860,29 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 	// oboe::AudioStreamDataCallback
 
+	static void recordSlowCallback(int64_t elapsed, int32_t percent, const timespec& cpu0,
+			const rusage& ru0, int cpuStart, int phaseStart) {
+		timespec cpu1;
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu1);
+		rusage ru1;
+		getrusage(RUSAGE_THREAD, &ru1);
+		uint32_t w = g_slowWrite.load(std::memory_order_relaxed);
+		SlowCallback& c = g_slowRing[w % SLOW_RING];
+		c.at = rack::system::getTime();
+		c.wallUs = (int32_t) (elapsed / 1000);
+		c.cpuUs = (int32_t) (((int64_t) (cpu1.tv_sec - cpu0.tv_sec) * 1000000000LL
+			+ (cpu1.tv_nsec - cpu0.tv_nsec)) / 1000);
+		c.percent = percent;
+		c.volSwitches = (int16_t) (ru1.ru_nvcsw - ru0.ru_nvcsw);
+		c.involSwitches = (int16_t) (ru1.ru_nivcsw - ru0.ru_nivcsw);
+		c.cpuStart = (int8_t) cpuStart;
+		c.cpuEnd = (int8_t) sched_getcpu();
+		c.phaseStart = (int8_t) phaseStart;
+		c.phaseEnd = (int8_t) windowPhase();
+		c.threads = rack::settings::threadCount;
+		g_slowWrite.store(w + 1, std::memory_order_release);
+	}
+
 	oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* audioData, int32_t numFrames) override {
 		float* output = (float*) audioData;
 		// What the stream actually asks for, which is not the engine's block
@@ -839,6 +937,16 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		bool reportToAdpf = adpfActive();
 		timespec t0;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
+		// For the slow-callback record. None of these block: thread CPU time
+		// and getrusage are plain syscalls on the calling thread's own
+		// counters, sched_getcpu is a vDSO read. Taken every time because by
+		// the time a callback is known to be slow its start is gone.
+		timespec cpu0;
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu0);
+		rusage ru0;
+		getrusage(RUSAGE_THREAD, &ru0);
+		int cpuStart = sched_getcpu();
+		int phaseStart = windowPhase();
 
 		const float* input = NULL;
 		if (inputStream) {
@@ -880,6 +988,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 				;
 			g_loadSumPercent.fetch_add(percent, std::memory_order_relaxed);
 			g_loadCount.fetch_add(1, std::memory_order_relaxed);
+			if (percent >= SLOW_CALLBACK_PERCENT)
+				recordSlowCallback(elapsed, percent, cpu0, ru0, cpuStart, phaseStart);
 		}
 
 		return oboe::DataCallbackResult::Continue;

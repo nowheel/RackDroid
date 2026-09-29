@@ -488,7 +488,11 @@ static int32_t handleInput(android_app* app, AInputEvent* event) {
 	// into Rack's event code. The dialog is modal, so just drain them.
 	if (rackdroid::dialogIsPumping())
 		return 0;
-	return rackdroid::touchHandleEvent(event);
+	int prev = rackdroid::windowPhase();
+	rackdroid::windowSetPhase(rackdroid::RENDER_INPUT);
+	int handled = rackdroid::touchHandleEvent(event);
+	rackdroid::windowSetPhase(prev);
+	return handled;
 }
 
 
@@ -1788,7 +1792,9 @@ void android_main(android_app* app) {
 				// Engine and audio outlive the surface, so what tunes them
 				// runs whether or not anything is on screen. None of these
 				// touch the window or the scene.
+				rackdroid::windowSetPhase(rackdroid::RENDER_TUNE);
 				checkWorkerPriority();
+				rackdroid::audioReportSlowCallbacks();
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
 				rackdroid::audioReportLatency();
@@ -1812,6 +1818,7 @@ void android_main(android_app* app) {
 					checkLanguageChanged();
 					APP->window->step();
 				}
+				rackdroid::windowSetPhase(rackdroid::RENDER_IDLE);
 			}
 			catch (std::exception& e) {
 				LOGE("FATAL in frame step: %s", e.what());

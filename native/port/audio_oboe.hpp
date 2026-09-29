@@ -69,6 +69,11 @@ change is a reopen that buys nothing and reports a latency it did not achieve.
 Seen on a Lenovo TB-X306X, whose burst is 960 frames. */
 int32_t audioAlignedCallbackFrames(int blockSize);
 
+/** Writes the callbacks that ran at least twice their deadline to the log,
+with their CPU time, context switches and what the render thread was doing.
+Frame loop only, for the same reason as audioReportUnderruns(). */
+void audioReportSlowCallbacks();
+
 /** Writes any new underruns to the log. Call from the frame loop, never from
 the audio callback: Rack's logger locks a mutex and fflush()es, which is the
 last thing a late callback should be made to wait for. */

@@ -51,4 +51,22 @@ without this the underruns it causes look to the engine like the patch's
 fault. */
 void windowNoteSurfaceChange();
 
+/** What the render thread is doing right now, coarsely. Written by the render
+thread at each stage of its loop, read by the audio callback when a block runs
+late, so a stall in the log says what the other side was busy with at the time.
+A diagnostic only: nothing decides anything on it. */
+enum RenderPhase {
+	RENDER_IDLE = 0, // waiting in the looper
+	RENDER_INPUT,    // dispatching a touch
+	RENDER_TUNE,     // engine/audio maintenance in the frame loop
+	RENDER_STEP,     // Scene::step (includes Rack's periodic autosave)
+	RENDER_DRAW,     // Scene::draw, framebuffer rebuilds included
+	RENDER_FLUSH,    // nvgEndFrame: the GL submission
+	RENDER_SWAP,     // eglSwapBuffers
+	RENDER_PHASES
+};
+void windowSetPhase(int phase);
+int windowPhase();
+const char* windowPhaseName(int phase);
+
 } // namespace rackdroid

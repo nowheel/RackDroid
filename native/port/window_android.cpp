@@ -49,6 +49,39 @@ both the audio driver and the window: this file lives in the engine library and
 cannot call into the app's. Read by Window::step, written by
 rackdroid::windowSetAudioStressed at the bottom of this file. */
 static std::atomic<bool> g_audioStressed{false};
+
+/** See rackdroid::RenderPhase. */
+static std::atomic<int> g_renderPhase{0};
+
+/** Where a slow frame spent its time, one entry per RenderPhase. Only the
+stages inside Window::step are timed here; a frame that is slow before it gets
+there (input, maintenance) shows up as a long gap between frames instead. */
+static void reportSlowFrame(double gap, const double* spent) {
+	// A frame longer than this has already been seen by anyone looking at the
+	// screen. Most frames are ~8-17 ms; a stall is what is being looked for.
+	static const double SLOW_FRAME_SEC = 0.050;
+	double total = 0.0;
+	for (int i = 0; i < rackdroid::RENDER_PHASES; i++)
+		total += spent[i];
+	if (total < SLOW_FRAME_SEC && gap < SLOW_FRAME_SEC * 2)
+		return;
+	// A stall produces a run of these; a few a second are enough to read it,
+	// and the rest would only push older evidence out of a capped log file.
+	static double budgetFrom = 0.0;
+	static int budget = 0;
+	double now = rack::system::getTime();
+	if (now - budgetFrom >= 1.0) {
+		budgetFrom = now;
+		budget = 5;
+	}
+	if (budget <= 0)
+		return;
+	budget--;
+	WARN("Render: slow frame %.0f ms (since previous %.0f ms): step %.0f, draw %.0f, "
+		"flush %.0f, swap %.0f", total * 1e3, gap * 1e3,
+		spent[rackdroid::RENDER_STEP] * 1e3, spent[rackdroid::RENDER_DRAW] * 1e3,
+		spent[rackdroid::RENDER_FLUSH] * 1e3, spent[rackdroid::RENDER_SWAP] * 1e3);
+}
 #if defined(__ANDROID__)
 	#include "menu_native.hpp"
 	#include "browser_native.hpp"
@@ -303,9 +336,22 @@ void Window::step() {
 		return;
 
 	double frameTime = system::getTime();
+	double frameGap = 0.0;
 	if (std::isfinite(internal->frameTime)) {
 		internal->lastFrameDuration = frameTime - internal->frameTime;
+		frameGap = internal->lastFrameDuration;
 	}
+	double spent[rackdroid::RENDER_PHASES] = {};
+	double stageAt = frameTime;
+	int stage = rackdroid::RENDER_STEP;
+	auto enterStage = [&](int next) {
+		double t = system::getTime();
+		spent[stage] += t - stageAt;
+		stageAt = t;
+		stage = next;
+		rackdroid::windowSetPhase(next);
+	};
+	rackdroid::windowSetPhase(rackdroid::RENDER_STEP);
 	internal->frameTime = frameTime;
 	internal->fbCount = 0;
 
@@ -350,6 +396,7 @@ void Window::step() {
 		rackdroid::fixupMenus();
 
 		// Render scene
+		enterStage(rackdroid::RENDER_DRAW);
 		nvgBeginFrame(vg, fbWidth, fbHeight, pixelRatio);
 		nvgScale(vg, pixelRatio, pixelRatio);
 
@@ -358,6 +405,7 @@ void Window::step() {
 		args.clipBox = APP->scene->box.zeroPos();
 		APP->scene->draw(args);
 
+		enterStage(rackdroid::RENDER_FLUSH);
 		glViewport(0, 0, fbWidth, fbHeight);
 		glClearColor(0.0, 0.0, 0.0, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -382,8 +430,11 @@ void Window::step() {
 		eglSwapInterval(internal->display, wantedInterval);
 	}
 
+	enterStage(rackdroid::RENDER_SWAP);
 	eglSwapBuffers(internal->display, internal->surface);
+	enterStage(rackdroid::RENDER_IDLE);
 	internal->frame++;
+	reportSlowFrame(frameGap, spent);
 }
 
 
@@ -590,6 +641,24 @@ void windowSetMods(int mods) {
 	rack::window::Window* w = APP->window;
 	if (w)
 		w->internal->mods = mods;
+}
+
+
+void windowSetPhase(int phase) {
+	g_renderPhase.store(phase, std::memory_order_relaxed);
+}
+
+
+int windowPhase() {
+	return g_renderPhase.load(std::memory_order_relaxed);
+}
+
+
+const char* windowPhaseName(int phase) {
+	static const char* const names[RENDER_PHASES] = {
+		"idle", "input", "tune", "step", "draw", "flush", "swap",
+	};
+	return (phase >= 0 && phase < RENDER_PHASES) ? names[phase] : "?";
 }
 
 
