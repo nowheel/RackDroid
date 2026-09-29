@@ -1129,6 +1129,7 @@ static void checkThreadCount() {
 	double windowLen = now - windowStartedAt;
 	int32_t loadPeak = windowLoadPeak;
 	int32_t loadMean = windowLoadMean;
+	int32_t loadSamples = windowLoadSamples;
 	windowLoadPeak = 0;
 	windowLoadSum = 0;
 	windowLoadSamples = 0;
@@ -1177,6 +1178,26 @@ static void checkThreadCount() {
 	// candidate's first window carries the move that created it, so without
 	// this exemption the fast rejection would be thrown away exactly when it
 	// is most useful.
+	// Underruns in a window where no callback ran past its deadline are not
+	// this thread count's doing, whatever their number. The xrun counter is
+	// read in the callback and lags the stall that caused it: on a Nothing
+	// A024 a one-second stall during a pinch at 2 threads was counted as
+	// "137 underruns in 1.5s at 3 threads (10% of the deadline, peak 97%)",
+	// and the search climbed on the strength of it to 4, 5, 6 and 7 -- where
+	// the barrier traffic made the engine genuinely late, 1360% and 2099% of
+	// the deadline, for clicks nobody would have heard at 3. The peak is only
+	// collected once the window has settled, which is exactly what keeps the
+	// stall that produced these underruns out of it; so trust it only when
+	// there are enough readings to have seen the window at all.
+	if (!hopeless && rawUnderruns > 0 && loadPeak < 100
+			&& loadSamples >= LOAD_MIN_SAMPLES) {
+		LOGI("Engine: %d underruns in %.1fs at %d threads, but no callback ran "
+			"late in that window (%d%% of the deadline, peak %d%%); not the "
+			"thread count, not counting it", rawUnderruns, windowLen, current,
+			loadMean, loadPeak);
+		return;
+	}
+
 	static const int32_t DISTURBANCE_EXCUSES = 10;
 	if (touched && !hopeless && underruns <= DISTURBANCE_EXCUSES) {
 		// Say so: a discarded window looks exactly like a tuner doing nothing,
