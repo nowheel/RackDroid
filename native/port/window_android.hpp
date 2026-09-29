@@ -66,6 +66,11 @@ enum RenderPhase {
 	RENDER_PHASES
 };
 void windowSetPhase(int phase);
+
+/** Places timing markers between the RackWidget's children, so a slow frame's
+log line can say which part of the rack took the time. Call once, after the
+label overlay has been added (it must be the last child). Diagnostic only. */
+void windowInstallDrawMarkers();
 int windowPhase();
 const char* windowPhaseName(int phase);
 

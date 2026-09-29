@@ -22,6 +22,12 @@ static const float MAX_RACK_ZOOM = 2.f;
 Returns 1 if the event was consumed. */
 int touchHandleEvent(AInputEvent* event);
 
+/** Seconds since two fingers last moved relative to each other -- a pinch in
+progress -- or a large number if there has never been one. The renderer uses
+it to stop re-rendering module framebuffers while the zoom is still moving;
+see Window::getFrameDurationRemaining() in window_android.cpp. */
+double touchSecondsSincePinch();
+
 /** Per-frame housekeeping (long-press detection). Call once per rendered
 frame, before Window::step(). */
 void touchStep();

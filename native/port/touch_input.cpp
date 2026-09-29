@@ -125,7 +125,7 @@ PINCH_ZOOM_SPEED * 50. That inverts exactly, so the gesture can be stopped ON
 the ceiling instead of sailing past it.
 
 Which it was doing, worse than before the ratios were batched: a single
-application now carries up to a thirtieth of a second of pinch, and a fast one
+application carries every sample since the last one, and a fast one
 took the zoom from 1.99 straight to 2.40. checkZoomCeiling then hauls it back
 by calling setZoom EVERY FRAME until it lands -- and every setZoom invalidates
 every module's framebuffer, which is the exact cost all of this exists to
@@ -143,11 +143,19 @@ static float clampZoomInToCeiling(float ratio) {
 	return (ratio > maxRatio) ? maxRatio : ratio;
 }
 
-/** How often a pinch may actually move the zoom, in seconds. Not a limit on
-how much it moves -- the ratios accumulate between applications, so the gesture
-arrives where the fingers put it, just in fewer steps. See the comment at the
-call site for why the step count is what matters. */
-static const double ZOOM_APPLY_INTERVAL = 1.0 / 30.0;
+/** How often a pinch may actually move the zoom, in seconds: about once per
+displayed frame. Not a limit on how much it moves -- the ratios accumulate
+between applications, so the gesture arrives where the fingers put it.
+
+It was 1/30 s, on the theory that each zoom value costs a rebuild of every
+module's framebuffer and touch samples outnumber frames. The rebuild happens
+at draw time, though, once per frame whatever the number of zoom values that
+went before it, so the throttle saved nothing -- and at 30 Hz on a 60-120 Hz
+screen the zoom visibly moved in steps. What bounds the rebuild now is the
+framebuffer budget during a pinch (Window::getFrameDurationRemaining() in
+window_android.cpp); and the audio breaking up during a pinch, which this was
+written for, was a spinning callback, fixed by giving it a core of its own. */
+static const double ZOOM_APPLY_INTERVAL = 1.0 / 120.0;
 
 // clampPinchRatio bounds a single MOVE callback's zoom change, which stops a
 // single glitched sample -- but not a BURST of them: a render/input thread
@@ -551,26 +559,13 @@ int touchHandleEvent(AInputEvent* event) {
 						// that must not turn into coasting when they lift.
 						st.lastPinchTime = now;
 						if (!atCap) {
-							// Accumulate, and hand it over on a clock rather
-							// than on every touch sample.
-							//
-							// Every distinct zoom value makes Rack rebuild the
-							// framebuffer of EVERY module, and touch samples
-							// arrive far faster than frames -- this log shows
-							// several inside one millisecond. At 240 Hz that is
-							// 240 full rebuilds a second competing with the
-							// audio callback, and it is audible: reported as
-							// "the sound breaks up while zooming", with the
-							// underruns in the log clustered exactly on the
-							// pinch bursts. Panning goes through the same
-							// handleScroll and does NOT break the audio, which
-							// is what points at the rebuild rather than at the
-							// touch handling.
-							//
-							// Thirty a second keeps the gesture smooth to the
-							// eye and cuts the rebuilds by up to eightfold.
-							// Nothing is lost: the ratios add up, so the zoom
-							// still ends exactly where the fingers put it.
+							// Accumulate, and hand it over about once a
+							// frame rather than on every touch sample: several
+							// can arrive inside one millisecond, and only the
+							// last before a frame is ever seen. See
+							// ZOOM_APPLY_INTERVAL. Nothing is lost: the ratios
+							// add up, so the zoom still ends exactly where the
+							// fingers put it.
 							st.pendingZoom += ratio;
 							if (now - st.lastZoomApply >= ZOOM_APPLY_INTERVAL) {
 								st.lastZoomApply = now;
@@ -625,7 +620,7 @@ int touchHandleEvent(AInputEvent* event) {
 			if (st.gesture && pointerCount == 2) {
 				// Hand over whatever the clock had not got to yet, so the zoom
 				// ends exactly where the fingers left it rather than up to a
-				// thirtieth of a second short of it. The centroid is stale by
+				// frame short of it. The centroid is stale by
 				// one sample here, which for a zoom anchor nobody can see.
 				// The cap applies here too. Without this check the flush
 				// poured the whole accumulation in regardless, pushing the
@@ -780,6 +775,13 @@ int touchHandleEvent(AInputEvent* event) {
 		default:
 			return 0;
 	}
+}
+
+
+double touchSecondsSincePinch() {
+	if (st.lastPinchTime <= 0.0)
+		return 1e9;
+	return rack::system::getTime() - st.lastPinchTime;
 }
 
 

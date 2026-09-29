@@ -32,6 +32,7 @@
 #include <asset.hpp>
 #include <widget/Widget.hpp>
 #include <app/Scene.hpp>
+#include <app/RackWidget.hpp>
 #include <context.hpp>
 #include <patch.hpp>
 #include <settings.hpp>
@@ -42,6 +43,7 @@
 #include <atomic>
 
 #include "window_android.hpp"
+#include "touch_input.hpp"
 #include "menu_touch.hpp"
 
 /** Set from the frame loop (main_android.cpp), which is the layer that can see
@@ -50,13 +52,75 @@ cannot call into the app's. Read by Window::step, written by
 rackdroid::windowSetAudioStressed at the bottom of this file. */
 static std::atomic<bool> g_audioStressed{false};
 
+/** How long after the fingers last moved apart or together framebuffers are
+still left alone (see pinchFreezesFramebuffers()). Long enough to bridge the gap between two touch samples, short
+enough that fingers resting mid-gesture already get a sharp picture. */
+static const double PINCH_FB_HOLD_SEC = 0.1;
+
+/** While a pinch is moving the zoom, no framebuffer is rebuilt at all: every
+one is drawn scaled from what it last held, and they sharpen once the fingers
+stop. Rebuilding one at a new size costs far more than drawing it -- measured
+40-250 ms for the rail's single tile alone on a Nothing A024 and a OnePlus 8T,
+and 50-100 ms for one module panel, growing with the framebuffer's pixel size
+and not with the SVG's complexity (a rail cut from 667 shapes to 51 cost the
+same). That is the texture being deleted and reallocated at every zoom step,
+and it is already out of date by the next step anyway.
+
+Two levers, because FramebufferWidget::draw() has two reasons to rebuild: time
+left in the frame (getFrameDurationRemaining(), made negative here), and being
+the first dirty framebuffer of the frame, which it rebuilds regardless. The
+second is judged by Window::fbCount(), which Window::step() therefore starts at
+1 instead of 0 during a pinch -- "one has already been rebuilt this frame". So
+the rail, always first in the rack, stops paying for the whole gesture.
+
+The price: a module that has never been drawn before (scrolled into view for
+the first time during the pinch) stays empty until the fingers stop. */
+static bool pinchFreezesFramebuffers() {
+	return rackdroid::touchSecondsSincePinch() < PINCH_FB_HOLD_SEC;
+}
+
 /** See rackdroid::RenderPhase. */
 static std::atomic<int> g_renderPhase{0};
+
+/** Timestamps inside Scene::draw, taken by marker widgets placed between the
+RackWidget's own children (see windowInstallDrawMarkers()). Reset every frame;
+zero means the marker was not reached. */
+enum DrawMark {
+	MARK_START,        // before the rail
+	MARK_RAIL,         // after the rail
+	MARK_MODULES,      // after every module's panel and widgets
+	MARK_CONTAINERS,   // after the plug and cable containers' base layer
+	MARK_LABELS,       // after RackDroid's control labels
+	MARK_LAYERS_START, // lights and halos begin
+	MARK_LAYERS_END,   // cables done
+	DRAW_MARKS
+};
+static double g_drawMark[DRAW_MARKS];
+
+struct DrawMarker : rack::widget::Widget {
+	int drawMark = -1;
+	int layerMark = -1;
+	int markLayer = 0;
+	void draw(const DrawArgs& args) override {
+		if (drawMark >= 0)
+			g_drawMark[drawMark] = rack::system::getTime();
+	}
+	void drawLayer(const DrawArgs& args, int layer) override {
+		if (layerMark >= 0 && layer == markLayer)
+			g_drawMark[layerMark] = rack::system::getTime();
+	}
+};
+
+static double markSpan(int from, int to) {
+	if (g_drawMark[from] <= 0.0 || g_drawMark[to] <= 0.0 || g_drawMark[to] < g_drawMark[from])
+		return -1.0;
+	return g_drawMark[to] - g_drawMark[from];
+}
 
 /** Where a slow frame spent its time, one entry per RenderPhase. Only the
 stages inside Window::step are timed here; a frame that is slow before it gets
 there (input, maintenance) shows up as a long gap between frames instead. */
-static void reportSlowFrame(double gap, const double* spent) {
+static void reportSlowFrame(double gap, const double* spent, int fbDirty, bool pinchFrozen) {
 	// A frame longer than this has already been seen by anyone looking at the
 	// screen. Most frames are ~8-17 ms; a stall is what is being looked for.
 	static const double SLOW_FRAME_SEC = 0.050;
@@ -81,6 +145,17 @@ static void reportSlowFrame(double gap, const double* spent) {
 		"flush %.0f, swap %.0f", total * 1e3, gap * 1e3,
 		spent[rackdroid::RENDER_STEP] * 1e3, spent[rackdroid::RENDER_DRAW] * 1e3,
 		spent[rackdroid::RENDER_FLUSH] * 1e3, spent[rackdroid::RENDER_SWAP] * 1e3);
+	// And inside draw: which part of the rack, how many framebuffers asked to
+	// be rebuilt, and whether the pinch was holding them back. -1 is a
+	// span whose markers were not both reached (nothing of the rack drawn).
+	WARN("Render:   draw = rail %.1f, modules %.1f, containers %.1f, labels %.1f, "
+		"lights/plugs/cables %.1f ms; %d framebuffers dirty, pinch freeze %s, zoom %.2f",
+		markSpan(MARK_START, MARK_RAIL) * 1e3, markSpan(MARK_RAIL, MARK_MODULES) * 1e3,
+		markSpan(MARK_MODULES, MARK_CONTAINERS) * 1e3,
+		markSpan(MARK_CONTAINERS, MARK_LABELS) * 1e3,
+		markSpan(MARK_LAYERS_START, MARK_LAYERS_END) * 1e3,
+		fbDirty, pinchFrozen ? "on" : "off",
+		(APP->scene && APP->scene->rackScroll) ? APP->scene->rackScroll->getZoom() : 0.f);
 }
 #if defined(__ANDROID__)
 	#include "menu_native.hpp"
@@ -342,6 +417,8 @@ void Window::step() {
 		frameGap = internal->lastFrameDuration;
 	}
 	double spent[rackdroid::RENDER_PHASES] = {};
+	for (int i = 0; i < DRAW_MARKS; i++)
+		g_drawMark[i] = 0.0;
 	double stageAt = frameTime;
 	int stage = rackdroid::RENDER_STEP;
 	auto enterStage = [&](int next) {
@@ -353,7 +430,7 @@ void Window::step() {
 	};
 	rackdroid::windowSetPhase(rackdroid::RENDER_STEP);
 	internal->frameTime = frameTime;
-	internal->fbCount = 0;
+	internal->fbCount = pinchFreezesFramebuffers() ? 1 : 0;
 
 	// Make event handlers and step() have a clean NanoVG context
 	nvgReset(vg);
@@ -434,7 +511,8 @@ void Window::step() {
 	eglSwapBuffers(internal->display, internal->surface);
 	enterStage(rackdroid::RENDER_IDLE);
 	internal->frame++;
-	reportSlowFrame(frameGap, spent);
+	reportSlowFrame(frameGap, spent, internal->fbCount,
+		pinchFreezesFramebuffers());
 }
 
 
@@ -491,8 +569,15 @@ double Window::getLastFrameDuration() {
 
 
 double Window::getFrameDurationRemaining() {
+	double elapsed = system::getTime() - internal->frameTime;
+	// The only reader is FramebufferWidget::draw(), which re-renders a dirty
+	// framebuffer while this is above -1/60 and otherwise draws the one it
+	// has, scaled. See pinchFreezesFramebuffers() for why none is re-rendered
+	// while a pinch is moving the zoom.
+	if (pinchFreezesFramebuffers())
+		return -1.0;
 	double frameDuration = 1.f / settings::frameRateLimit;
-	return frameDuration - (system::getTime() - internal->frameTime);
+	return frameDuration - elapsed;
 }
 
 
@@ -641,6 +726,31 @@ void windowSetMods(int mods) {
 	rack::window::Window* w = APP->window;
 	if (w)
 		w->internal->mods = mods;
+}
+
+
+void windowInstallDrawMarkers() {
+	if (!APP->scene || !APP->scene->rack)
+		return;
+	rack::app::RackWidget* rack = APP->scene->rack;
+	if (rack->children.empty())
+		return;
+	rack::widget::Widget* rail = rack->children.front();
+	rack::widget::Widget* modules = rack->getModuleContainer();
+	rack::widget::Widget* cables = rack->getCableContainer();
+	auto marker = [&](int drawMark, int layerMark, int layer) {
+		DrawMarker* m = new DrawMarker;
+		m->box = rack->box.zeroPos(); // never culled
+		m->drawMark = drawMark;
+		m->layerMark = layerMark;
+		m->markLayer = layer;
+		return m;
+	};
+	rack->addChildBottom(marker(MARK_START, MARK_LAYERS_START, 1));
+	rack->addChildAbove(marker(MARK_RAIL, -1, 0), rail);
+	rack->addChildAbove(marker(MARK_MODULES, -1, 0), modules);
+	rack->addChildAbove(marker(MARK_CONTAINERS, -1, 0), cables);
+	rack->addChild(marker(MARK_LABELS, MARK_LAYERS_END, 3));
 }
 
 

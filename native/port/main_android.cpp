@@ -384,6 +384,7 @@ struct RackDroidApp {
 					(system::getTime() - tPatch) * 1000.0);
 				APP->engine->startFallbackThread();
 				rackdroid::installLabelOverlay();
+				rackdroid::windowInstallDrawMarkers();
 				rackdroid::installCableParkBar();
 				rackdroid::installSelectionGlow();
 				patchLaunched = true;

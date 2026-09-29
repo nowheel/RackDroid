@@ -306,6 +306,24 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   render thread spezzava l'audio allo zoom massimo. Limite applicato in due
   punti: `touch_input.cpp` non chiede più del muro, `checkZoomCeiling()` copre
   ogni altra via (menu View, patch salvata su desktop a 4×).
+- **Durante un pinch nessun framebuffer viene ricreato.** Ogni passo di zoom
+  sporca il framebuffer di ogni pannello, manopola e presa, e cambiandone la
+  dimensione Rack **cancella e rialloca la texture** prima di ridisegnarla.
+  Misurato con i marcatori di `windowInstallDrawMarkers()`: 40–250 ms per il
+  solo riquadro delle rotaie, 50–100 ms per un pannello (Nothing A024, OnePlus
+  8T), in crescita con i pixel del framebuffer e **non** con la complessità
+  dell'SVG — le rotaie portate da 667 forme a 51 costavano uguale. Il budget di
+  upstream non basta: `FramebufferWidget::draw()` ricrea comunque il primo
+  framebuffer sporco del frame, e il primo sono sempre le rotaie. Ora durante
+  il gesto `getFrameDurationRemaining()` è negativo e `Window::step()` fa
+  partire `fbCount()` da 1 ("il primo è già stato fatto"): tutto viene
+  disegnato scalato e torna nitido 0,1 s dopo che le dita si fermano. Stessa
+  prova dopo: nessun frame lento durante il gesto, gesto fluido e sfocatura
+  "quasi inesistente" a occhio, scatto al rilascio non percepito (su A024 due
+  frame da ~60 ms). Costo: un modulo mai disegnato che entra in vista durante
+  il pinch resta vuoto fino al rilascio. Il pinch applica lo zoom circa una
+  volta per frame, non più a 30 Hz: la ricostruzione avviene al disegno, e a
+  30 Hz su uno schermo a 60–120 Hz lo zoom avanzava a scatti.
 - **Tenuta termica misurata (S22, 12 minuti di carico continuo + churn di
   lifecycle):** picco AP 49,0 °C, picco SKIN 38,9 °C, throttling mai oltre il
   livello 1, batteria in salita con un alimentatore da ~10 W. Dopo il primo
