@@ -301,9 +301,29 @@ def blank(w, h):
     return svg_open(w, h) + f'<rect width="{w}" height="{h}" fill="none"/></svg>'
 
 
+def circle_subpath(cx, cy, r):
+    """One circle as a closed subpath, for merging many into a single <path>."""
+    return (f"M{cx - r:.2f},{cy:.2f}"
+            f"A{r:.2f},{r:.2f} 0 1,0 {cx + r:.2f},{cy:.2f}"
+            f"A{r:.2f},{r:.2f} 0 1,0 {cx - r:.2f},{cy:.2f}Z")
+
+
 def rail(w, h, dark=False):
     """Rack background: perforated 'grate' metal tiled across the rack, with
-    a mounting rail (holes) at the top and bottom of each 380px row."""
+    a mounting rail (holes) at the top and bottom of each 380px row.
+
+    The holes are grouped one <path> per row and kind: ~50 shapes instead of
+    one <circle> each (667). Rack draws an SVG one nanovg fill per shape, and
+    the rail tile is re-rendered whenever the zoom changes, so fewer fills is
+    cheaper -- but measured on a Nothing A024 and a OnePlus 8T it was NOT what
+    made pinch-zoom stutter: the rebuild cost the same with 51 shapes, and
+    grew with the framebuffer's pixel size. That was the texture being
+    reallocated (see pinchFreezesFramebuffers() in window_android.cpp).
+    Do not put all the holes in ONE path either: window::svgDraw tests every
+    subpath of a shape against every segment of the others to tell holes from
+    solids, and at 330 subpaths that is over a million tests per render. The
+    holes never overlap, so none of this changes what is on screen.
+    """
     bg = RAIL_BG_DARK if dark else RAIL_BG
     grate = RAIL_GRATE_DARK if dark else RAIL_GRATE
     railcol = RAIL_COL
@@ -315,19 +335,26 @@ def rail(w, h, dark=False):
     # Perforated grate: staggered small holes across the whole tile
     step = 19.0
     r = 3.2
+    grate_rows = []
     row = 0
     y = step / 2
     while y < h:
         off = (step / 2) if (row % 2) else 0.0
         x = step / 2 + off
+        rims, holes = [], []
         while x < w:
-            out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{grate}"/>')
-            out.append(f'<circle cx="{x:.1f}" cy="{y-0.6:.1f}" r="{r*0.55:.1f}" fill="{holecol}"/>')
+            rims.append(circle_subpath(x, y, r))
+            holes.append(circle_subpath(x, y - 0.6, round(r * 0.55, 1)))
             x += step
+        grate_rows.append(("".join(rims), "".join(holes)))
         y += step
         row += 1
+    for rims, holes in grate_rows:
+        out.append(f'<path d="{rims}" fill="{grate}"/>')
+        out.append(f'<path d="{holes}" fill="{holecol}"/>')
     # Mounting rails at each row boundary (top and bottom of every 380px row)
     rail_h = 26.0
+    mount_rows = []
     yb = 0.0
     while yb <= h + 1:
         out.append(f'<rect x="0" y="{yb:.1f}" width="{w}" height="{rail_h}" fill="{railcol}"/>')
@@ -335,11 +362,16 @@ def rail(w, h, dark=False):
         out.append(f'<rect x="0" y="{yb+rail_h-2:.1f}" width="{w}" height="2" fill="{holecol}"/>')
         # Evenly spaced mounting holes along the rail
         hx = 15.0
+        holes = []
         while hx < w:
-            out.append(f'<circle cx="{hx:.1f}" cy="{yb+rail_h/2:.1f}" r="4.5" fill="{holecol}"/>')
-            out.append(f'<circle cx="{hx:.1f}" cy="{yb+rail_h/2:.1f}" r="4.5" fill="none" stroke="{hi}" stroke-width="0.8"/>')
+            holes.append(circle_subpath(hx, yb + rail_h / 2, 4.5))
             hx += 30.0
+        if holes:
+            mount_rows.append("".join(holes))
         yb += ROW
+    for holes in mount_rows:
+        out.append(f'<path d="{holes}" fill="{holecol}"/>')
+        out.append(f'<path d="{holes}" fill="none" stroke="{hi}" stroke-width="0.8"/>')
     out.append('</svg>')
     return "\n".join(out)
 
