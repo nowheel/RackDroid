@@ -347,8 +347,9 @@ bool audioUnderrunsRecently() {
 }
 
 /** The audio callback thread, as gettid() -- readable only from inside the
-callback, so it is published from there the first time it runs. Zero until
-then. ADPF wants it at the head of its thread list. */
+callback, so it is published from there the first time each callback thread
+runs. Zero until then. ADPF wants it at the head of its thread list, and the
+core pinning in main_android.cpp keeps the Workers off its core. */
 static std::atomic<int> g_audioThreadTid{0};
 
 int audioCallbackThreadTid() {
@@ -925,9 +926,15 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		}
 
 		// The callback thread is one of the threads ADPF needs to know about,
-		// and it is the only place its id can be read. Published once.
-		if (g_audioThreadTid.load(std::memory_order_relaxed) == 0)
-			g_audioThreadTid.store(gettid(), std::memory_order_relaxed);
+		// and it is the only place its id can be read. Published once per
+		// thread, not once ever: every reopened stream calls back on a new
+		// one, and the old id pointed ADPF and the core pinning at a thread
+		// that no longer existed.
+		static thread_local int callbackTid = 0;
+		if (callbackTid == 0) {
+			callbackTid = gettid();
+			g_audioThreadTid.store(callbackTid, std::memory_order_relaxed);
+		}
 
 		// Bracket the work ADPF is asked to make fit, and measure how much of
 		// the callback's own deadline it used. CLOCK_MONOTONIC because that is

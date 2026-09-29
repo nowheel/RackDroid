@@ -267,6 +267,34 @@ Obiettivo: vedere il rack renderizzato e interagirci.
 - **Il core riservato si sceglie per frequenza, non per indice**: su SM8250
   cpu7 è il core *prime*, quindi la vecchia regola `cores-1` regalava via il
   core più veloce (`pickReservedCpu()` legge `cpuinfo_max_freq`).
+- **La callback audio ha un core suo, e nessun worker ci può andare.** "Si
+  interrompe mentre si fa lo zoom" su un Nothing A024, patch di sette moduli a
+  2 thread: il log degli stalli (`audioReportSlowCallbacks()`) ha misurato
+  `1633.4 ms wall, 1628.0 ms cpu, switches 0 voluntary` — un secondo e mezzo di
+  CPU per un blocco che di norma ne usa il 14% di 10 ms, senza mai dormire. La
+  callback **girava a vuoto** sulla `SpinBarrier` di `Engine_stepFrame()`. È
+  SCHED_FIFO (glielo concede AAudio), i worker sono thread normali a nice -19:
+  quando lo scheduler li mette sullo stesso core, lo spinner real-time
+  preempta proprio il worker che sta aspettando, e lì nessuno può farlo girare
+  finché non interviene il throttle RT del kernel o il load balancer. Stalli
+  misurati da 0,3 a 1,9 s, 600 underrun in dieci secondi. Emergeva col pinch
+  perché è lì che il render thread (50–100 ms a frame in draw) tiene occupati
+  gli altri core; e più thread volevano dire più occasioni di collisione,
+  infatti il regolatore che saliva a 7 peggiorava. Ora `applyWorkerAffinity()`
+  fissa la callback sul core più veloce (`pickAudioCpu()`, cpu7 sull'SM8735) e
+  tiene i worker fuori da quello e da quello riservato: su 8 core ne restano 6,
+  esattamente quanti ne chiede il soffitto di 7 thread. Stessa prova dopo:
+  **zero callback lente e zero underrun** durante il pinch, a 1024 e a 512
+  frame, audio pulito all'ascolto. Trovato per strada: l'id del thread della
+  callback veniva pubblicato una volta sola, ma ogni riapertura dello stream
+  richiama su un thread nuovo, quindi ADPF (e ora il pin) puntavano a un thread
+  morto. Ora si pubblica per thread, e il pin segue la riapertura.
+- **Un underrun senza una callback in ritardo non è colpa dei thread.** Il
+  contatore xrun si legge nella callback ed è in ritardo sullo stallo che lo ha
+  causato: lo stallo di sopra a 2 thread è stato contato come
+  "137 underruns at 3 threads (10% of the deadline, peak 97%)", e il regolatore
+  è salito a 4, 5, 6, 7 dove la barriera rendeva il motore davvero in ritardo
+  (1360%, 2099%). Una finestra con picco sotto il 100% ora non viene contata.
 - **Il block size non può superare la capacità del buffer dello stream**: 4096
   frame in un buffer da 1536 è una callback in ritardo per costruzione
   (misurati 225 underrun/30 s). La scala è limitata da

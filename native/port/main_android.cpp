@@ -16,6 +16,7 @@
 #include <sys/system_properties.h>
 #include <dirent.h>
 #include <cstring>
+#include <cerrno>
 #include <vector>
 #include <sched.h>
 
@@ -572,6 +573,54 @@ static int pickReservedCpu(int cores) {
 }
 
 
+/** The core the audio callback thread is pinned to, so that no Worker can ever
+share one with it. Picked as the fastest core (the last of equals, which on
+every big.LITTLE layout seen so far is the prime core), never the one
+pickReservedCpu() keeps for the system. -1 when there are too few cores to
+set one aside.
+
+Why the callback needs a core of its own, measured on a Nothing A024 with a
+seven-module patch at two threads: "slow callback: 1633.4 ms wall, 1628.0 ms
+cpu, switches 0 voluntary". A second and a half of CPU for a block that
+normally takes 14% of 10 ms, without once going to sleep -- the callback was
+spinning. Engine::stepFrame syncs every thread at SpinBarrier twice per sample,
+and a spinner is only as fast as the slowest thread it waits for. The callback
+runs SCHED_FIFO (AAudio grants it); the Workers are ordinary threads at nice
+-19. When the scheduler puts both on one core, the real-time spinner preempts
+the very Worker it is waiting for, and nothing can run that Worker there until
+the kernel's real-time throttle steps in or the load balancer moves it -- the
+stalls measured were 0.3 to 1.9 s. It surfaced during a pinch because that is
+when the render thread keeps the other cores busy enough for the collision to
+happen and to last. More threads only add more chances of it, which is why the
+tuner climbing to seven made it worse, never better. */
+static int pickAudioCpu(int cores, int reservedCpu) {
+	if (cores <= 2)
+		return -1;
+	int bestCpu = -1;
+	long bestFreq = -1;
+	for (int cpu = 0; cpu < cores; cpu++) {
+		if (cpu == reservedCpu)
+			continue;
+		char path[96];
+		std::snprintf(path, sizeof(path),
+			"/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+		FILE* f = std::fopen(path, "r");
+		if (!f)
+			return reservedCpu == cores - 1 ? cores - 2 : cores - 1;
+		long freq = -1;
+		int n = std::fscanf(f, "%ld", &freq);
+		std::fclose(f);
+		if (n != 1 || freq <= 0)
+			return reservedCpu == cores - 1 ? cores - 2 : cores - 1;
+		if (freq >= bestFreq) {
+			bestFreq = freq;
+			bestCpu = cpu;
+		}
+	}
+	return bestCpu;
+}
+
+
 /** The engine's worker threads, by id. One walk of /proc/self/task rather
 than the three that would otherwise be needed -- priority, affinity and the
 ADPF hint session all want the same list, and they are all applied together
@@ -620,10 +669,38 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	if (cores <= 1)
 		return;
 	int reservedCpu = pickReservedCpu(cores);
+	int audioCpu = pickAudioCpu(cores, reservedCpu);
+
+	// The callback first: it is the thread the Workers must never meet. Only
+	// once per callback thread -- a reopened stream brings a new one, and
+	// checkWorkerPriority() calls back here when it does.
+	static int pinnedAudioTid = 0;
+	int audioTid = rackdroid::audioCallbackThreadTid();
+	if (audioCpu >= 0 && audioTid > 0 && audioTid != pinnedAudioTid) {
+		cpu_set_t audioMask;
+		CPU_ZERO(&audioMask);
+		CPU_SET(audioCpu, &audioMask);
+		if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
+			LOGI("Engine: pinned the audio callback thread to cpu%d, which no "
+				"worker may use", audioCpu);
+		}
+		else {
+			// Then the Workers must not be kept off a core the callback is
+			// not actually on: that would cost a core and buy nothing.
+			LOGW("Engine: could not pin the audio callback thread to cpu%d: %s",
+				audioCpu, strerror(errno));
+			audioCpu = -1;
+		}
+		pinnedAudioTid = audioTid;
+	}
+	else if (audioTid <= 0) {
+		audioCpu = -1; // no callback yet; nothing to keep the Workers away from
+	}
+
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	for (int cpu = 0; cpu < cores; cpu++) {
-		if (cpu != reservedCpu)
+		if (cpu != reservedCpu && cpu != audioCpu)
 			CPU_SET(cpu, &mask);
 	}
 	int pinned = 0;
@@ -631,7 +708,10 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 		if (sched_setaffinity(tid, sizeof(mask), &mask) == 0)
 			pinned++;
 	}
-	if (pinned > 0)
+	if (pinned > 0 && audioCpu >= 0)
+		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system, "
+			"and cpu%d, the audio callback's", pinned, reservedCpu, audioCpu);
+	else if (pinned > 0)
 		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system",
 			pinned, reservedCpu);
 }
@@ -663,6 +743,16 @@ static void checkWorkerPriority() {
 	if (settings::threadCount != lastThreadCount) {
 		lastThreadCount = settings::threadCount;
 		applyAt = system::getTime() + 0.5;
+	}
+	// A reopened stream (block size change, route change) calls back on a new
+	// thread, which is neither pinned nor known to ADPF. No delay needed: the
+	// id is only published from inside a running callback.
+	static int lastAudioTid = 0;
+	int audioTid = rackdroid::audioCallbackThreadTid();
+	if (audioTid > 0 && audioTid != lastAudioTid) {
+		lastAudioTid = audioTid;
+		if (applyAt <= 0.0)
+			applyAt = system::getTime();
 	}
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
