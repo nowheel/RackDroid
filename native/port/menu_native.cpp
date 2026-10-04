@@ -44,6 +44,7 @@
 
 #include "menu_native.hpp"
 #include "jni_bridge.hpp"
+#include "touch_input.hpp"
 
 // Mirror to Rack's logger too: it lands in <userDir>/log.txt, readable from
 // the in-app log viewer (no adb needed on device).
@@ -151,6 +152,18 @@ static bool capturable(ui::Menu* menu) {
 }
 
 
+/** Nothing in it but labels and separators: there is no row to choose. A
+ * button's context menu is one whenever the button has no Initialize -- only
+ * its name is left. */
+static bool labelsOnly(ui::Menu* menu) {
+	for (widget::Widget* c : menu->children) {
+		if (!dynamic_cast<ui::MenuLabel*>(c) && !dynamic_cast<ui::MenuSeparator*>(c))
+			return false;
+	}
+	return true;
+}
+
+
 /** Upstream MenuBar rows that are dead weight on Android and hidden from the
  * bottom sheet: Quit (apps exit via system navigation), Fullscreen
  * (Window::setFullScreen is a no-op -- always fullscreen), the mouse-only
@@ -163,9 +176,7 @@ static bool hiddenOnAndroid(const std::string& text) {
 	static const std::set<std::string> hidden = {
 		string::translate("MenuBar.file.quit"),
 		string::translate("MenuBar.view.fullscreen"),
-		string::translate("MenuBar.view.mouseWheelZoom"),
 		string::translate("MenuBar.view.lockCursor"),
-		string::translate("MenuBar.view.knobScroll"),
 		string::translate("MenuBar.help.manual"),
 		string::translate("MenuBar.help.tips"),
 		string::translate("MenuBar.help.support"),
@@ -180,10 +191,24 @@ static bool hiddenOnAndroid(const std::string& text) {
 		// owners writing one number, which is where every thread bug in issue
 		// #3 lived.
 		string::translate("MenuBar.engine.threads"),
+		// Nothing on Android paces frames on settings::frameRateLimit (vsync
+		// does), and main_android.cpp sets it at every launch for the one
+		// thing it still controls -- FramebufferWidget's re-render budget.
+		// So the row would show a number that is not the refresh rate, and
+		// a choice made there would be quietly undone at the next start: a
+		// tester read "120 Hz" as a change of frame rate.
+		string::translate("MenuBar.view.frameRate"),
 		string::f(string::translate("MenuBar.help.update"), APP_NAME),
 		string::f(string::translate("MenuBar.help.checkUpdate"), APP_NAME),
 	};
-	return hidden.count(text) > 0;
+	if (hidden.count(text) > 0)
+		return true;
+	// The two wheel rows are for a mouse and appear once one has been used
+	// (issue #5); to a finger they are dead weight like the rest.
+	if (!touchMouseSeen())
+		return text == string::translate("MenuBar.view.mouseWheelZoom")
+			|| text == string::translate("MenuBar.view.knobScroll");
+	return false;
 }
 
 
@@ -590,6 +615,15 @@ void processNativeMenus() {
 					top = dynamic_cast<ui::Menu*>(mc);
 					if (top)
 						break;
+				}
+				// A menu of labels alone offers nothing, and left on the canvas
+				// it sat over the whole rack until the back key: holding a
+				// step button on SEQ 3 looked like the app freezing with the
+				// audio still running (issue #3). Drop it.
+				if (top && labelsOnly(top)) {
+					LOGI("dropping a menu with no rows to choose");
+					overlay->requestDelete();
+					continue;
 				}
 				if (!top || !capturable(top))
 					continue; // not this one; keep scanning (was a `return`

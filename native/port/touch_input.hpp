@@ -22,6 +22,10 @@ static const float MAX_RACK_ZOOM = 2.f;
 Returns 1 if the event was consumed. */
 int touchHandleEvent(AInputEvent* event);
 
+/** True once a mouse has sent an event in this session. The View menu keeps
+its two wheel rows hidden until then: they mean nothing to a finger. */
+bool touchMouseSeen();
+
 /** Seconds since two fingers last moved relative to each other -- a pinch in
 progress -- or a large number if there has never been one. The renderer uses
 it to stop re-rendering module framebuffers while the zoom is still moving;

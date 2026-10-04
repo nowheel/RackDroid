@@ -23,6 +23,7 @@
 #include <widget/event.hpp>
 #include <window/Window.hpp>
 #include <ui/TextField.hpp>
+#include <ui/MenuOverlay.hpp>
 #include <app/ModuleWidget.hpp>
 #include <app/PortWidget.hpp>
 #include <app/Scene.hpp>
@@ -71,6 +72,11 @@ static const float PINCH_ZOOM_SPEED = 8.f;
 static const float INERTIA_MIN_SPEED = 80.f;   // scene units/s to start coasting
 static const float INERTIA_STOP_SPEED = 20.f;  // stop below this
 static const float INERTIA_DECAY = 4.f;         // exponential decay per second
+// A finger that stopped this long before lifting was put down, not flicked.
+// The velocity is only updated by MOVE samples, so without this the last
+// speed of a drag survived any pause after it and coasted the rack away when
+// the finger finally came off -- the inertia "at random" of issues #3 and #4.
+static const double INERTIA_REST_SEC = 0.1;
 // Caps a single velocity sample before it enters the EMA. Scene units track
 // dp (scenePos divides by density, same as Window's pixelRatio), so this is
 // ~20 screen-widths/s on a typical phone -- nothing a real flick reaches. A
@@ -218,6 +224,10 @@ struct TouchState {
 	// marquee, which now needs the toolbar's multi-select mode).
 	bool panSingle = false;
 
+	// The pointer of the current event is a mouse. A mouse drag does not coast:
+	// there is no flick in letting go of a button.
+	bool mouse = false;
+
 	// Multi-select mode only: the module this press landed on. Rack never sees
 	// the press, so the release can toggle the module's selection and a hold can
 	// turn it into a move instead of a context menu.
@@ -231,6 +241,10 @@ struct TouchState {
 };
 
 static TouchState st;
+
+/** A mouse has been used in this session. Read by the menu thread-side code,
+hence atomic. */
+static std::atomic<bool> mouseSeen{false};
 
 /** Patch lock (toolbar padlocks). 0 = off. 1 = layout lock: module drags
  * and port/cable touches are swallowed, params stay live. 2 = full lock:
@@ -262,6 +276,13 @@ static bool overInteractive() {
 		return true;
 	for (rack::widget::Widget* w = APP->event->hoveredWidget; w; w = w->parent) {
 		if (dynamic_cast<rack::app::PlugWidget*>(w))
+			return true;
+		// A menu drawn on the canvas (one the bottom sheet could not take)
+		// covers the rack with its overlay, and the overlay closes on a click.
+		// Treated as empty rack, a tap beside the menu became a pan and the
+		// click never arrived: the menu stayed, swallowing everything, and
+		// only the back key got rid of it -- reported as a freeze (issue #3).
+		if (dynamic_cast<rack::ui::MenuOverlay*>(w))
 			return true;
 	}
 	return false;
@@ -299,7 +320,11 @@ static bool pressBlockedByLock() {
 }
 
 
-static void startInertia() {
+/** `evTime` is the lifting event's own timestamp, on the same clock as
+st.lastMoveTime. */
+static void startInertia(double evTime) {
+	if (st.mouse || evTime - st.lastMoveTime > INERTIA_REST_SEC)
+		st.panVelocity = rack::math::Vec();
 	if (st.panVelocity.norm() >= INERTIA_MIN_SPEED) {
 		st.inertiaActive = true;
 		st.inertiaVel = st.panVelocity;
@@ -401,6 +426,75 @@ int touchHandleEvent(AInputEvent* event) {
 	size_t pointerCount = AMotionEvent_getPointerCount(event);
 
 	rack::math::Vec pos = scenePos(AMotionEvent_getX(event, 0), AMotionEvent_getY(event, 0));
+	// When the event HAPPENED, not when it is being handled. Samples that
+	// queued up behind a slow frame are handled microseconds apart, and a
+	// velocity taken over that gap is a real distance divided by almost
+	// nothing -- the clamp below then let 8000 units/s through as if it were a
+	// flick. Dividing by the time the finger actually took needs no clamp.
+	double evTime = AMotionEvent_getEventTime(event) * 1e-9;
+
+	st.mouse = AMotionEvent_getToolType(event, 0) == AMOTION_EVENT_TOOL_TYPE_MOUSE;
+	if (st.mouse) {
+		mouseSeen.store(true, std::memory_order_relaxed);
+		int32_t meta = AMotionEvent_getMetaState(event);
+		int mods = 0;
+		if (meta & AMETA_CTRL_ON)
+			mods |= GLFW_MOD_CONTROL;
+		if (meta & AMETA_SHIFT_ON)
+			mods |= GLFW_MOD_SHIFT;
+		if (meta & AMETA_ALT_ON)
+			mods |= GLFW_MOD_ALT;
+		switch (actionMasked) {
+			case AMOTION_EVENT_ACTION_HOVER_MOVE: {
+				// The pointer moving with no button down: Rack's own hover,
+				// which is what raises the tooltips.
+				APP->event->handleHover(pos, pos.minus(st.lastPos));
+				st.lastPos = pos;
+				return 1;
+			}
+			case AMOTION_EVENT_ACTION_SCROLL: {
+				// The wheel, exactly as upstream's scrollCallback hands it on:
+				// it scrolls the rack, zooms with Ctrl (or without, under
+				// View > mouse wheel zoom) and turns the knob under the pointer
+				// when View > scroll wheel knob control is on.
+				st.inertiaActive = false;
+				rack::math::Vec d(-AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HSCROLL, 0),
+					AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_VSCROLL, 0));
+				windowSetMods(mods);
+				APP->event->handleScroll(pos, d.mult(50.f));
+				windowSetMods(0);
+				return 1;
+			}
+			case AMOTION_EVENT_ACTION_DOWN: {
+				if (!(AMotionEvent_getButtonState(event) & AMOTION_EVENT_BUTTON_SECONDARY))
+					break;
+				// Right button: the context menu, at once. Nothing else of the
+				// gesture is ours -- down stays false, so the MOVEs and the UP
+				// that follow fall through without effect; longPressFired
+				// keeps that UP from opening the text prompt on the menu's
+				// value field.
+				st.down = false;
+				st.gesture = false;
+				st.panSingle = false;
+				st.selectTarget = NULL;
+				st.inertiaActive = false;
+				st.longPressFired = true;
+				st.lastPos = pos;
+				APP->event->handleHover(pos, rack::math::Vec());
+				if (pressBlockedByLock())
+					return 1;
+				if (hoveredModule())
+					menuExpectModuleMenu();
+				else
+					menuClearModuleMenu();
+				APP->event->handleButton(pos, GLFW_MOUSE_BUTTON_RIGHT, GLFW_PRESS, 0);
+				APP->event->handleButton(pos, GLFW_MOUSE_BUTTON_RIGHT, GLFW_RELEASE, 0);
+				return 1;
+			}
+			default:
+				break;
+		}
+	}
 
 	switch (actionMasked) {
 		case AMOTION_EVENT_ACTION_DOWN: {
@@ -466,7 +560,7 @@ int touchHandleEvent(AInputEvent* event) {
 			if (!multiSelect.load(std::memory_order_relaxed) && !overInteractive()) {
 				st.panSingle = true;
 				st.lastCentroid = pos;
-				st.lastMoveTime = st.downTime;
+				st.lastMoveTime = evTime;
 				st.panVelocity = rack::math::Vec();
 				return 1;
 			}
@@ -489,7 +583,7 @@ int touchHandleEvent(AInputEvent* event) {
 				st.lastCentroid = pos.plus(p1).mult(0.5f);
 				st.lastDist = pos.minus(p1).norm();
 				st.pendingZoom = 0.f;
-				st.lastMoveTime = rack::system::getTime();
+				st.lastMoveTime = evTime;
 			}
 			return 1;
 		}
@@ -503,7 +597,7 @@ int touchHandleEvent(AInputEvent* event) {
 					st.selectTarget = NULL;
 					st.panSingle = true;
 					st.lastCentroid = pos;
-					st.lastMoveTime = rack::system::getTime();
+					st.lastMoveTime = evTime;
 					st.panVelocity = rack::math::Vec();
 				}
 				st.lastPos = pos;
@@ -514,14 +608,13 @@ int touchHandleEvent(AInputEvent* event) {
 			if (st.panSingle) {
 				rack::math::Vec delta = pos.minus(st.lastPos);
 				APP->event->handleScroll(pos, delta);
-				double now = rack::system::getTime();
-				double dt = now - st.lastMoveTime;
+				double dt = evTime - st.lastMoveTime;
 				if (dt > 1e-4) {
 					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
 					st.panVelocity = st.panVelocity.mult(0.5f).plus(instV.mult(0.5f));
 				}
 				st.lastCentroid = pos;
-				st.lastMoveTime = now;
+				st.lastMoveTime = evTime;
 				st.lastPos = pos;
 				return 1;
 			}
@@ -538,7 +631,7 @@ int touchHandleEvent(AInputEvent* event) {
 				rack::math::Vec centroid = pos.plus(p1).mult(0.5f);
 				float dist = pos.minus(p1).norm();
 				double now = rack::system::getTime();
-				double dt = now - st.lastMoveTime;
+				double dt = evTime - st.lastMoveTime;
 
 				// Pinch → Ctrl+scroll (Rack's zoom gesture). Rate-limited
 				// against dt (clampPinchDistRate), not merely clamped per
@@ -591,7 +684,7 @@ int touchHandleEvent(AInputEvent* event) {
 					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
 					st.panVelocity = st.panVelocity.mult(0.5f).plus(instV.mult(0.5f));
 				}
-				st.lastMoveTime = now;
+				st.lastMoveTime = evTime;
 				st.lastCentroid = centroid;
 				st.lastDist = dist;
 				st.lastPos = pos;
@@ -652,7 +745,7 @@ int touchHandleEvent(AInputEvent* event) {
 				// it lands in the pan velocity instead.
 				if (rack::system::getTime() - st.lastPinchTime < PINCH_COAST_BLOCK_SEC)
 					st.panVelocity = rack::math::Vec();
-				startInertia();
+				startInertia(evTime);
 			}
 			return 1;
 		}
@@ -672,7 +765,7 @@ int touchHandleEvent(AInputEvent* event) {
 			if (st.panSingle) {
 				st.panSingle = false;
 				st.down = false;
-				startInertia();
+				startInertia(evTime);
 				return 1;
 			}
 			// Report the release point so a drop onto the spare hole still sees
@@ -775,6 +868,11 @@ int touchHandleEvent(AInputEvent* event) {
 		default:
 			return 0;
 	}
+}
+
+
+bool touchMouseSeen() {
+	return mouseSeen.load(std::memory_order_relaxed);
 }
 
 
