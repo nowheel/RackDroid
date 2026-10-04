@@ -21,10 +21,15 @@
 #include <jni.h>
 
 #include <system.hpp>
+#include <logger.hpp>
 
 #include "jni_bridge.hpp"
 
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__)
+// Both sinks: logcat for a cable, user/log.txt for everyone else -- the log a
+// tester exports from the app, where a "dialog reply never arrived" had been
+// invisible.
+#define LOGE(...) do { __android_log_print(ANDROID_LOG_ERROR, "rackdroid", __VA_ARGS__); WARN(__VA_ARGS__); } while (0)
+#define LOGI(...) do { __android_log_print(ANDROID_LOG_INFO, "rackdroid", __VA_ARGS__); INFO(__VA_ARGS__); } while (0)
 
 
 namespace rackdroid {
@@ -461,6 +466,11 @@ bool dialogPrompt(const std::string& title, const std::string& text, std::string
 	JNIEnv* env = getEnv();
 	if (!env || !midClipboardSet)
 		return false;
+	// Logged both ways because the render thread waits here for as long as the
+	// prompt is up, and from outside that looks exactly like a frozen app with
+	// the audio still running. A report of that shape then has to say whether
+	// a prompt was involved and whether it ever came back.
+	LOGI("dialog: text prompt \"%s\" opened; the render thread waits for it", title.c_str());
 	dialogDone = false;
 	jstring jTitle = env->NewStringUTF(title.c_str());
 	jstring jText = env->NewStringUTF(text.c_str());
@@ -471,7 +481,10 @@ bool dialogPrompt(const std::string& title, const std::string& text, std::string
 		env->ExceptionClear();
 		return false;
 	}
-	if (!pumpUntilDialogDone() || !dialogResultHasStr)
+	bool answered = pumpUntilDialogDone();
+	LOGI("dialog: text prompt closed (%s)",
+		!answered ? "no reply" : (dialogResultHasStr ? "confirmed" : "cancelled"));
+	if (!answered || !dialogResultHasStr)
 		return false;
 	result = dialogResultStr;
 	return true;
