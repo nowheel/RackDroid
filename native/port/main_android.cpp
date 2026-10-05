@@ -1130,6 +1130,19 @@ opening guess it is underrunning on purpose, and the answer is usually three
 rungs away. */
 static bool g_threadTunerExhausted = false;
 
+/** Set by checkThreadCount() while every thread count it has measured leaves
+the engine needing more time than the audio lasts, and it has parked on the
+least bad of them. That is a different state from "underrunning": no count and
+no buffer fixes it, so the block-size ladder stands down and the user is told.
+
+Before this the tuner compared rungs by underruns, which are all alike once
+none can keep up, so it never found a best one. It walked the whole ladder each
+time the scores went stale -- a minute at two threads, a minute at seven -- and
+the block size was doubled to 1024 on the way for nothing. Seven Workers at
+audio priority leave the interface no CPU on a small device: on a TB-X306X a
+133-module patch took the File menu up to eight seconds to open. */
+static bool g_engineOverloaded = false;
+
 /** Set the first time a thread count runs a window clean, and never cleared.
 Not a claim that the engine is settled NOW -- it is a claim that the opening
 search is over, which is the only thing anyone else needs to wait for.
@@ -1254,6 +1267,10 @@ static void checkThreadCount() {
 	// thirty underruns a second for four minutes after an artificial load was
 	// removed, because every alternative had been scored during it.
 	static double scoreAt[MAX_TRACKED_THREADS + 1];
+	// The mean share of the deadline each rung used when it was scored, or 0
+	// where the window had too few readings to say. What rungs are compared by
+	// once none of them keeps up.
+	static int32_t loads[MAX_TRACKED_THREADS + 1];
 	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static bool initialised = false;
 	static int settledAt = -1;
@@ -1554,18 +1571,49 @@ static void checkThreadCount() {
 		return; // and do not record it as this rung's score
 	}
 
+	// Clearly past the deadline, not brushing it: between 90 and this a bigger
+	// block or one more thread can still be the answer.
+	// Once parked on an overload it takes dropping back under the line the
+	// search itself calls hopeless to leave it: an 8T sitting at 97-128% of its
+	// deadline crossed a single threshold every few seconds, and each crossing
+	// set the ladder walking again.
+	static const int32_t OVERLOAD_PERCENT = 110;
+	bool overNow = loadSamples >= LOAD_MIN_SAMPLES
+		&& loadMean > (g_engineOverloaded ? LOAD_HOPELESS_PERCENT : OVERLOAD_PERCENT);
 	if (current >= 1 && current <= MAX_TRACKED_THREADS) {
+		// The lowest reading a rung has given while its score is fresh, not the
+		// latest. These windows are half a second long and whatever disturbs one
+		// only ever makes it read higher: the same rung on an S22 read 116% and
+		// then 177%, and comparing rungs on the latest sent the engine round
+		// eight of them in forty seconds.
+		// Only ever against another overloaded reading: a low number left
+		// from the patch that was loaded before this one says nothing, and
+		// kept as the minimum it sent all three test devices to two threads.
+		bool fresh = overNow && scores[current] >= 0
+			&& loads[current] > LOAD_HOPELESS_PERCENT
+			&& now - scoreAt[current] < 300.0;
+		if (loadSamples >= LOAD_MIN_SAMPLES)
+			loads[current] = (fresh && loads[current] < loadMean) ? loads[current] : loadMean;
+		else if (!fresh)
+			loads[current] = 0;
 		scores[current] = underruns;
 		scoreAt[current] = now;
 	}
+	if (!overNow)
+		g_engineOverloaded = false;
 
 	// A score is only evidence while the conditions that produced it still
 	// hold. Past this, treat the rung as never measured and let the search go
 	// and look again -- which is what breaks the deadlock described above.
+	// Parked on an overload, the ladder is only walked again every five
+	// minutes: each walk passes through the ceiling, and nothing but the phone
+	// cooling down can have changed the answer.
 	static const double SCORE_TTL_SEC = 60.0;
+	static const double OVERLOAD_TTL_SEC = 300.0;
+	double scoreTtl = g_engineOverloaded ? OVERLOAD_TTL_SEC : SCORE_TTL_SEC;
 	auto known = [&](int i) {
 		return i >= 1 && i <= MAX_TRACKED_THREADS && scores[i] >= 0
-			&& now - scoreAt[i] < SCORE_TTL_SEC;
+			&& now - scoreAt[i] < scoreTtl;
 	};
 
 	// Clean at a count that is more than it needs is not a happy ending. The
@@ -1655,6 +1703,32 @@ static void checkThreadCount() {
 		candidate = current - 1;
 	else if (current + 1 <= ceiling && !known(current + 1))
 		candidate = current + 1;
+	else if (overNow) {
+		// Nothing keeps up, so underruns no longer tell the rungs apart. Go to
+		// the one that came closest and stay: it wastes the least CPU and heat
+		// on audio that is broken either way, and on every device measured it
+		// sits mid-ladder, which leaves the interface cores to draw with.
+		int best = current;
+		int32_t ownLoad = (current <= MAX_TRACKED_THREADS && loads[current] > 0)
+			? loads[current] : loadMean;
+		int32_t bestLoad = ownLoad;
+		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
+			if (known(i) && loads[i] > 0 && loads[i] < bestLoad) {
+				bestLoad = loads[i];
+				best = i;
+			}
+		}
+		// The margin is for the same reason as below, and wide because these
+		// windows are short and their readings move by a tenth on their own.
+		if (best != current && bestLoad * 115 < ownLoad * 100)
+			candidate = best;
+		else if (!g_engineOverloaded) {
+			LOGW("Engine: no thread count keeps up with this patch; staying at %d "
+				"(%d%% of the audio deadline), the closest any came", current,
+				loadMean);
+			g_engineOverloaded = true;
+		}
+	}
 	else {
 		// Everything nearby is known: go to the best of it, but only if it is
 		// clearly better. Without that margin two counts that both underrun a
@@ -1763,6 +1837,13 @@ static void checkBlockSizeOverload() {
 	// measures best rather than climbing to the ceiling, so "wait until we are
 	// at the ceiling" would wait forever on a Shared path.
 	if (!g_threadTunerExhausted)
+		return;
+	// A bigger block buys time for a callback that is sometimes late. It buys
+	// nothing for an engine that needs more time than the audio lasts, at any
+	// block: three devices each went 128 -> 1024 in twenty seconds on a patch
+	// too heavy for them, three reopens and three toasts, and underran exactly
+	// as before. The same goes for telling someone their fixed size is too small.
+	if (g_engineOverloaded)
 		return;
 	// And never during a recording. Changing the block size reopens the
 	// stream, which takes the callback away for the best part of a second --
@@ -2089,7 +2170,13 @@ static void checkMaxedOutOverload() {
 	bool freshCeilingUnderrun = ceilingCount != lastCeilingCount;
 	lastCeilingCount = ceilingCount;
 
-	if (shown || !freshCeilingUnderrun || !g_blockSizeTried)
+	// Said once per overload, not once per launch: a quiet minute means that
+	// one is over, and the next heavy patch deserves its own explanation.
+	if (shown && rackdroid::audioSecondsSinceUnderrun() >= 60.0)
+		shown = false;
+	// An engine that cannot keep up at any thread count has no use for the
+	// block-size ladder, so it does not wait for it.
+	if (shown || !freshCeilingUnderrun || !(g_blockSizeTried || g_engineOverloaded))
 		return;
 	// Not while the thread tuner is still working. It opens at the ceiling and
 	// walks down, so the first seconds of a heavy patch underrun by design: an
