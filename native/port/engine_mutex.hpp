@@ -56,7 +56,7 @@ struct EngineMutex : rack::SharedMutex {
 	/** Called by Engine::stepBlock before it takes the lock. Bounded: a
 	writer that never leaves must not stop the audio for good. A tenth of a
 	second is far longer than any block and short enough to pass for the gap a
-	patch change makes anyway.
+	patch change makes anyway (a second, once it is plainly a patch change).
 
 	It does not return the moment the writer is gone, but once none has shown
 	up for a while -- how long depends on what is going on. One change, a cable
@@ -74,8 +74,14 @@ struct EngineMutex : rack::SharedMutex {
 		int64_t last = lastBusyMs.load(std::memory_order_relaxed);
 		int run = (now - last < RUN_GAP_MS) ? busyRun.load(std::memory_order_relaxed) + 1 : 1;
 		int quietNeeded = (run >= RUN_LENGTH) ? 80 : 4; // x 250 us
+		// And a run gets a second rather than a tenth before a block is let
+		// through regardless. Each block a patch too heavy for the device slips
+		// in between two removals costs many times what the removal does -- 40 ms
+		// against well under one, on a TB-X306X leaving a 353-module patch,
+		// which took ten to fifteen seconds that way.
+		int budget = (run >= RUN_LENGTH) ? 4000 : 400;
 		int quiet = 0;
-		for (int i = 0; i < 400 && quiet < quietNeeded; i++) {
+		for (int i = 0; i < budget && quiet < quietNeeded; i++) {
 			usleep(250);
 			quiet = writers.load(std::memory_order_relaxed) > 0 ? 0 : quiet + 1;
 		}
