@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cerrno>
 #include <vector>
+#include <algorithm>
 #include <sched.h>
 
 #include <common.hpp>
@@ -56,6 +57,7 @@
 #include "cable_park.hpp"
 #include "selection_glow.hpp"
 #include "tour_demo.hpp"
+#include "engine_barrier.hpp"
 
 // Both sinks, always. logcat needs a USB cable and a developer at the other
 // end of it; user/log.txt is the one a user can export and paste into an
@@ -695,38 +697,206 @@ static void applyWorkerPriority(const std::vector<int>& workers) {
 }
 
 
+/** The callback thread applyWorkerAffinity() last dealt with, and the core it
+got -- -1 when no core would take it. */
+static int g_pinnedAudioTid = 0;
+static int g_pinnedAudioCpu = -1;
+/** There is a core to give it at all (more than two cores). */
+static bool g_audioPinWanted = false;
+/** Cores that refused the callback or let go of it, one bit each: not asked
+again this session. A Snapdragon's prime core is the fastest and also the one
+the SoC halts whenever the load allows -- an 8T took the pin on cpu7 at 0.8 s
+and dropped it at 4 s, and until the next look the callback wandered over the
+Workers' cores: four callbacks of 43-75 ms, 8 underruns. The second-fastest
+core, which stays up, is the better home. */
+static uint64_t g_audioCpusGivenUp = 0;
+
+/** True while the callback thread is still on the one core it was given.
+
+It does not stay there by itself. On a Nothing A024 (SM8735) the first pin
+failed outright -- "could not pin the audio callback thread to cpu7: Invalid
+argument" -- because the SoC halts its prime core when the load is low, and a
+halted core is not a valid affinity. The old code tried once per thread and
+remembered the thread as dealt with, so it never tried again, went on telling
+the Workers to keep off cpu7 "the audio callback's", and the callback floated
+over the Workers' cores for the rest of the stream: 0.2 to 4 s spins, the very
+thing the pin exists to prevent. And a core halted AFTER a successful pin
+has the kernel move the thread off it and widen its mask, which looks the same
+from here. */
+static bool audioStillPinned() {
+	int tid = rackdroid::audioCallbackThreadTid();
+	if (tid <= 0 || tid != g_pinnedAudioTid || g_pinnedAudioCpu < 0)
+		return false;
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	if (sched_getaffinity(tid, sizeof(mask), &mask) != 0)
+		return false;
+	return CPU_COUNT(&mask) == 1 && CPU_ISSET(g_pinnedAudioCpu, &mask);
+}
+
+
+/** A core's top clock, or -1 when sysfs will not say. */
+static long cpuMaxFreq(int cpu) {
+	char path[96];
+	std::snprintf(path, sizeof(path),
+		"/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+	FILE* f = std::fopen(path, "r");
+	if (!f)
+		return -1;
+	long freq = -1;
+	if (std::fscanf(f, "%ld", &freq) != 1)
+		freq = -1;
+	std::fclose(f);
+	return freq;
+}
+
+
+/** Keeps the render thread -- the caller -- off as many of the fastest cores
+as there are Workers, so that each Worker has a core the drawing cannot take.
+
+Drawing is the one other heavy thing this process does, and it peaks exactly
+when the user zooms: every module's framebuffer is rebuilt, 50-130 ms of solid
+work per frame. A Worker sharing that core is run in slices, the engine waits
+for it at the barrier twice per sample, and the callback is late by the length
+of a slice. Measured with the same patch and a wheel-zoom in and out for forty
+seconds on a OnePlus 8T: 6 underruns and callbacks of 50-70 ms that spent all
+but 8 ms asleep, waiting. A Nothing A024 showed the same thing as 6-12 ms and
+"a little crackle while zooming".
+
+Only the render thread is fenced in. The Workers keep the whole mask they had:
+confining each to one core would hand the same stall to the first core the SoC
+halts. And the render thread always keeps at least two cores, however many
+Workers there are. */
+static void applyRenderAffinity(int cores, int audioCpu, int workerCount) {
+	std::vector<int> order; // every core but the callback's, fastest first
+	for (int cpu = cores - 1; cpu >= 0; cpu--) {
+		if (cpu != audioCpu)
+			order.push_back(cpu);
+	}
+	std::stable_sort(order.begin(), order.end(), [](int a, int b) {
+		return cpuMaxFreq(a) > cpuMaxFreq(b);
+	});
+	int fenced = std::min(workerCount, (int) order.size() - 2);
+	if (fenced < 0)
+		fenced = 0;
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	std::string off;
+	for (int i = 0; i < (int) order.size(); i++) {
+		if (i < fenced)
+			off += string::f(" cpu%d", order[i]);
+		else
+			CPU_SET(order[i], &mask);
+	}
+	static std::string lastSaid;
+	std::string say;
+	if (sched_setaffinity(0, sizeof(mask), &mask) != 0)
+		say = string::f("Engine: could not move the render thread off the workers' cores: %s",
+			strerror(errno));
+	else if (fenced > 0)
+		say = string::f("Engine: render thread kept off%s, left to the %d worker threads",
+			off.c_str(), workerCount);
+	if (!say.empty() && say != lastSaid)
+		LOGI("%s", say.c_str());
+	lastSaid = say;
+}
+
+
+/** Where the engine's threads are running right now, for the line after a slow
+callback. Read a moment AFTER the callback, from the render thread -- it says
+where the threads live, not where they were in that instant. */
+static void reportEngineThreadCores() {
+	static double saidAt = 0.0;
+	double now = system::getTime();
+	if (now - saidAt < 1.0)
+		return;
+	saidAt = now;
+	std::string where;
+	for (int tid : collectWorkerThreads()) {
+		char path[64];
+		std::snprintf(path, sizeof(path), "/proc/self/task/%d/stat", tid);
+		FILE* f = std::fopen(path, "r");
+		if (!f)
+			continue;
+		char buf[512] = {0};
+		size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+		std::fclose(f);
+		buf[n] = 0;
+		// "pid (comm) state ..." -- comm holds a space ("Worker 1"), so count
+		// fields from the closing bracket: state is the 3rd, processor the 39th.
+		const char* p = std::strrchr(buf, ')');
+		int cpu = -1;
+		for (int field = 2; p && field < 39; field++) {
+			p = std::strchr(p + 1, ' ');
+		}
+		if (p)
+			cpu = atoi(p + 1);
+		where += string::f(" cpu%d", cpu);
+	}
+	LOGI("Engine: just after that, render thread on cpu%d, workers on%s",
+		sched_getcpu(), where.empty() ? " none" : where.c_str());
+}
+
+
 static void applyWorkerAffinity(const std::vector<int>& workers) {
 	int cores = system::getLogicalCoreCount();
 	if (cores <= 1)
 		return;
 	int reservedCpu = pickReservedCpu(cores);
 	int audioCpu = pickAudioCpu(cores, reservedCpu);
+	g_audioPinWanted = audioCpu >= 0;
 
-	// The callback first: it is the thread the Workers must never meet. Only
-	// once per callback thread -- a reopened stream brings a new one, and
-	// checkWorkerPriority() calls back here when it does.
-	static int pinnedAudioTid = 0;
+	// The callback first: it is the thread the Workers must never meet. Redone
+	// whenever it is not where it was put -- a reopened stream brings a new
+	// thread, and checkWorkerPriority() calls back here for that and for a
+	// pin that failed or was undone.
 	int audioTid = rackdroid::audioCallbackThreadTid();
-	if (audioCpu >= 0 && audioTid > 0 && audioTid != pinnedAudioTid) {
-		cpu_set_t audioMask;
-		CPU_ZERO(&audioMask);
-		CPU_SET(audioCpu, &audioMask);
-		if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
-			LOGI("Engine: pinned the audio callback thread to cpu%d, which no "
-				"worker may use", audioCpu);
+	if (audioCpu >= 0 && audioTid > 0 && !audioStillPinned()) {
+		int before = g_pinnedAudioTid == audioTid ? g_pinnedAudioCpu : -2;
+		// Same thread, and it had a core: that core let go of it.
+		if (before >= 0)
+			g_audioCpusGivenUp |= (uint64_t) 1 << before;
+		g_pinnedAudioTid = audioTid;
+		g_pinnedAudioCpu = -1;
+		int err = 0;
+		// The fastest core first, then the others from the top down: when the
+		// first choice is halted, any core of its own beats none.
+		for (int i = -1; i < cores && g_pinnedAudioCpu < 0; i++) {
+			int cpu = i < 0 ? audioCpu : cores - 1 - i;
+			if (cpu == reservedCpu || (i >= 0 && cpu == audioCpu))
+				continue;
+			if ((g_audioCpusGivenUp >> cpu) & 1)
+				continue;
+			cpu_set_t audioMask;
+			CPU_ZERO(&audioMask);
+			CPU_SET(cpu, &audioMask);
+			if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
+				g_pinnedAudioCpu = cpu;
+			}
+			else {
+				if (i < 0)
+					err = errno;
+				g_audioCpusGivenUp |= (uint64_t) 1 << cpu;
+			}
 		}
-		else {
-			// Then the Workers must not be kept off a core the callback is
-			// not actually on: that would cost a core and buy nothing.
-			LOGW("Engine: could not pin the audio callback thread to cpu%d: %s",
-				audioCpu, strerror(errno));
-			audioCpu = -1;
+		// Said once per outcome, not once per retry.
+		if (g_pinnedAudioCpu != before) {
+			if (g_pinnedAudioCpu < 0)
+				LOGW("Engine: could not pin the audio callback thread to any core "
+					"(cpu%d: %s); will keep trying", audioCpu, strerror(err));
+			else if (g_pinnedAudioCpu != audioCpu)
+				LOGW("Engine: cpu%d would not keep the audio callback thread%s%s; "
+					"pinned it to cpu%d instead, which no worker may use",
+					audioCpu, err ? ": " : "", err ? strerror(err) : "",
+					g_pinnedAudioCpu);
+			else
+				LOGI("Engine: pinned the audio callback thread to cpu%d, which no "
+					"worker may use", audioCpu);
 		}
-		pinnedAudioTid = audioTid;
 	}
-	else if (audioTid <= 0) {
-		audioCpu = -1; // no callback yet; nothing to keep the Workers away from
-	}
+	// The Workers keep off the core the callback is actually on, never off
+	// one it merely should have been on: that costs a core and buys nothing.
+	audioCpu = (audioTid > 0 && audioTid == g_pinnedAudioTid) ? g_pinnedAudioCpu : -1;
 
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
@@ -734,17 +904,34 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 		if (cpu != reservedCpu && cpu != audioCpu)
 			CPU_SET(cpu, &mask);
 	}
+	// Workers launched from now on take this mask as they start, instead of
+	// inheriting the callback's single core. See engineWorkerStarted().
+	uint64_t bits = 0;
+	for (int cpu = 0; cpu < cores && cpu < 64; cpu++) {
+		if (CPU_ISSET(cpu, &mask))
+			bits |= (uint64_t) 1 << cpu;
+	}
+	rackdroid::engineSetWorkerCpus(bits);
 	int pinned = 0;
 	for (int tid : workers) {
 		if (sched_setaffinity(tid, sizeof(mask), &mask) == 0)
 			pinned++;
 	}
+	// Not repeated while nothing about it changes: the callback's pin is
+	// retried every two seconds for as long as it fails.
+	static std::string lastSaid;
+	std::string say;
 	if (pinned > 0 && audioCpu >= 0)
-		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system, "
+		say = string::f("Engine: pinned %d worker threads off cpu%d, reserved for the system, "
 			"and cpu%d, the audio callback's", pinned, reservedCpu, audioCpu);
 	else if (pinned > 0)
-		LOGI("Engine: pinned %d worker threads off cpu%d, reserved for the system",
+		say = string::f("Engine: pinned %d worker threads off cpu%d, reserved for the system",
 			pinned, reservedCpu);
+	if (!say.empty() && say != lastSaid)
+		LOGI("%s", say.c_str());
+	lastSaid = say;
+
+	applyRenderAffinity(cores, audioCpu, (int) workers.size());
 }
 
 
@@ -784,6 +971,17 @@ static void checkWorkerPriority() {
 		lastAudioTid = audioTid;
 		if (applyAt <= 0.0)
 			applyAt = system::getTime();
+	}
+	// The callback's pin can fail or be undone behind our back (see
+	// audioStillPinned()); look four times a second -- one syscall -- and redo
+	// it when it has. Every 2 s left the callback loose for up to that long.
+	static double pinCheckAt = 0.0;
+	if (audioTid > 0 && applyAt <= 0.0 && system::getTime() >= pinCheckAt) {
+		pinCheckAt = system::getTime() + 0.25;
+		// Only the affinity: priority and ADPF have not changed, and each
+		// would say so in the log every two seconds.
+		if (g_audioPinWanted && !audioStillPinned())
+			applyWorkerAffinity(collectWorkerThreads());
 	}
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
@@ -1936,7 +2134,8 @@ void android_main(android_app* app) {
 				// touch the window or the scene.
 				rackdroid::windowSetPhase(rackdroid::RENDER_TUNE);
 				checkWorkerPriority();
-				rackdroid::audioReportSlowCallbacks();
+				if (rackdroid::audioReportSlowCallbacks() > 0)
+					reportEngineThreadCores();
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
 				rackdroid::audioReportLatency();

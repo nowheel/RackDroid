@@ -72,7 +72,8 @@ int32_t audioAlignedCallbackFrames(int blockSize);
 /** Writes the callbacks that ran at least twice their deadline to the log,
 with their CPU time, context switches and what the render thread was doing.
 Frame loop only, for the same reason as audioReportUnderruns(). */
-void audioReportSlowCallbacks();
+/** Returns how many it wrote to the log this time. */
+int audioReportSlowCallbacks();
 
 /** Writes any new underruns to the log. Call from the frame loop, never from
 the audio callback: Rack's logger locks a mutex and fflush()es, which is the

@@ -199,6 +199,28 @@ target_include_directories(osdialog PUBLIC ${RACK_DIR}/dep/osdialog)
 # Rack engine subset
 # ------------------------------------------------------------------
 
+# Rack's engine threads meet at two spinning barriers, twice per sample, and
+# spin there without limit. Against a SCHED_FIFO audio callback that is a
+# multi-second stall on any device (port/engine_barrier.hpp has the story), so
+# a patched copy uses one that spins briefly and then sleeps. No submodule
+# edit; the checks fail the build if upstream ever renames what is replaced.
+set(RACK_ENGINE_PATCH_DIR ${CMAKE_CURRENT_BINARY_DIR}/rack_engine_patched)
+file(READ ${RACK_DIR}/src/engine/Engine.cpp _eng_cpp)
+set(_eng_worker "system::setThreadName(string::f(\"Worker %d\", id));")
+foreach(_needle "#include <simd/common.hpp>" "SpinBarrier engineBarrier;" "HybridBarrier workerBarrier;" "${_eng_worker}")
+	string(FIND "${_eng_cpp}" "${_needle}" _pos)
+	if(_pos EQUAL -1)
+		message(FATAL_ERROR "Engine.cpp no longer contains '${_needle}': update the barrier patch")
+	endif()
+endforeach()
+string(REPLACE "#include <simd/common.hpp>"
+	"#include <simd/common.hpp>\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_barrier.hpp\""
+	_eng_cpp "${_eng_cpp}")
+string(REPLACE "SpinBarrier engineBarrier;" "rackdroid::EngineBarrier engineBarrier{true};" _eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_worker}" "${_eng_worker} rackdroid::engineWorkerStarted();" _eng_cpp "${_eng_cpp}")
+string(REPLACE "HybridBarrier workerBarrier;" "rackdroid::EngineBarrier workerBarrier;" _eng_cpp "${_eng_cpp}")
+file(WRITE ${RACK_ENGINE_PATCH_DIR}/Engine.cpp "${_eng_cpp}")
+
 set(RACK_SOURCES
 	# Infrastructure
 	${RACK_DIR}/src/common.cpp
@@ -221,7 +243,7 @@ set(RACK_SOURCES
 	# DSP + engine
 	${RACK_DIR}/src/dsp/minblep.cpp
 	${RACK_DIR}/src/engine/Cable.cpp
-	${RACK_DIR}/src/engine/Engine.cpp
+	${RACK_ENGINE_PATCH_DIR}/Engine.cpp
 	${RACK_DIR}/src/engine/LightInfo.cpp
 	${RACK_DIR}/src/engine/Module.cpp
 	${RACK_DIR}/src/engine/ParamQuantity.cpp
@@ -237,6 +259,7 @@ set(RACK_SOURCES
 #   src/gamepad.cpp (GLFW joystick) -> not available on Android
 
 set(PORT_SOURCES
+	${CMAKE_CURRENT_SOURCE_DIR}/port/engine_barrier.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/port/network_stub.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/port/glfw_stub.cpp
 )

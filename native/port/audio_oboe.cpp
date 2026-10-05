@@ -248,6 +248,7 @@ Read from the callback rather than from the builder because it is the only
 figure that cannot be wrong: it is what the stream handed us, after whatever
 the device decided to do with the request. Zero until the first callback. */
 static std::atomic<int32_t> g_callbackFrames{0};
+static int32_t callbackFloorFrames(oboe::AudioStream* stream);
 
 int32_t audioCallbackFrames() {
 	return g_callbackFrames.load(std::memory_order_relaxed);
@@ -298,8 +299,9 @@ static std::atomic<uint32_t> g_slowWrite{0};
 this the log would fill with scheduling noise at small block sizes. */
 static const int32_t SLOW_CALLBACK_PERCENT = 200;
 
-void audioReportSlowCallbacks() {
+int audioReportSlowCallbacks() {
 	static uint32_t read = 0;
+	int written = 0;
 	uint32_t write = g_slowWrite.load(std::memory_order_acquire);
 	uint32_t dropped = 0;
 	if (write - read > (uint32_t) SLOW_RING) {
@@ -323,6 +325,7 @@ void audioReportSlowCallbacks() {
 			continue;
 		}
 		budget--;
+		written++;
 		AUDIO_WARN("Oboe: slow callback at %.3f: %.1f ms wall (%d%% of the deadline), "
 			"%.1f ms cpu, switches %d voluntary / %d involuntary, cpu%d->cpu%d, "
 			"render %s->%s, %d threads",
@@ -333,6 +336,7 @@ void audioReportSlowCallbacks() {
 	if (skipped > 0 || dropped > 0)
 		AUDIO_WARN("Oboe: %d more slow callbacks not written (%u lost to a full ring)",
 			skipped + (int) dropped, dropped);
+	return written;
 }
 
 
@@ -706,6 +710,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		inputBuffer.resize(outputStream->getBufferCapacityInFrames() * NUM_INPUTS);
 
 		latencyTuner.reset(new oboe::LatencyTuner(*outputStream));
+		// The tuner starts every stream at two bursts. See callbackFloorFrames.
+		int32_t callbackFloor = callbackFloorFrames(outputStream.get());
+		if (callbackFloor > outputStream->getBufferSizeInFrames())
+			outputStream->setBufferSizeInFrames(callbackFloor);
 		lastXRuns = 0;
 
 		if (inputStream)
@@ -1185,6 +1193,28 @@ int audioLatencyMode() {
 	return g_latencyMode.load(std::memory_order_relaxed);
 }
 
+/** The least buffer a stream whose callback is larger than a burst can live
+with: one whole callback, rounded up to bursts. 0 when the callback is a burst.
+
+Oboe serves such a stream from an adapter: the device still asks for a burst at
+a time, and every so often one of those requests has to wait for the engine to
+compute the entire next block. Whatever is buffered then is all there is to
+play meanwhile. A Nothing A024 at block 1024 (callback 1056, burst 96) opened
+at the tuner's two bursts and was trimmed back to them: seven underruns in the
+first 1.4 s of every launch, then one each time the buffer was halved again,
+all with "no callback ran late" -- the engine was at 26% of its deadline, and
+4 ms of buffer cannot cover 26% of 22 ms. The tuner found 480 frames by itself,
+one click at a time, and forgot it at the next launch.
+ponytail: a whole callback is the size that cannot underrun this way whatever
+the load; scale it by the measured load if the latency at big blocks matters. */
+static int32_t callbackFloorFrames(oboe::AudioStream* stream) {
+	int32_t burst = stream->getFramesPerBurst();
+	int32_t callback = stream->getFramesPerDataCallback();
+	if (burst <= 0 || callback <= burst)
+		return 0;
+	return (callback + burst - 1) / burst * burst;
+}
+
 /** Bursts of buffer the trim may not go below, by setting. Two is the hardware
 floor -- under that a callback has nowhere to be late at all. */
 static int32_t latencyFloorBursts() {
@@ -1324,6 +1354,8 @@ void audioTrimBuffer() {
 	// Two bursts is the hard floor -- below that a callback has nowhere to be
 	// late -- and one step above whatever already failed is the learned one.
 	int32_t floorFrames = burst * latencyFloorBursts();
+	if (callbackFloorFrames(stream) > floorFrames)
+		floorFrames = callbackFloorFrames(stream);
 	if (learnedFloor > floorFrames)
 		floorFrames = learnedFloor;
 	if (tooSmall > 0 && now - tooSmallAt > TOO_SMALL_TTL)
