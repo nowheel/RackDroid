@@ -18,4 +18,9 @@ void menuExpectModuleMenu();
 long press on empty rack), so their Copy/Paste rows are somebody else's. */
 void menuClearModuleMenu();
 
+/** True while one of the Audio module's own block size rows is running its
+action. The audio driver asks, to tell a size the user picked there -- their
+choice, to be remembered -- from one a patch file carries. */
+bool menuUserActionRunning();
+
 } // namespace rackdroid

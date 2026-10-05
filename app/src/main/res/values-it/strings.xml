@@ -8,6 +8,22 @@
 	<string name="menu_help">Aiuto</string>
 	<string name="menu_back">Indietro</string>
 	<string name="menu_share_patch">Condividi patch…</string>
+	<string name="menu_save_to_device">Salva sul dispositivo…</string>
+	<string name="menu_block">Blocco audio</string>
+	<string name="block_explain">Il motore produce il suono a blocchi. Un blocco piccolo risponde prima alle dita; uno grande è più difficile da interrompere. Automatico sceglie per questo dispositivo e avvisa quando cambia.</string>
+	<string name="block_auto">Automatico</string>
+	<string name="block_auto_note">Sceglie l’app, e avvisa quando cambia.</string>
+	<string name="block_auto_note_now">Sceglie l’app. Ora: %1$d frame.</string>
+	<string name="block_frames">%1$d frame</string>
+	<string name="block_delay_note">Aggiunge %1$s ms di ritardo. Resta dove lo metti.</string>
+	<string name="block_auto_raised">Crackling: blocco audio alzato a %1$d</string>
+	<string name="block_auto_lowered">Blocco audio riportato a %1$d</string>
+	<string name="block_crackle_title">Il suono si interrompe</string>
+	<string name="block_crackle_message">Il blocco audio è fisso a %1$d frame e questo dispositivo non riesce a starci dietro. Un blocco più grande, o Automatico, dovrebbe fermare il crackling.</string>
+	<string name="block_crackle_raise">Alza a %1$d</string>
+	<string name="block_crackle_ignore">Ignora</string>
+	<string name="toast_patch_saved">Patch salvata</string>
+	<string name="toast_patch_save_failed">Impossibile salvare la patch</string>
 	<!-- Aggiornamenti (solo build GitHub; quella per Play non ha l'aggiornatore). -->
 	<string name="menu_check_updates">Controlla aggiornamenti</string>
 	<string name="updates_optin_title">Controllare gli aggiornamenti?</string>

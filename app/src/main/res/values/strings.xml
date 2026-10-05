@@ -12,6 +12,22 @@
 	<string name="menu_help">Help</string>
 	<string name="menu_back">Back</string>
 	<string name="menu_share_patch">Share patch…</string>
+	<string name="menu_save_to_device">Save to device…</string>
+	<string name="menu_block">Audio block</string>
+	<string name="block_explain">The engine makes sound in blocks. A small block answers your fingers sooner; a big one is harder to interrupt. Automatic picks for this device and says so when it changes.</string>
+	<string name="block_auto">Automatic</string>
+	<string name="block_auto_note">The app chooses, and tells you when it changes.</string>
+	<string name="block_auto_note_now">The app chooses. Now: %1$d frames.</string>
+	<string name="block_frames">%1$d frames</string>
+	<string name="block_delay_note">Adds %1$s ms of delay. Stays where you put it.</string>
+	<string name="block_auto_raised">Crackling: audio block raised to %1$d</string>
+	<string name="block_auto_lowered">Audio block back down to %1$d</string>
+	<string name="block_crackle_title">The sound is breaking up</string>
+	<string name="block_crackle_message">The audio block is fixed at %1$d frames and this device is not keeping up with it. A bigger block, or Automatic, should stop the crackling.</string>
+	<string name="block_crackle_raise">Raise to %1$d</string>
+	<string name="block_crackle_ignore">Ignore</string>
+	<string name="toast_patch_saved">Patch saved</string>
+	<string name="toast_patch_save_failed">Could not save the patch</string>
 	<!-- Updates (GitHub build only; the Play build has no updater). -->
 	<string name="menu_check_updates">Check for updates</string>
 	<string name="updates_optin_title">Check for updates?</string>

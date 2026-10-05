@@ -42,7 +42,8 @@ nativeBrowserModelsJson JNI callback and shows the sheet. */
 void nativeBrowserShow();
 
 /** Hand a saved .vcv to Java for the system share sheet. */
-void nativeSharePatch(const std::string& path);
+/** toDevice: offer the system "save to" picker instead of the share sheet. */
+void nativeSharePatch(const std::string& path, bool toDevice);
 
 /** Open the Java help UI: 0 = guide sheet, 1 = step-by-step wizard. */
 void nativeShowHelp(int which);
@@ -51,6 +52,15 @@ void nativeShowHelp(int which);
 dialog and the stored preference; native only asks for it and is told the
 result through nativeSetLatencyMode. */
 void nativeShowLatencyPicker();
+
+/** Opens Engine > Audio block: automatic, or a size the user fixes. */
+void nativeShowBlockPicker();
+
+/** Something about the audio block the user should be told, on the UI thread.
+kind 0: Auto raised it from a to b. 1: Auto lowered it from a to b. 2: the
+user's own size a is crackling; b is the next size up, or 0 when there is
+none. */
+void nativeAudioNotice(int kind, int a, int b);
 
 /** Tells Java the patch is restored and the engine is running, so it can
 build the model list and raise the palette. Non-blocking. */

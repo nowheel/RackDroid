@@ -10,6 +10,7 @@
  */
 #include "audio_oboe.hpp"
 #include "window_android.hpp"
+#include "menu_native.hpp"
 
 #include <vector>
 #include <memory>
@@ -343,6 +344,11 @@ int audioReportSlowCallbacks() {
 /** When the last underrun happened, as rack::system::getTime(). */
 static std::atomic<double> g_lastUnderrunAt{0.0};
 
+double audioSecondsSinceUnderrun() {
+	double at = g_lastUnderrunAt.load(std::memory_order_relaxed);
+	return at <= 0.0 ? 1e9 : rack::system::getTime() - at;
+}
+
 bool audioUnderrunsRecently() {
 	double at = g_lastUnderrunAt.load(std::memory_order_relaxed);
 	if (at <= 0.0)
@@ -454,8 +460,13 @@ many. Doubling from four: a size that genuinely does not suit the device is
 retried four launches later, then eight, and so on, and the cost of being wrong
 about it stays bounded at one stream reopen per retry. */
 static int g_tooSmallPenalty = 0;
-static const int TOO_SMALL_SKIPS_MIN = 4;
-static const int TOO_SMALL_SKIPS_MAX = 64;
+// One launch, doubling to four. It was four doubling to sixty-four, and a
+// verdict reached during a stall that had nothing to do with the block size --
+// Workers born on the callback's core -- then held a Nothing A024 at 1024
+// frames, 57 ms of delay, for launch after launch. A wrong verdict now costs
+// one launch; a right one still spares most launches the failed attempt.
+static const int TOO_SMALL_SKIPS_MIN = 1;
+static const int TOO_SMALL_SKIPS_MAX = 4;
 
 static void writeBlockSizeMemo() {
 	if (g_driverBlockSize <= 0)
@@ -492,6 +503,51 @@ void audioNoteBlockTooSmall(int bs) {
 	writeBlockSizeMemo();
 }
 
+/** Engine > Audio block, as stored: -1 not read yet, 0 automatic, else the
+user's size. In a file of its own beside the block-size memo, because it is a
+setting and that is a measurement. */
+static std::atomic<int> g_blockChoice{-1};
+static std::atomic<int> g_blockChoicePending{-1};
+
+static bool validBlockSize(int v) {
+	return v >= 64 && v <= 1024 && (v & (v - 1)) == 0;
+}
+
+static std::string blockChoicePath() {
+	return rack::asset::user("audio-block-choice");
+}
+
+int audioBlockChoice() {
+	int choice = g_blockChoice.load(std::memory_order_relaxed);
+	if (choice >= 0)
+		return choice;
+	choice = 0;
+	if (FILE* f = std::fopen(blockChoicePath().c_str(), "r")) {
+		int v = 0;
+		if (std::fscanf(f, "%d", &v) == 1 && validBlockSize(v))
+			choice = v;
+		std::fclose(f);
+	}
+	g_blockChoice.store(choice, std::memory_order_relaxed);
+	return choice;
+}
+
+static void storeBlockChoice(int choice) {
+	g_blockChoice.store(choice, std::memory_order_relaxed);
+	if (FILE* f = std::fopen(blockChoicePath().c_str(), "w")) {
+		std::fprintf(f, "%d\n", choice);
+		std::fclose(f);
+	}
+	AUDIO_WARN("Oboe: audio block is now %s%s", choice > 0 ? "fixed at " : "automatic",
+		choice > 0 ? std::to_string(choice).c_str() : "");
+}
+
+void audioRequestBlockChoice(int choice) {
+	if (choice == 0 || validBlockSize(choice))
+		g_blockChoicePending.store(choice, std::memory_order_relaxed);
+}
+
+
 static int rememberedBlockSize() {
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "r");
 	if (!f)
@@ -505,14 +561,20 @@ static int rememberedBlockSize() {
 		// Treat it as one that has just been made rather than one that has
 		// already served its time: the size did fail, once, and the point of
 		// this is to re-ask eventually, not immediately.
-		g_tooSmallSkips = (n >= 3 && skips >= 0 && skips <= TOO_SMALL_SKIPS_MAX)
-			? skips : TOO_SMALL_SKIPS_MIN;
+		// Clamped rather than rejected: a memo from before the limits came
+		// down can ask for up to sixty-four.
+		g_tooSmallSkips = (n >= 3 && skips >= 0)
+			? (skips > TOO_SMALL_SKIPS_MAX ? TOO_SMALL_SKIPS_MAX : skips)
+			: TOO_SMALL_SKIPS_MIN;
 		g_tooSmallPenalty = (n >= 4 && penalty >= TOO_SMALL_SKIPS_MIN
 				&& penalty <= TOO_SMALL_SKIPS_MAX) ? penalty : TOO_SMALL_SKIPS_MIN;
 	}
 	// Only sizes Rack itself offers; anything else is a stale or corrupt file.
 	if (n < 1 || v < 64 || v > 4096 || (v & (v - 1)) != 0)
 		v = DEFAULT_BLOCK_SIZE;
+	// A size the user fixed is where the device opens, whatever it last ran at.
+	if (audioBlockChoice() > 0)
+		v = audioBlockChoice();
 	// The size in use from here, which is what the memo has to be written with.
 	// Only setBlockSize() used to publish this, so on a launch where nothing
 	// changed the block size it stayed zero and every write was silently
@@ -857,6 +919,19 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		return blockSize;
 	}
 	void setBlockSize(int bs) override {
+		// Three callers reach this: a patch file applying the value saved in
+		// it, the Audio module's own menu, and the app itself. Picked from a
+		// menu, it is the user's choice and is remembered as one. Otherwise a
+		// size the user fixed stands -- a patch carries whatever block size
+		// its author's device needed, and used to impose it on every device
+		// that opened it.
+		if (menuUserActionRunning()) {
+			if (validBlockSize(bs) && audioBlockChoice() != bs)
+				storeBlockChoice(bs);
+		}
+		else if (audioBlockChoice() > 0) {
+			bs = audioBlockChoice();
+		}
 		if (bs == blockSize)
 			return;
 		AUDIO_WARN("Oboe: block size %d -> %d", blockSize, bs);
@@ -1087,6 +1162,19 @@ void oboeInit() {
 
 int audioBlockSize() {
 	return (g_driver && g_driver->device) ? g_driver->device->blockSize : 0;
+}
+
+
+void audioApplyBlockChoice() {
+	int choice = g_blockChoicePending.exchange(-1, std::memory_order_relaxed);
+	if (choice < 0)
+		return;
+	if (choice != audioBlockChoice())
+		storeBlockChoice(choice);
+	// A fixed size takes effect now. Going back to automatic changes nothing
+	// by itself: the tuning carries on from where the stream is.
+	if (choice > 0 && g_driver && g_driver->device)
+		g_driver->device->setBlockSize(choice);
 }
 
 
@@ -1451,6 +1539,48 @@ Java_org_rackdroid_MainActivity_nativeRecordStart(JNIEnv* env, jobject thiz, jst
 	bool ok = gRecorder.start(path, sr, NUM_OUTPUTS);
 	AUDIO_WARN("record start %s: %d", path.c_str(), ok);
 	return ok;
+}
+
+/** What the Audio block picker needs, in one call: sample rate, the choice (0
+automatic), the callback the choice produces, the block in use now, then one
+(block, callback frames) pair per size worth offering. Two sizes that reach
+this device as the same callback are one option -- the larger, which does the
+same work in fewer steps -- and nothing above what the stream's buffer holds. */
+extern "C" JNIEXPORT jintArray JNICALL
+Java_org_rackdroid_MainActivity_nativeGetBlockInfo(JNIEnv* env, jobject) {
+	std::vector<jint> out;
+	int rate = 48000;
+	if (g_driver && g_driver->device && g_driver->device->getSampleRate() > 0.f)
+		rate = (int) g_driver->device->getSampleRate();
+	int choice = rackdroid::audioBlockChoice();
+	auto aligned = [](int bs) {
+		int a = rackdroid::audioAlignedCallbackFrames(bs);
+		return a > 0 ? a : bs;
+	};
+	out.push_back(rate);
+	out.push_back(choice);
+	out.push_back(choice > 0 ? aligned(choice) : 0);
+	out.push_back(rackdroid::audioBlockSize());
+	int cap = rackdroid::audioMaxUsefulBlockSize();
+	for (int bs = 64; bs <= 1024; bs *= 2) {
+		if (cap > 0 && bs > cap)
+			break;
+		int frames = aligned(bs);
+		if (out.size() > 4 && out.back() == frames) {
+			out[out.size() - 2] = bs;
+			continue;
+		}
+		out.push_back(bs);
+		out.push_back(frames);
+	}
+	jintArray arr = env->NewIntArray((jsize) out.size());
+	env->SetIntArrayRegion(arr, 0, (jsize) out.size(), out.data());
+	return arr;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rackdroid_MainActivity_nativeSetBlockChoice(JNIEnv*, jobject, jint choice) {
+	rackdroid::audioRequestBlockChoice((int) choice);
 }
 
 extern "C" JNIEXPORT void JNICALL

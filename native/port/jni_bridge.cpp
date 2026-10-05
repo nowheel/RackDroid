@@ -50,6 +50,8 @@ static jmethodID midBrowserShow;
 static jmethodID midSharePatch;
 static jmethodID midShowHelp;
 static jmethodID midShowLatencyPicker;
+static jmethodID midShowBlockPicker;
+static jmethodID midAudioNotice;
 static jmethodID midLoadUserPlugins;
 static jmethodID midPatchReady;
 static jmethodID midLanguageChanged;
@@ -148,9 +150,15 @@ void jniInit(ANativeActivity* activity) {
 	midMenuShow = env->GetMethodID(activityCls, "showNativeMenu", "([Ljava/lang/String;[Ljava/lang/String;[I)V");
 	midMenuDismiss = env->GetMethodID(activityCls, "dismissNativeMenu", "()V");
 	midBrowserShow = env->GetMethodID(activityCls, "showNativeBrowser", "()V");
-	midSharePatch = env->GetMethodID(activityCls, "sharePatchFromNative", "(Ljava/lang/String;)V");
+	midSharePatch = env->GetMethodID(activityCls, "sharePatchFromNative", "(Ljava/lang/String;Z)V");
 	midShowHelp = env->GetMethodID(activityCls, "showHelpFromNative", "(I)V");
 	midShowLatencyPicker = env->GetMethodID(activityCls, "showLatencyPickerFromNative", "()V");
+	midShowBlockPicker = env->GetMethodID(activityCls, "showBlockPickerFromNative", "()V");
+	midAudioNotice = env->GetMethodID(activityCls, "audioNoticeFromNative", "(III)V");
+	if (!midShowBlockPicker || !midAudioNotice) {
+		env->ExceptionClear();
+		LOGE("jni: block picker methods not found");
+	}
 	if (!midShowLatencyPicker)
 		LOGE("jni: showLatencyPickerFromNative not found");
 	midLoadUserPlugins = env->GetMethodID(activityCls, "loadUserPluginsFromNative", "()V");
@@ -273,6 +281,26 @@ std::string startupChosenLanguage() {
 }
 
 
+void nativeShowBlockPicker() {
+	JNIEnv* env = getEnv();
+	if (!env || !midShowBlockPicker)
+		return;
+	env->CallVoidMethod(activityObj, midShowBlockPicker);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+}
+
+
+void nativeAudioNotice(int kind, int a, int b) {
+	JNIEnv* env = getEnv();
+	if (!env || !midAudioNotice)
+		return;
+	env->CallVoidMethod(activityObj, midAudioNotice, (jint) kind, (jint) a, (jint) b);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+}
+
+
 void nativeShowLatencyPicker() {
 	JNIEnv* env = getEnv();
 	if (!env || !midShowLatencyPicker)
@@ -283,12 +311,12 @@ void nativeShowLatencyPicker() {
 }
 
 
-void nativeSharePatch(const std::string& path) {
+void nativeSharePatch(const std::string& path, bool toDevice) {
 	JNIEnv* env = getEnv();
 	if (!env || !midSharePatch)
 		return;
 	jstring js = env->NewStringUTF(path.c_str());
-	env->CallVoidMethod(activityObj, midSharePatch, js);
+	env->CallVoidMethod(activityObj, midSharePatch, js, (jboolean) toDevice);
 	if (js)
 		env->DeleteLocalRef(js);
 	if (env->ExceptionCheck())

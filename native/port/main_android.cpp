@@ -1722,6 +1722,10 @@ Because that earlier version shipped, a device can come back with a persisted
 block size ABOVE what its buffer can hold, which nothing would otherwise undo
 -- so this walks that back down, the one case where it lowers rather than
 raises. */
+/** The size Auto was at before it first raised the block in this session, or 0
+if it has not. checkBlockSizeStepDown() works its way back to it. */
+static int g_autoRaisedFrom = 0;
+
 static void checkBlockSizeOverload() {
 	static int32_t lastCeilingCount = 0;
 	int32_t ceilingCount = rackdroid::audioCeilingUnderrunCount();
@@ -1744,7 +1748,8 @@ static void checkBlockSizeOverload() {
 		return;
 	}
 
-	if (g_blockSizeTried || !freshCeilingUnderrun)
+	// The spent ladder only silences Auto; a fixed size still gets its notice.
+	if ((g_blockSizeTried && rackdroid::audioBlockChoice() == 0) || !freshCeilingUnderrun)
 		return;
 	if (!startupSettled())
 		return; // the patch is still loading; those underruns are not the workload
@@ -1766,18 +1771,40 @@ static void checkBlockSizeOverload() {
 	// wait until they have stopped.
 	if (rackdroid::audioIsRecording())
 		return;
+	int next = current * 2;
+	if (next > cap)
+		next = cap;
+	// A size the user fixed is theirs. Say that it is not holding and what
+	// would help, and leave the decision where it was made -- at most every
+	// five minutes, which is also how long a dismissed notice stays dismissed.
+	if (rackdroid::audioBlockChoice() > 0) {
+		static double noticedAt = -1e9;
+		double now = system::getTime();
+		if (now - noticedAt >= 300.0) {
+			noticedAt = now;
+			LOGW("Engine: underrunning at the %d-frame block the user fixed; "
+				"suggesting %s", current, next > current ? "the next size up" : "Auto");
+			rackdroid::nativeAudioNotice(2, current, next > current ? next : 0);
+		}
+		return;
+	}
 	if (current >= cap) {
 		g_blockSizeTried = true; // ladder fully spent
 		return;
 	}
-	int next = current * 2;
-	if (next > cap)
-		next = cap;
+	// One step, then time to see what it did. It used to take the next step
+	// on the very next ceiling underrun, and a reopened stream produces some
+	// of its own: a Nothing A024 went 128 -> 256 -> 512 in 1.4 s, the second
+	// step answering the first one's reopen.
+	if (rackdroid::audioSecondsSinceStreamOpen() < 10.0)
+		return;
 	LOGW("Engine: still underrunning at this device's thread ceiling; trying "
-		"block size %d instead of %d (Audio module > Block size to change it "
-		"back -- this will not be undone automatically)",
-		next, current);
+		"block size %d instead of %d (it is tried lower again after a clean "
+		"minute; Engine > Audio block fixes a size)", next, current);
+	if (g_autoRaisedFrom <= 0)
+		g_autoRaisedFrom = current;
 	rackdroid::audioSetBlockSize(next);
+	rackdroid::nativeAudioNotice(0, current, next);
 }
 
 /** Surfaces the one case the two levers above can do nothing further about:
@@ -1924,11 +1951,22 @@ static void checkBlockSizeStepDown() {
 	static bool done = false;
 	static int probedFrom = 0;
 	static double probedAt = 0.0;
+	// Undoing what the upward ladder did in this session: asked again after a
+	// clean minute, and after a failure twice as long as the time before.
+	static bool probeIsUndo = false;
+	static double undoAt = 0.0;
+	static double undoBackoff = 120.0;
 
 	int current = rackdroid::audioBlockSize();
 	if (current <= 0)
 		return;
 	double now = system::getTime();
+	// The user fixed the size: nothing here moves it, in either direction.
+	if (rackdroid::audioBlockChoice() > 0) {
+		probedFrom = 0;
+		g_autoRaisedFrom = 0;
+		return;
+	}
 
 	if (probedFrom > 0) {
 		// Never while a recording is running. Reverting reopens the stream,
@@ -1950,17 +1988,31 @@ static void checkBlockSizeStepDown() {
 				current, probedFrom);
 			rackdroid::audioNoteBlockTooSmall(current);
 			rackdroid::audioSetBlockSize(probedFrom);
+			if (probeIsUndo) {
+				undoAt = now + undoBackoff;
+				undoBackoff = std::min(undoBackoff * 2.0, 960.0);
+			}
 			probedFrom = 0;
 			return;
 		}
 		if (now - probedAt < 20.0)
 			return;
 		LOGI("Engine: a %d-frame block holds; keeping the lower latency", current);
+		if (probeIsUndo)
+			rackdroid::nativeAudioNotice(1, probedFrom, current);
+		if (current <= g_autoRaisedFrom)
+			g_autoRaisedFrom = 0; // back where the session started
 		probedFrom = 0;
 		return;
 	}
 
-	if (done)
+	// The ladder went up in this session and things have been quiet since: one
+	// step back down. This is the half that was missing -- a block raised once
+	// stayed raised, and the patch then saved it.
+	bool undo = done && g_autoRaisedFrom > 0 && current > g_autoRaisedFrom
+		&& now >= undoAt && rackdroid::audioSecondsSinceUnderrun() >= 60.0
+		&& rackdroid::audioSecondsSinceStreamOpen() >= 60.0;
+	if (done && !undo)
 		return;
 	// Early, but after the patch has loaded and applied its own value, and
 	// after the first seconds of underruns that mean nothing.
@@ -1970,6 +2022,11 @@ static void checkBlockSizeStepDown() {
 	if (!g_threadTunerSettled)
 		return;
 	done = true;
+	probeIsUndo = undo;
+	// Whatever stops an undo below, it is asked again in a minute rather than
+	// on the next frame; a probe that starts and fails sets its own, longer wait.
+	if (undo)
+		undoAt = now + 60.0;
 
 	int want = current / 2;
 	if (want < BLOCK_FLOOR)
@@ -1984,13 +2041,14 @@ static void checkBlockSizeStepDown() {
 	int alignedNow = rackdroid::audioAlignedCallbackFrames(current);
 	int alignedWant = rackdroid::audioAlignedCallbackFrames(want);
 	if (alignedNow > 0 && alignedWant == alignedNow) {
+		g_autoRaisedFrom = 0; // nothing lower to be had: stop asking
 		LOGI("Engine: a %d-frame block would reach this device as the same "
 			"%d-frame callback as %d does -- its burst is %d, so there is no "
 			"lower latency to be had here", want, alignedWant, current,
 			alignedNow);
 		return;
 	}
-	if (want == rackdroid::audioKnownTooSmallBlock()) {
+	if (!undo && want == rackdroid::audioKnownTooSmallBlock()) {
 		int waiting = rackdroid::audioTooSmallLaunchesLeft();
 		if (waiting > 0) {
 			LOGI("Engine: %d frames is where this device settled; a %d-frame "
@@ -2146,6 +2204,7 @@ void android_main(android_app* app) {
 				checkAdpfTarget();
 				rackdroid::windowSetAudioStressed(rackdroid::audioUnderrunsRecently());
 				checkThreadCount();
+				rackdroid::audioApplyBlockChoice();
 				checkBlockSizeOverload();
 				checkBlockSizeStepDown();
 

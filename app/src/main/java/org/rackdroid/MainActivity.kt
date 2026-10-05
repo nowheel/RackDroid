@@ -1216,6 +1216,9 @@ class MainActivity : NativeActivity() {
 	}
 
 	private val REQ_PICK_RDMOD = 4711
+	private val REQ_SAVE_PATCH = 4712
+	/** The archived patch waiting for the user to pick where it goes. */
+	private var pendingPatchExport: File? = null
 	private var moduleManagerDialog: AlertDialog? = null
 
 	/** 📥 toolbar button: the module manager. Lists every installed .rdmod pack
@@ -1486,6 +1489,27 @@ class MainActivity : NativeActivity() {
 	@Deprecated("Deprecated in Java")
 	override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
 		super.onActivityResult(requestCode, resultCode, data)
+		if (requestCode == REQ_SAVE_PATCH) {
+			val source = pendingPatchExport
+			pendingPatchExport = null
+			val target = data?.data
+			if (resultCode != RESULT_OK || source == null || target == null) return
+			// A patch is a few hundred KB at most, but the target can be a
+			// cloud provider: off the UI thread.
+			Thread {
+				val ok = runCatching {
+					contentResolver.openOutputStream(target, "wt")!!.use { out ->
+						source.inputStream().use { it.copyTo(out) }
+					}
+				}.isSuccess
+				uiHandler.post {
+					Toast.makeText(this,
+						if (ok) R.string.toast_patch_saved else R.string.toast_patch_save_failed,
+						Toast.LENGTH_LONG).show()
+				}
+			}.start()
+			return
+		}
 		if (requestCode != REQ_PICK_RDMOD || resultCode != RESULT_OK || data == null) return
 		val uris = ArrayList<Uri>()
 		data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
@@ -1533,6 +1557,145 @@ class MainActivity : NativeActivity() {
 	 * the user chose. */
 	fun showLatencyPickerFromNative() {
 		uiHandler.post { runCatching { showLatencyPicker() } }
+	}
+
+	/** Engine ▸ Audio block. Automatic by default; a size the user picks is
+	 * remembered by the native side, survives a patch that carries another, and
+	 * is never changed by the app -- which is why, when it crackles, the app
+	 * says so (audioNoticeFromNative) instead of quietly raising it. */
+	fun showBlockPickerFromNative() {
+		uiHandler.post { runCatching { showBlockPicker() } }
+	}
+
+	private fun blockMs(frames: Int, rate: Int): String =
+		String.format(java.util.Locale.getDefault(), "%.1f", frames * 1000.0 / rate)
+
+	private fun showBlockPicker() {
+		// rate, choice, the callback the choice produces, block in use, then
+		// (block, callback frames) pairs -- see nativeGetBlockInfo.
+		val info = nativeGetBlockInfo()
+		if (info.size < 6) return
+		val rate = info[0].coerceAtLeast(1)
+		val choice = info[1]
+		val choiceFrames = info[2]
+		val inUse = info[3]
+		val labels = ArrayList<String>()
+		val notes = ArrayList<String>()
+		val values = ArrayList<Int>()
+		labels.add(getString(R.string.block_auto))
+		notes.add(if (choice == 0 && inUse > 0) getString(R.string.block_auto_note_now, inUse)
+			else getString(R.string.block_auto_note))
+		values.add(0)
+		var i = 4
+		while (i + 1 < info.size) {
+			labels.add(getString(R.string.block_frames, info[i]))
+			notes.add(getString(R.string.block_delay_note, blockMs(info[i + 1], rate)))
+			values.add(info[i])
+			i += 2
+		}
+		val current = if (choice == 0) 0 else {
+			var found = -1
+			var k = 4
+			while (k + 1 < info.size) {
+				if (info[k + 1] == choiceFrames) found = (k - 4) / 2 + 1
+				k += 2
+			}
+			found
+		}
+		val col = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(20), dp(18), dp(20), dp(8))
+		}
+		col.addView(TextView(this).apply {
+			text = getString(R.string.menu_block)
+			setTextColor(AppTheme.current.accent)
+			textSize = 17f
+			setTypeface(AppFont.get(this@MainActivity), Typeface.BOLD)
+			setPadding(0, 0, 0, dp(10))
+		})
+		col.addView(TextView(this).apply {
+			text = getString(R.string.block_explain)
+			setTextColor(AppTheme.current.textSecondary)
+			textSize = 14f
+			typeface = AppFont.get(this@MainActivity)
+			setPadding(0, 0, 0, dp(14))
+		})
+		lateinit var dlg: AlertDialog
+		for (n in labels.indices) {
+			col.addView(LinearLayout(this).apply {
+				orientation = LinearLayout.VERTICAL
+				setPadding(dp(6), dp(10), dp(6), dp(10))
+				background = amberRippleRounded()
+				addView(TextView(this@MainActivity).apply {
+					text = (if (n == current) "✔  " else "     ") + labels[n]
+					setTextColor(if (n == current) AppTheme.current.accent
+						else AppTheme.current.textPrimary)
+					textSize = 16f
+					setTypeface(AppFont.get(this@MainActivity),
+						if (n == current) Typeface.BOLD else Typeface.NORMAL)
+				})
+				addView(TextView(this@MainActivity).apply {
+					text = notes[n]
+					setTextColor(AppTheme.current.textSecondary)
+					textSize = 13f
+					typeface = AppFont.get(this@MainActivity)
+					setPadding(dp(28), dp(2), 0, 0)
+				})
+				setOnClickListener {
+					nativeSetBlockChoice(values[n])
+					blockNoticeMuted = false
+					Toast.makeText(this@MainActivity, labels[n], Toast.LENGTH_SHORT).show()
+					dlg.dismiss()
+				}
+			})
+		}
+		// The same glass card and scrolling as the Response picker, for the
+		// same reasons.
+		dlg = AlertDialog.Builder(this).create()
+		dlg.setView(ScrollView(this).apply { addView(col) })
+		trackTopWindow(dlg)
+		dlg.window?.apply {
+			setBackgroundDrawable(GradientDrawable().apply {
+				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
+				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+			})
+			setDimAmount(0.4f)
+		}
+		glassify(dlg.window)
+		dlg.show()
+	}
+
+	/** "Ignore" on the crackle notice: quiet until the next launch, or until
+	 * the user changes the block themselves. */
+	private var blockNoticeMuted = false
+
+	/** Called from native (render thread). kind 0: Auto raised the block from
+	 * a to b. 1: Auto lowered it. 2: the size the user fixed (a) is crackling;
+	 * b is the next size up, or 0 when there is none. */
+	fun audioNoticeFromNative(kind: Int, a: Int, b: Int) {
+		uiHandler.post {
+			runCatching {
+				when (kind) {
+					0 -> Toast.makeText(this, getString(R.string.block_auto_raised, b), Toast.LENGTH_LONG).show()
+					1 -> Toast.makeText(this, getString(R.string.block_auto_lowered, b), Toast.LENGTH_LONG).show()
+					2 -> showBlockCrackleNotice(a, b)
+				}
+			}
+		}
+	}
+
+	private fun showBlockCrackleNotice(size: Int, next: Int) {
+		if (blockNoticeMuted || isFinishing) return
+		val builder = AlertDialog.Builder(this)
+			.setTitle(R.string.block_crackle_title)
+			.setMessage(getString(R.string.block_crackle_message, size))
+			.setNegativeButton(R.string.block_crackle_ignore) { _, _ -> blockNoticeMuted = true }
+			.setNeutralButton(R.string.block_auto) { _, _ -> nativeSetBlockChoice(0) }
+		if (next > 0)
+			builder.setPositiveButton(getString(R.string.block_crackle_raise, next)) { _, _ ->
+				nativeSetBlockChoice(next)
+			}
+		trackTopWindow(builder.show())
 	}
 
 	private fun latencyMode(): Int =
@@ -1686,8 +1849,31 @@ class MainActivity : NativeActivity() {
 
 	/** Called from native (menu_native.cpp processShare) with the path of
 	 * the .vcv it just archived under user/share/. */
-	fun sharePatchFromNative(path: String) {
-		uiHandler.post { runCatching { sharePatch(File(path)) } }
+	fun sharePatchFromNative(path: String, toDevice: Boolean) {
+		uiHandler.post {
+			runCatching { if (toDevice) savePatchToDevice(File(path)) else sharePatch(File(path)) }
+		}
+	}
+
+	/** File ▸ Save to device: the system picker chooses the folder (Downloads,
+	 * Documents, an SD card, a cloud drive) and grants write access to that one
+	 * file, so no storage permission is needed. The copy happens in
+	 * onActivityResult. */
+	private fun savePatchToDevice(file: File) {
+		pendingPatchExport = file
+		val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+			addCategory(Intent.CATEGORY_OPENABLE)
+			// No MIME type is registered for .vcv; a generic one keeps the
+			// picker from appending an extension of its own.
+			type = "application/octet-stream"
+			putExtra(Intent.EXTRA_TITLE, file.name)
+		}
+		try {
+			startActivityForResult(intent, REQ_SAVE_PATCH)
+		} catch (t: Throwable) {
+			pendingPatchExport = null
+			Toast.makeText(this, R.string.toast_patch_save_failed, Toast.LENGTH_LONG).show()
+		}
 	}
 
 	private fun sharePatch(file: File) {
@@ -2036,6 +2222,8 @@ class MainActivity : NativeActivity() {
 	private val ROW_PRESET_PASTE = 4096
 	private val ROW_TOUR = 8192
 	private val ROW_LATENCY = 16384
+	private val ROW_EXPORT = 32768
+	private val ROW_BLOCK = 65536
 	// Rack's own fixed, non-localized markers (ui/common.hpp) for a
 	// submenu's current-value display and a checkbox's checked state.
 	private val RIGHT_ARROW = "▸"
@@ -2350,7 +2538,9 @@ class MainActivity : NativeActivity() {
 			text = when {
 				back -> "‹   " + getString(R.string.menu_back)
 				flags and ROW_SHARE != 0 -> getString(R.string.menu_share_patch)
+				flags and ROW_EXPORT != 0 -> getString(R.string.menu_save_to_device)
 				flags and ROW_LATENCY != 0 -> getString(R.string.menu_response)
+				flags and ROW_BLOCK != 0 -> getString(R.string.menu_block)
 				flags and ROW_GUIDE != 0 -> getString(R.string.menu_guide)
 				flags and ROW_WIZARD != 0 -> getString(R.string.menu_wizard)
 					flags and ROW_TOUR != 0 -> getString(R.string.menu_tour)
@@ -2512,6 +2702,8 @@ class MainActivity : NativeActivity() {
 	private external fun nativeHistoryAction(action: Int)
 	private external fun nativeSetLockMode(mode: Int)
 	private external fun nativeSetLatencyMode(mode: Int)
+	private external fun nativeGetBlockInfo(): IntArray
+	private external fun nativeSetBlockChoice(choice: Int)
 	private external fun nativeSetMultiSelect(on: Boolean)
 	private external fun nativeCopySelection()
 	private external fun nativePasteSelection()

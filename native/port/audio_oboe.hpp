@@ -133,6 +133,22 @@ int audioTooSmallLaunchesLeft();
 before it is tried again. */
 void audioNoteBlockTooSmall(int bs);
 
+/** Engine > Audio block: 0 when the app chooses the block size, otherwise the
+size the user fixed. A fixed size is remembered across launches, is not moved
+by a patch file's own value, and is never changed by the app. */
+int audioBlockChoice();
+
+/** Asks for a new choice from any thread; audioApplyBlockChoice() carries it
+out. */
+void audioRequestBlockChoice(int choice);
+
+/** Render thread, once a frame: applies a requested choice. Reopens the stream
+when the size changes. */
+void audioApplyBlockChoice();
+
+/** Seconds since the last underrun, or a large number if there has been none. */
+double audioSecondsSinceUnderrun();
+
 /** The live Oboe device's current block size (frames per callback), or 0 if
 no device is open yet. Render-thread only, same contract as the engine
 itself (see CLAUDE.md). */

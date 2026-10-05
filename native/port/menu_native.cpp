@@ -93,6 +93,12 @@ enum RowFlag {
 	// opposite case: a question with one right answer that the user had no
 	// way to know.
 	ROW_LATENCY = 16384,
+	// Synthetic File row: write the patch to a place of the user's choosing
+	// through the system file picker. "Save as" only reaches the app's own
+	// folder, which no file manager can open.
+	ROW_EXPORT = 32768,
+	// Synthetic Engine row: the audio block size, automatic or the user's.
+	ROW_BLOCK = 65536,
 };
 
 
@@ -136,9 +142,38 @@ struct NativeMenu {
 	bool engineMenuPending = false;
 	bool viewMenuPending = false;
 	bool sharePending = false;
+	// processShare() hands the file to the "save to device" picker instead of
+	// the share sheet.
+	bool exportPending = false;
 };
 
 static NativeMenu g;
+
+static bool g_userActionRunning = false;
+
+bool menuUserActionRunning() {
+	return g_userActionRunning;
+}
+
+/** One of the Audio module's own block size rows: "256 (5.3 ms)", in a menu
+that carries Rack's "Block size" heading. Only these count as the user picking
+a size -- File > Open is a menu row too, and the patch it loads applies its
+saved block size from inside that row's action. Taking every row for a choice
+made opening a patch rewrite the size the user had fixed. */
+static bool isBlockSizeRow(ui::MenuItem* item) {
+	const std::string& text = item->text;
+	if (text.size() < 5 || text.compare(text.size() - 4, 4, " ms)") != 0)
+		return false;
+	if (!g.menu)
+		return false;
+	std::string heading = string::translate("AudioDisplay.blockSize");
+	for (widget::Widget* c : g.menu->children) {
+		auto* label = dynamic_cast<ui::MenuLabel*>(c);
+		if (label && label->text == heading)
+			return true;
+	}
+	return false;
+}
 
 
 /** Capturable if it has at least one actionable MenuItem. Non-list children
@@ -285,6 +320,10 @@ static void present(ui::Menu* menu) {
 		labels.push_back("Share patch…"); // replaced by a localized string in Java
 		rights.push_back("");
 		flags.push_back(ROW_SHARE);
+		g.rows.push_back(Row(NULL, ROW_EXPORT));
+		labels.push_back("Save to device…"); // localized in Java
+		rights.push_back("");
+		flags.push_back(ROW_EXPORT);
 	}
 	if (g.engineMenuPending && !menu->parentMenu) {
 		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
@@ -295,6 +334,10 @@ static void present(ui::Menu* menu) {
 		labels.push_back("Response"); // localized in Java
 		rights.push_back("");
 		flags.push_back(ROW_LATENCY);
+		g.rows.push_back(Row(NULL, ROW_BLOCK));
+		labels.push_back("Audio block"); // localized in Java
+		rights.push_back("");
+		flags.push_back(ROW_BLOCK);
 	}
 	if (g.helpMenuPending && !menu->parentMenu) {
 		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
@@ -361,9 +404,15 @@ static void handleSelect(int idx) {
 		}
 		return;
 	}
-	if (row.flags & ROW_SHARE) {
+	if (row.flags & (ROW_SHARE | ROW_EXPORT)) {
 		g.sharePending = true;
+		g.exportPending = (row.flags & ROW_EXPORT) != 0;
 		closeAll();
+		return;
+	}
+	if (row.flags & ROW_BLOCK) {
+		closeAll();
+		nativeShowBlockPicker();
 		return;
 	}
 	if (row.flags & ROW_LATENCY) {
@@ -390,7 +439,9 @@ static void handleSelect(int idx) {
 		present(child);
 	}
 	else {
+		g_userActionRunning = isBlockSizeRow(item);
 		item->doAction(true); // runs action; requests overlay delete
+		g_userActionRunning = false;
 		closeAll();
 	}
 }
@@ -529,7 +580,7 @@ static void processShare() {
 			: rack::system::getStem(APP->patch->path);
 		std::string path = dir + "/" + stem + ".vcv";
 		APP->patch->save(path);
-		nativeSharePatch(path);
+		nativeSharePatch(path, g.exportPending);
 	}
 	catch (std::exception& e) {
 		LOGE("share failed: %s", e.what());
