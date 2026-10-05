@@ -468,13 +468,29 @@ static int g_tooSmallPenalty = 0;
 static const int TOO_SMALL_SKIPS_MIN = 1;
 static const int TOO_SMALL_SKIPS_MAX = 4;
 
+/** The size the block was at before the app itself raised it, or 0 while it
+has not. A raise answers trouble that may be gone in a minute -- a heavy
+moment, a warm phone -- and is tried lower again once things are quiet, so
+until that has been tried and has failed it is not something to remember:
+the next launch opens where this one did. It used to be remembered at once,
+and the patch saved it too, so a OnePlus 8T that had been through an overload
+opened a light patch at 512 frames, and a Lenovo TB-X306X at 512 as well,
+launch after launch, until the step-down got round to them. */
+static int g_raisedFrom = 0;
+/** True while the app's own tuner, not a patch or a menu, is changing the size;
+and whether that change is the overload ladder reaching for headroom, which is
+the only kind that counts as a raise. Going back up after a smaller size failed
+its trial is not one: that size has just been shown to be needed. */
+static bool g_ownBlockChange = false;
+static bool g_ladderRaise = false;
+
 static void writeBlockSizeMemo() {
 	if (g_driverBlockSize <= 0)
 		return;
 	FILE* f = std::fopen(blockSizeMemoPath().c_str(), "w");
 	if (!f)
 		return;
-	std::fprintf(f, "%d %d %d %d\n", g_driverBlockSize, g_knownTooSmall,
+	std::fprintf(f, "%d %d %d %d\n", g_raisedFrom > 0 ? g_raisedFrom : g_driverBlockSize, g_knownTooSmall,
 		g_tooSmallSkips, g_tooSmallPenalty);
 	std::fclose(f);
 }
@@ -500,6 +516,9 @@ void audioNoteBlockTooSmall(int bs) {
 		g_tooSmallPenalty = TOO_SMALL_SKIPS_MIN;
 	g_knownTooSmall = bs;
 	g_tooSmallSkips = g_tooSmallPenalty;
+	// The way back down was tried and did not hold: the raise was not a
+	// passing thing after all, and the size it led to is the one to keep.
+	g_raisedFrom = 0;
 	writeBlockSizeMemo();
 }
 
@@ -932,8 +951,24 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		else if (audioBlockChoice() > 0) {
 			bs = audioBlockChoice();
 		}
+		else if (!g_ownBlockChange && bs > blockSize) {
+			// On Automatic a patch may ask for less latency than the device
+			// is running at, never for more: a bigger block in a file is
+			// either its author's device or a raise this one made during an
+			// overload and then saved. If this patch needs it here, the
+			// ladder finds that out in seconds and says so.
+			AUDIO_WARN("Oboe: the patch asks for a %d-frame block; staying at %d "
+				"(Automatic raises it only when this device needs it)", bs, blockSize);
+			return;
+		}
 		if (bs == blockSize)
 			return;
+		if (g_ladderRaise && bs > blockSize) {
+			if (g_raisedFrom <= 0)
+				g_raisedFrom = blockSize;
+		}
+		else if (!g_ownBlockChange || bs <= g_raisedFrom)
+			g_raisedFrom = 0;
 		AUDIO_WARN("Oboe: block size %d -> %d", blockSize, bs);
 		closeStreams();
 		blockSize = bs;
@@ -1210,10 +1245,13 @@ void audioApplyBlockChoice() {
 }
 
 
-bool audioSetBlockSize(int blockSize) {
+bool audioSetBlockSize(int blockSize, bool ladderRaise) {
 	if (!g_driver || !g_driver->device)
 		return false;
+	g_ownBlockChange = true;
+	g_ladderRaise = ladderRaise;
 	g_driver->device->setBlockSize(blockSize);
+	g_ownBlockChange = g_ladderRaise = false;
 	return true;
 }
 

@@ -160,7 +160,10 @@ stream, so this is NOT free: it is an audible gap, not a silent tweak, and
 exists for checkBlockSizeOverload() in main_android.cpp to reach for only
 once, after thread count is already maxed out and still not enough. Returns
 false (no-op) if no device is open. */
-bool audioSetBlockSize(int blockSize);
+/** `ladderRaise`: the overload ladder buying headroom. Such a size is not
+remembered for the next launch until stepping back down has been tried and has
+failed (see g_raisedFrom in audio_oboe.cpp). */
+bool audioSetBlockSize(int blockSize, bool ladderRaise = false);
 
 /** The largest block size worth asking the live stream for: the biggest power
 of two that still fits inside its buffer capacity, capped at 1024 (the

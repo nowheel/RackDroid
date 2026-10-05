@@ -1884,7 +1884,7 @@ static void checkBlockSizeOverload() {
 		"minute; Engine > Audio block fixes a size)", next, current);
 	if (g_autoRaisedFrom <= 0)
 		g_autoRaisedFrom = current;
-	rackdroid::audioSetBlockSize(next);
+	rackdroid::audioSetBlockSize(next, true);
 	rackdroid::nativeAudioNotice(0, current, next);
 }
 
