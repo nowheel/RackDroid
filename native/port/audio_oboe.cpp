@@ -1127,6 +1127,21 @@ struct OboeDriver : rack::audio::Driver {
 		idleSince = 0.0;
 		if (!device)
 			device = new OboeDevice;
+		// The port has to know its device BEFORE the callback can see the port.
+		// Rack's Port::setDeviceId() assigns it from our return value, which is
+		// after Device::subscribe() has published the port; a callback landing
+		// in between runs core Audio's processInput() with port->device NULL,
+		// reads a device sample rate of 0, divides by it, and asks the engine
+		// for INT_MAX frames in one stepBlock(). That call never returns: the
+		// callback is gone, it holds the Device mutex, and the interface thread
+		// stops for good at the next unsubscribe. On a desktop the window is a
+		// few instructions wide against a callback every few milliseconds. Here
+		// a patch too heavy for the device has the callback running back to
+		// back, and it was hit twice in an afternoon on an SM-S901E while
+		// changing patch (thread dumps: the callback inside stepBlock for
+		// minutes, the interface thread in ~Audio -> Device::unsubscribe ->
+		// mutex::lock).
+		port->device = device;
 		device->subscribe(port);
 		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
