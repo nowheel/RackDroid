@@ -106,15 +106,22 @@ class MainActivity : NativeActivity() {
 		val lang = runCatching {
 			base.getSharedPreferences("ui", Context.MODE_PRIVATE).getString("lang", null)
 		}.getOrNull()
-		if (lang.isNullOrEmpty()) {
-			super.attachBaseContext(base)
+		super.attachBaseContext(base)
+		if (lang.isNullOrEmpty())
 			return
-		}
-		val cfg = android.content.res.Configuration(base.resources.configuration)
 		val loc = java.util.Locale.forLanguageTag(lang)
 		java.util.Locale.setDefault(loc)
-		cfg.setLocale(loc)
-		super.attachBaseContext(base.createConfigurationContext(cfg))
+		// An override holding the locale and nothing else, laid over the
+		// activity's own resources. This used to wrap the base in
+		// createConfigurationContext() with a full copy of its configuration,
+		// and that context is a snapshot: the manifest keeps the activity
+		// through a rotation, so everything asking it for the orientation got
+		// the one the launcher happened to be in when the app started. On a
+		// OnePlus 8T lying on its side the toolbar came up in three different
+		// shapes over a day of launches, portrait sizes in a landscape window
+		// among them -- but only once a language had been picked, which is why
+		// no other device showed it.
+		applyOverrideConfiguration(android.content.res.Configuration().apply { setLocale(loc) })
 	}
 
 	/** Called from the render thread when Rack's Help ▸ Language changed it.
