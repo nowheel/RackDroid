@@ -32,21 +32,43 @@ namespace rackdroid {
 
 
 struct EngineMutex : rack::SharedMutex {
-	std::atomic<int> writersWaiting{0};
+	/** Writers waiting for the lock or holding it. */
+	std::atomic<int> writers{0};
 
 	void lock() {
-		writersWaiting.fetch_add(1, std::memory_order_relaxed);
+		writers.fetch_add(1, std::memory_order_relaxed);
 		rack::SharedMutex::lock();
-		writersWaiting.fetch_sub(1, std::memory_order_relaxed);
+	}
+
+	bool try_lock() {
+		if (!rack::SharedMutex::try_lock())
+			return false;
+		writers.fetch_add(1, std::memory_order_relaxed);
+		return true;
+	}
+
+	void unlock() {
+		rack::SharedMutex::unlock();
+		writers.fetch_sub(1, std::memory_order_relaxed);
 	}
 
 	/** Called by Engine::stepBlock before it takes the lock. Bounded: a
-	writer that never arrives must not stop the audio for good. A tenth of a
+	writer that never leaves must not stop the audio for good. A tenth of a
 	second is far longer than any block and short enough to pass for the gap a
-	patch change makes anyway. */
+	patch change makes anyway.
+
+	It does not return the moment the writer is gone, but once none has shown
+	up for a millisecond. Clearing a patch takes the lock once per module, and
+	when each of those had to wait for a block of its own, leaving a 133-module
+	patch on an overloaded TB-X306X took eight seconds. */
 	void letWritersIn() {
-		for (int i = 0; i < 400 && writersWaiting.load(std::memory_order_relaxed) > 0; i++)
+		if (writers.load(std::memory_order_relaxed) == 0)
+			return;
+		int quiet = 0;
+		for (int i = 0; i < 400 && quiet < 4; i++) {
 			usleep(250);
+			quiet = writers.load(std::memory_order_relaxed) > 0 ? 0 : quiet + 1;
+		}
 	}
 };
 
