@@ -182,6 +182,26 @@ be able to go quiet again so checkEngineUnderload() can notice and undo an
 escalation checkEngineOverload() made earlier in the session. */
 static std::atomic<int32_t> g_ceilingUnderruns{0};
 
+/** Asks the callback to play silence until the engine has found its feet, then
+fade in. Set whenever a stream starts and whenever a port arrives, which is
+what loading a patch looks like from here.
+
+The first second of a patch is not the patch. Its Workers have just been
+created and do not have their priority or their cores yet, the caches are
+cold, the buffer is at the two bursts every stream opens with, and the
+callback is late over and over: 504 underruns in the first second on a
+Nothing A024 with a 177-module patch, 47 on an SM-S901E and 6 on a OnePlus
+8T with a light one, at every launch and every File > Open. Each of those is
+a click, because a sequencer is already running and there is sound to cut
+holes in. A hole in silence is not heard. So nothing is let out until a fifth
+of a second of callbacks has come in on time, or two seconds have gone by --
+a patch too heavy for the device never has an on-time fifth of a second, and
+it still has to be heard. */
+static std::atomic<bool> g_warmupWanted{true};
+/** How long the last silence lasted, in ms, for the log; -1 once reported. */
+static std::atomic<int32_t> g_warmupEndedMs{-1};
+static std::atomic<int32_t> g_warmupStartUnderruns{0};
+
 int32_t audioCeilingUnderrunCount() {
 	return g_ceilingUnderruns.load(std::memory_order_relaxed);
 }
@@ -385,6 +405,14 @@ that ever existed: size in the low 16 bits, capacity in the high 16. */
 static std::atomic<uint32_t> g_underrunBuffer{0};
 
 void audioReportUnderruns() {
+	// Said from here because the callback must not log: see onAudioReady.
+	int32_t warm = g_warmupEndedMs.exchange(-1, std::memory_order_relaxed);
+	if (warm >= 0)
+		AUDIO_WARN("Oboe: audio let out after %d ms of silence (%d underruns fell in it)%s",
+			warm, g_totalUnderruns.load(std::memory_order_relaxed)
+				- g_warmupStartUnderruns.load(std::memory_order_relaxed),
+			warm >= 2000 ? " -- it never settled; playing anyway" : "");
+
 	static int32_t lastReported = 0;
 	static double nextReportAt = 0.0;
 	int32_t now = g_totalUnderruns.load(std::memory_order_relaxed);
@@ -697,6 +725,11 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	every callback. A user saying "it crackles" and a log saying "xruns 0 -> 37"
 	are not the same bug report. */
 	int32_t lastXRuns = 0;
+	// Callback-thread state of the start-up silence; see g_warmupWanted.
+	bool warming = true;
+	int32_t warmGoodFrames = 0;
+	int32_t warmFrames = 0;
+	float warmGain = 0.f;
 
 	OboeDevice() {
 		openStreams("device created");
@@ -806,6 +839,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// a log full of underruns with no way to tell which rung of
 		// checkBlockSizeOverload()'s ladder was in effect at the time.
 		AUDIO_WARN("Oboe: openStreams took %.0f ms", (rack::system::getTime() - t0) * 1000.0);
+		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d callback=%d burst=%d buffer=%d "
 			"capacity=%d sharing=%s performance=%s api=%s",
 			why, sampleRate, blockSize, callbackFrames, outputStream->getFramesPerBurst(),
@@ -1002,6 +1036,44 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		g_slowWrite.store(w + 1, std::memory_order_release);
 	}
 
+	void applyWarmup(float* output, int channels, int32_t numFrames, int32_t rate, int64_t elapsedNanos) {
+		if (g_warmupWanted.exchange(false, std::memory_order_relaxed)) {
+			warming = true;
+			warmGoodFrames = 0;
+			warmFrames = 0;
+			warmGain = 0.f;
+			g_warmupStartUnderruns.store(g_totalUnderruns.load(std::memory_order_relaxed),
+				std::memory_order_relaxed);
+		}
+		if (warmGain >= 1.f && !warming)
+			return;
+		if (rate <= 0 || numFrames <= 0)
+			return;
+		if (warming) {
+			// On time, with room to spare: under four fifths of what it had.
+			bool onTime = elapsedNanos * rate < (int64_t) numFrames * 800000000LL;
+			warmGoodFrames = onTime ? warmGoodFrames + numFrames : 0;
+			warmFrames += numFrames;
+			if (warmGoodFrames >= rate / 5 || warmFrames >= rate * 2) {
+				warming = false;
+				g_warmupEndedMs.store((int32_t) ((int64_t) warmFrames * 1000 / rate),
+					std::memory_order_relaxed);
+			}
+			else {
+				std::fill_n(output, (size_t) numFrames * channels, 0.f);
+				return;
+			}
+		}
+		// A twentieth of a second from nothing to full: short enough not to be
+		// noticed as a fade, long enough not to be a click of its own.
+		float step = 20.f / rate;
+		for (int32_t i = 0; i < numFrames; i++) {
+			for (int c = 0; c < channels; c++)
+				output[i * channels + c] *= warmGain;
+			warmGain = (warmGain + step < 1.f) ? warmGain + step : 1.f;
+		}
+	}
+
 	oboe::DataCallbackResult onAudioReady(oboe::AudioStream* stream, void* audioData, int32_t numFrames) override {
 		float* output = (float*) audioData;
 		// What the stream actually asks for, which is not the engine's block
@@ -1089,12 +1161,13 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 
 		// Drives Engine::stepBlock() through the subscribed audio Ports.
 		processBuffer(input, NUM_INPUTS, output, stream->getChannelCount(), numFrames);
-		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
 
 		timespec t1;
 		clock_gettime(CLOCK_MONOTONIC, &t1);
 		int64_t elapsed = (int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
 			+ (t1.tv_nsec - t0.tv_nsec);
+		applyWarmup(output, stream->getChannelCount(), numFrames, stream->getSampleRate(), elapsed);
+		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
 		if (reportToAdpf)
 			adpfReportNanos(elapsed);
 		// The deadline this callback had to meet. Taken from the frame count
@@ -1180,6 +1253,7 @@ struct OboeDriver : rack::audio::Driver {
 		// mutex::lock).
 		port->device = device;
 		device->subscribe(port);
+		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
 	}
