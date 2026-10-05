@@ -317,6 +317,8 @@ if(RACKDROID_UI)
 			${CMAKE_CURRENT_SOURCE_DIR}/port/menu_native.cpp
 			${CMAKE_CURRENT_SOURCE_DIR}/port/browser_native.cpp
 			${CMAKE_CURRENT_SOURCE_DIR}/port/keyboard_native.cpp)
+	else()
+		list(APPEND PORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/host/touch_stub.cpp)
 	endif()
 
 else()
