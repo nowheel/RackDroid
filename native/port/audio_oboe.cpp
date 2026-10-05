@@ -203,6 +203,18 @@ static std::atomic<bool> g_warmupWanted{true};
 /** How long the silence may last, in seconds: long after a patch arrives, when
 the thread tuner has a search ahead of it, short after a mere reopen. */
 static std::atomic<int> g_warmupLimitSec{6};
+/** Held by the thread tuner while it measures a new patch at each count: the
+silence then does not end on the first on-time fifth of a second, which any
+count can have, but when the tuner has picked one -- or the limit runs out. */
+static std::atomic<bool> g_warmupHold{false};
+
+void audioWarmupHold(bool hold) {
+	// Whoever holds it has a few seconds of measuring to do, whatever opened
+	// the stream: a reopen alone would have allowed two.
+	if (hold)
+		g_warmupLimitSec.store(8, std::memory_order_relaxed);
+	g_warmupHold.store(hold, std::memory_order_relaxed);
+}
 /** The longest any callback has taken since audioTrimBuffer() last looked, in
 ns. What the buffer is sized from before anything underruns. */
 static std::atomic<int64_t> g_callbackPeakNanos{0};
@@ -1084,7 +1096,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			// loads is the thread tuner, and it needs four or five to walk to
 			// the count a heavy patch wants: with two, an SM-S901E let out ten
 			// seconds of 450 underruns a second while it did.
-			if (warmGoodFrames >= rate / 5
+			if ((warmGoodFrames >= rate / 5 && !g_warmupHold.load(std::memory_order_relaxed))
 					|| warmFrames >= rate * g_warmupLimitSec.load(std::memory_order_relaxed)) {
 				warming = false;
 				g_warmupEndedMs.store((int32_t) ((int64_t) warmFrames * 1000 / rate),
@@ -1294,7 +1306,11 @@ struct OboeDriver : rack::audio::Driver {
 		device->subscribe(port);
 		g_portCount.store((int) device->subscribed.size(), std::memory_order_relaxed);
 		g_portEpoch.fetch_add(1, std::memory_order_relaxed);
-		g_warmupLimitSec.store(6, std::memory_order_relaxed);
+		g_warmupLimitSec.store(8, std::memory_order_relaxed);
+		// Held from here, not from when the tuner next looks: in between, the
+		// first on-time fifth of a second let a blip of the patch out before
+		// the silence came back down on it. The tuner lets go.
+		g_warmupHold.store(true, std::memory_order_relaxed);
 		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
@@ -1354,12 +1370,22 @@ void audioApplyBlockChoice() {
 	int choice = g_blockChoicePending.exchange(-1, std::memory_order_relaxed);
 	if (choice < 0)
 		return;
-	if (choice != audioBlockChoice())
+	// What Automatic was running before the user fixed a size, to go back to.
+	static int autoSizeBeforeFix = 0;
+	int was = audioBlockChoice();
+	if (was == 0 && choice > 0 && g_driver && g_driver->device)
+		autoSizeBeforeFix = g_driver->device->blockSize;
+	if (choice != was)
 		storeBlockChoice(choice);
-	// A fixed size takes effect now. Going back to automatic changes nothing
-	// by itself: the tuning carries on from where the stream is.
+	// A fixed size takes effect now. Going back to automatic returns to the
+	// size Automatic had chosen: it used to carry on from wherever the fixed
+	// size had left the stream, and a tester who tried 1024 and went back to
+	// Automatic stayed at 1024 -- 22 ms a block, and a patch that had run at
+	// 75% of its deadline now at 92%.
 	if (choice > 0 && g_driver && g_driver->device)
 		g_driver->device->setBlockSize(choice);
+	else if (choice == 0 && was > 0 && autoSizeBeforeFix > 0)
+		audioSetBlockSize(autoSizeBeforeFix);
 }
 
 
