@@ -23,6 +23,7 @@
 #pragma once
 
 #include <atomic>
+#include <time.h>
 #include <unistd.h>
 
 #include <mutex.hpp>
@@ -58,17 +59,42 @@ struct EngineMutex : rack::SharedMutex {
 	patch change makes anyway.
 
 	It does not return the moment the writer is gone, but once none has shown
-	up for a millisecond. Clearing a patch takes the lock once per module, and
-	when each of those had to wait for a block of its own, leaving a 133-module
-	patch on an overloaded TB-X306X took eight seconds. */
+	up for a while -- how long depends on what is going on. One change, a cable
+	plugged in, gets a millisecond: the audio is playing and must not be made
+	to click for it. A run of them is a patch being cleared or loaded, which
+	takes the lock once per cable and per module; there the audio is already
+	gone, and every block let through between two of them is time the user
+	spends looking at a frozen rack. With the short wait alone, leaving a
+	133-module patch on an overloaded TB-X306X took nine seconds, seven of
+	them one block at a time. */
 	void letWritersIn() {
 		if (writers.load(std::memory_order_relaxed) == 0)
 			return;
+		int64_t now = nowMs();
+		int64_t last = lastBusyMs.load(std::memory_order_relaxed);
+		int run = (now - last < RUN_GAP_MS) ? busyRun.load(std::memory_order_relaxed) + 1 : 1;
+		int quietNeeded = (run >= RUN_LENGTH) ? 80 : 4; // x 250 us
 		int quiet = 0;
-		for (int i = 0; i < 400 && quiet < 4; i++) {
+		for (int i = 0; i < 400 && quiet < quietNeeded; i++) {
 			usleep(250);
 			quiet = writers.load(std::memory_order_relaxed) > 0 ? 0 : quiet + 1;
 		}
+		busyRun.store(run, std::memory_order_relaxed);
+		lastBusyMs.store(nowMs(), std::memory_order_relaxed);
+	}
+
+private:
+	/** Blocks in a row, no further apart than this, that each found a writer:
+	that many is a run. */
+	static const int RUN_LENGTH = 3;
+	static const int64_t RUN_GAP_MS = 50;
+	std::atomic<int> busyRun{0};
+	std::atomic<int64_t> lastBusyMs{0};
+
+	static int64_t nowMs() {
+		timespec ts;
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 	}
 };
 
