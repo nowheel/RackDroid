@@ -379,9 +379,19 @@ static void present(ui::Menu* menu) {
 }
 
 
+/** The overlay closeAll() last asked Rack to delete. Rack does that at its next
+step, so for a frame it is still a child of the scene and still looks like a
+menu waiting to be shown: every action taken from a sheet brought the same
+sheet straight back up for a frame, and after File > Open on a slow device for
+as long as the first frames of the new patch took. Only ever compared, never
+dereferenced. */
+static ui::MenuOverlay* g_closingOverlay = NULL;
+
 static void closeAll() {
 	if (g.overlay)
 		g.overlay->requestDelete();
+	if (g.overlay)
+		g_closingOverlay = g.overlay;
 	g.overlay = NULL;
 	g.menu = NULL;
 	g.active = false;
@@ -696,7 +706,16 @@ void processNativeMenus() {
 		}
 
 		if (!g.active) {
+			// Forget the closing overlay once Rack has really deleted it, so a
+			// new one that lands on the same address is not mistaken for it.
+			bool closingStillThere = false;
+			for (widget::Widget* c : scene->children)
+				closingStillThere |= (c == g_closingOverlay);
+			if (!closingStillThere)
+				g_closingOverlay = NULL;
 			for (widget::Widget* c : scene->children) {
+				if (c == g_closingOverlay)
+					continue;
 				// Scene keeps a permanent hidden MenuOverlay (the module
 				// browser) as a child from construction on. It is not a
 				// plain ui::Menu; skip it explicitly (also handled below by
