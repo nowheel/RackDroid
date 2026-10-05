@@ -425,6 +425,13 @@ static void processBackKey(app::Scene* scene) {
 		return;
 	}
 	for (widget::Widget* c : scene->children) {
+		// Not the module browser: it is a MenuOverlay too, a permanent hidden
+		// child the scene keeps a pointer to. With no menu open it was the
+		// first one this loop met, so a back press deleted it, and the next
+		// back press read scene->browser after the free -- a segfault in
+		// Widget::hide(), found on an SM-S901E by random input.
+		if (c == scene->browser)
+			continue;
 		if (dynamic_cast<ui::MenuOverlay*>(c)) {
 			c->requestDelete();
 			break;

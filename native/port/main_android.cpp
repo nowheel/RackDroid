@@ -403,7 +403,7 @@ struct RackDroidApp {
 		if (!rackStarted)
 			return;
 		rackdroid::tourDemoRestore();
-		if (APP->patch && !settings::safeMode) {
+		if (APP->patch && patchLaunched && !settings::safeMode) {
 			try {
 				// Persist the session like desktop autosave-on-quit.
 				APP->patch->saveAutosave();
@@ -484,7 +484,15 @@ static void handleCmdInner(RackDroidApp* rd, int32_t cmd) {
 			// module parked mid-animation is never what gets written out.
 			if (rd->rackStarted)
 				rackdroid::tourDemoRestore();
-			if (rd->rackStarted && APP->patch) {
+			// Only a patch that has been LOADED is worth writing out. Startup
+			// pumps this very queue while the user's plugin packs load, so a
+			// stop arriving then -- the screen locking, the user switching
+			// away during a slow start -- used to save the still-empty engine
+			// over the autosave, and the load that followed read the empty
+			// patch back: the session was gone without a word. Seen on a
+			// OnePlus 8T launched with the screen locked. Nor in a recovery
+			// start, which promises to leave the autosave as it found it.
+			if (rd->rackStarted && rd->patchLaunched && APP->patch && !settings::safeMode) {
 				try {
 					APP->patch->saveAutosave();
 					settings::save();

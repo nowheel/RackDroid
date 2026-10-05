@@ -2148,7 +2148,16 @@ class MainActivity : NativeActivity() {
 
 		override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
 			when (ev.actionMasked) {
-				android.view.MotionEvent.ACTION_DOWN -> { startRawY = ev.rawY; return true }
+				android.view.MotionEvent.ACTION_DOWN -> {
+					startRawY = ev.rawY
+					// ScrollView has to see the DOWN too: it is where it learns
+					// which pointer it is following. Swallowing it left that id
+					// stale, and a second finger on the sheet then crashed the
+					// app -- "pointerIndex out of range" in ScrollView.onTouchEvent,
+					// found on a Lenovo TB-X306X by random multi-touch input.
+					super.onTouchEvent(ev)
+					return true
+				}
 				android.view.MotionEvent.ACTION_MOVE -> if (dragging || scrollY == 0) {
 					dragging = true
 					translationY = (ev.rawY - startRawY).coerceAtLeast(0f)
@@ -2167,7 +2176,9 @@ class MainActivity : NativeActivity() {
 						return true
 					}
 			}
-			return super.onTouchEvent(ev)
+			// The framework throws rather than ignoring a pointer it has lost
+			// track of; a menu sheet is not worth the process.
+			return try { super.onTouchEvent(ev) } catch (e: IllegalArgumentException) { false }
 		}
 	}
 
@@ -2664,7 +2675,13 @@ class MainActivity : NativeActivity() {
 
 	override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
 		super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-		if (requestCode == 2 && grantResults.all { it == PackageManager.PERMISSION_GRANTED })
+		// Not on an empty answer: Android replies with empty arrays, at once and
+		// from inside requestPermissions, when a request is already on screen or
+		// cannot be shown -- and all{} of nothing is true. That sent this
+		// straight back into showBleMidiScanner, which asked again: a stack
+		// overflow from tapping the Bluetooth MIDI button twice.
+		if (requestCode == 2 && grantResults.isNotEmpty()
+				&& grantResults.all { it == PackageManager.PERMISSION_GRANTED })
 			showBleMidiScanner()
 	}
 
