@@ -11,6 +11,7 @@
 	<string name="menu_back">Atrás</string>
 	<string name="menu_share_patch">Compartir parche…</string>
 	<string name="menu_save_to_device">Guardar en el dispositivo…</string>
+	<string name="open_patch_title">Abrir patch (mantén pulsado para compartir)</string>
 	<string name="menu_block">Bloque de audio</string>
 	<string name="block_explain">El motor produce el sonido en bloques. Un bloque pequeño responde antes a los dedos; uno grande es más difícil de interrumpir. Automático elige para este dispositivo y avisa cuando cambia.</string>
 	<string name="block_auto">Automático</string>

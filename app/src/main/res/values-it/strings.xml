@@ -9,6 +9,7 @@
 	<string name="menu_back">Indietro</string>
 	<string name="menu_share_patch">Condividi patch…</string>
 	<string name="menu_save_to_device">Salva sul dispositivo…</string>
+	<string name="open_patch_title">Apri patch (tieni premuto per condividere)</string>
 	<string name="menu_block">Blocco audio</string>
 	<string name="block_explain">Il motore produce il suono a blocchi. Un blocco piccolo risponde prima alle dita; uno grande è più difficile da interrompere. Automatico sceglie per questo dispositivo e avvisa quando cambia.</string>
 	<string name="block_auto">Automatico</string>

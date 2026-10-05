@@ -13,6 +13,7 @@
 	<string name="menu_back">Back</string>
 	<string name="menu_share_patch">Share patch…</string>
 	<string name="menu_save_to_device">Save to device…</string>
+	<string name="open_patch_title">Open patch (hold to share)</string>
 	<string name="menu_block">Audio block</string>
 	<string name="block_explain">The engine makes sound in blocks. A small block answers your fingers sooner; a big one is harder to interrupt. Automatic picks for this device and says so when it changes.</string>
 	<string name="block_auto">Automatic</string>

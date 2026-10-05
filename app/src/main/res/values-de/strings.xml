@@ -11,6 +11,7 @@
 	<string name="menu_back">Zurück</string>
 	<string name="menu_share_patch">Patch teilen…</string>
 	<string name="menu_save_to_device">Auf dem Gerät speichern…</string>
+	<string name="open_patch_title">Patch öffnen (zum Teilen gedrückt halten)</string>
 	<string name="menu_block">Audioblock</string>
 	<string name="block_explain">Die Engine erzeugt den Klang in Blöcken. Ein kleiner Block reagiert schneller auf die Finger; ein großer lässt sich schwerer unterbrechen. Automatisch wählt für dieses Gerät und meldet jede Änderung.</string>
 	<string name="block_auto">Automatisch</string>

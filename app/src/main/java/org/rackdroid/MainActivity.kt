@@ -2189,7 +2189,7 @@ class MainActivity : NativeActivity() {
 		uiHandler.post {
 			var answered = false
 			val dialog = AlertDialog.Builder(this)
-				.setTitle("Open patch  (long-press to share)")
+				.setTitle(R.string.open_patch_title)
 				.setItems(files.map { it.name }.toTypedArray()) { _, which ->
 					answered = true; nativeDialogString(files[which].absolutePath)
 				}

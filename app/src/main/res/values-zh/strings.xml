@@ -11,6 +11,7 @@
 	<string name="menu_back">返回</string>
 	<string name="menu_share_patch">分享工程…</string>
 	<string name="menu_save_to_device">保存到设备…</string>
+	<string name="open_patch_title">打开工程(长按分享)</string>
 	<string name="menu_block">音频块</string>
 	<string name="block_explain">引擎按块生成声音。块小，手指的响应更快；块大，更不容易中断。自动会为这台设备选择，并在更改时提示。</string>
 	<string name="block_auto">自动</string>

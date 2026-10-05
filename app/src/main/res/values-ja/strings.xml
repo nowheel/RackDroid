@@ -11,6 +11,7 @@
 	<string name="menu_back">戻る</string>
 	<string name="menu_share_patch">パッチを共有…</string>
 	<string name="menu_save_to_device">デバイスに保存…</string>
+	<string name="open_patch_title">パッチを開く(長押しで共有)</string>
 	<string name="menu_block">オーディオブロック</string>
 	<string name="block_explain">エンジンは音をブロック単位で作ります。小さいブロックは指への反応が速く、大きいブロックは途切れにくくなります。自動はこの端末に合わせて選び、変更したときに知らせます。</string>
 	<string name="block_auto">自動</string>
