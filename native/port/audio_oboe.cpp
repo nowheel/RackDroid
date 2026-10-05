@@ -1099,6 +1099,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 struct OboeDriver : rack::audio::Driver {
 	OboeDevice* device = NULL;
 
+	~OboeDriver() override;
+
 	std::string getName() override {
 		return "Android (Oboe)";
 	}
@@ -1168,6 +1170,21 @@ struct OboeDriver : rack::audio::Driver {
 
 
 static OboeDriver* g_driver = NULL;
+
+/** The device goes with the driver. It did not: unsubscribe() keeps the device
+for a couple of seconds on purpose, stopRack() deleted the driver inside that
+time, and the stream went on calling back for the life of the process. That
+is longer than it sounds -- the playback service keeps the process when the
+activity is closed, so opening the app again starts a second Rack beside it.
+On a Nothing A024 the orphan kept the phone's one Exclusive endpoint and the
+new stream was given Shared: 170.8 ms of measured latency against the usual
+handful, a 960-frame callback, and two streams taking turns to tell ADPF
+their deadline was 2 ms and 20 ms, 1600 times in three minutes. */
+OboeDriver::~OboeDriver() {
+	delete device;
+	if (g_driver == this)
+		g_driver = NULL;
+}
 
 void oboeInit() {
 	g_driver = new OboeDriver;
