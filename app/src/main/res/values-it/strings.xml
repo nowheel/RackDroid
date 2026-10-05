@@ -77,6 +77,7 @@
 	<!-- Toast / dialoghi -->
 	<string name="toast_recording">Registrazione…</string>
 	<string name="toast_recording_failed">Impossibile avviare la registrazione</string>
+	<string name="toast_recording_no_audio">Niente da registrare: in questa patch manca il modulo Audio</string>
 	<string name="toast_saved_to">Salvato in Documenti/RackDroid/%1$s</string>
 	<string name="toast_patch_imported">Patch importata: %1$s (File ▸ Apri)</string>
 	<string name="toast_import_failed">Import non riuscito: %1$s</string>

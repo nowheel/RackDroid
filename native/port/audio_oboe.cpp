@@ -198,6 +198,8 @@ of a second of callbacks has come in on time, or two seconds have gone by --
 a patch too heavy for the device never has an on-time fifth of a second, and
 it still has to be heard. */
 static std::atomic<bool> g_warmupWanted{true};
+/** Audio ports on the device, for threads that may not look at the device. */
+static std::atomic<int> g_portCount{0};
 /** How long the last silence lasted, in ms, for the log; -1 once reported. */
 static std::atomic<int32_t> g_warmupEndedMs{-1};
 static std::atomic<int32_t> g_warmupStartUnderruns{0};
@@ -1253,6 +1255,7 @@ struct OboeDriver : rack::audio::Driver {
 		// mutex::lock).
 		port->device = device;
 		device->subscribe(port);
+		g_portCount.store((int) device->subscribed.size(), std::memory_order_relaxed);
 		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
@@ -1262,6 +1265,7 @@ struct OboeDriver : rack::audio::Driver {
 		if (deviceId != 0 || !device)
 			return;
 		device->unsubscribe(port);
+		g_portCount.store((int) device->subscribed.size(), std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: port unsubscribed (%d left)", (int) device->subscribed.size());
 		// Deliberately NOT destroyed here. Rack rewrites a port's driver,
 		// device and channel count one after another while restoring a patch,
@@ -1291,6 +1295,7 @@ handful, a 960-frame callback, and two streams taking turns to tell ADPF
 their deadline was 2 ms and 20 ms, 1600 times in three minutes. */
 OboeDriver::~OboeDriver() {
 	delete device;
+	g_portCount.store(0, std::memory_order_relaxed);
 	if (g_driver == this)
 		g_driver = NULL;
 }
@@ -1669,6 +1674,16 @@ bool audioIsSharedMode() {
 
 
 // ---- JNI: master recording toggle (MainActivity's ⏺ button) ----
+
+/** Whether anything is being played at all. The recorder is fed by the audio
+callback, and a patch with no Audio module has no stream and no callback: the
+button then "recorded" for as long as it was held on and saved a 44-byte file,
+a header and nothing else, with a toast saying where. Found on a OnePlus 8T
+after File > New. */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_rackdroid_MainActivity_nativeHasAudioOutput(JNIEnv*, jobject) {
+	return g_portCount.load(std::memory_order_relaxed) > 0;
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_rackdroid_MainActivity_nativeRecordStart(JNIEnv* env, jobject thiz, jstring jPath) {

@@ -73,6 +73,7 @@
 	<string name="palette_module_info">%1$sの情報</string>
 	<string name="toast_recording">録音中…</string>
 	<string name="toast_recording_failed">録音を開始できませんでした</string>
+	<string name="toast_recording_no_audio">録音するものがありません:このパッチにAudioモジュールがありません</string>
 	<string name="toast_saved_to">Documents/RackDroid/%1$s に保存しました</string>
 	<string name="toast_patch_imported">パッチを読み込みました: %1$s（ファイル ▸ 開く）</string>
 	<string name="toast_import_failed">読み込みに失敗しました: %1$s</string>

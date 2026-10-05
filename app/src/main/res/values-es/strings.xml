@@ -73,6 +73,7 @@
 	<string name="palette_module_info">Información sobre %1$s</string>
 	<string name="toast_recording">Grabando…</string>
 	<string name="toast_recording_failed">La grabación no pudo empezar</string>
+	<string name="toast_recording_no_audio">Nada que grabar: este patch no tiene módulo Audio</string>
 	<string name="toast_saved_to">Guardado en Documents/RackDroid/%1$s</string>
 	<string name="toast_patch_imported">Parche importado: %1$s (Archivo ▸ Abrir)</string>
 	<string name="toast_import_failed">Error al importar: %1$s</string>

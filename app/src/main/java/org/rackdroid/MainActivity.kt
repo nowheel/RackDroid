@@ -868,7 +868,9 @@ class MainActivity : NativeActivity() {
 			val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
 				.format(java.util.Date())
 			val f = File(dir, "rackdroid-$stamp.wav")
-			if (nativeRecordStart(f.absolutePath)) {
+			if (!nativeHasAudioOutput()) {
+				android.widget.Toast.makeText(this, getString(R.string.toast_recording_no_audio), android.widget.Toast.LENGTH_LONG).show()
+			} else if (nativeRecordStart(f.absolutePath)) {
 				recordingFile = f
 				button.setImageResource(R.drawable.ic_tb_stop)
 				android.widget.Toast.makeText(this, getString(R.string.toast_recording), android.widget.Toast.LENGTH_SHORT).show()
@@ -2705,6 +2707,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeDialogInt(result: Int)
 	private external fun nativeDialogString(s: String?)
 	private external fun nativeRecordStart(path: String): Boolean
+	private external fun nativeHasAudioOutput(): Boolean
 	private external fun nativeRecordStop()
 	private external fun nativeHistoryAction(action: Int)
 	private external fun nativeSetLockMode(mode: Int)

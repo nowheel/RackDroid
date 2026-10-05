@@ -82,6 +82,7 @@
 	<!-- Toasts / dialogs -->
 	<string name="toast_recording">Recording…</string>
 	<string name="toast_recording_failed">Recording failed to start</string>
+	<string name="toast_recording_no_audio">Nothing to record: this patch has no Audio module</string>
 	<string name="toast_saved_to">Saved to Documents/RackDroid/%1$s</string>
 	<string name="toast_patch_imported">Patch imported: %1$s (File ▸ Open)</string>
 	<string name="toast_import_failed">Import failed: %1$s</string>
