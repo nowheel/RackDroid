@@ -207,15 +207,21 @@ target_include_directories(osdialog PUBLIC ${RACK_DIR}/dep/osdialog)
 set(RACK_ENGINE_PATCH_DIR ${CMAKE_CURRENT_BINARY_DIR}/rack_engine_patched)
 file(READ ${RACK_DIR}/src/engine/Engine.cpp _eng_cpp)
 set(_eng_worker "system::setThreadName(string::f(\"Worker %d\", id));")
-foreach(_needle "#include <simd/common.hpp>" "SpinBarrier engineBarrier;" "HybridBarrier workerBarrier;" "${_eng_worker}")
+set(_eng_block "std::lock_guard<std::mutex> stepLock(internal->blockMutex);")
+foreach(_needle "#include <simd/common.hpp>" "SpinBarrier engineBarrier;" "HybridBarrier workerBarrier;" "${_eng_worker}" "SharedMutex mutex;" "${_eng_block}")
 	string(FIND "${_eng_cpp}" "${_needle}" _pos)
 	if(_pos EQUAL -1)
 		message(FATAL_ERROR "Engine.cpp no longer contains '${_needle}': update the barrier patch")
 	endif()
 endforeach()
 string(REPLACE "#include <simd/common.hpp>"
-	"#include <simd/common.hpp>\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_barrier.hpp\""
+	"#include <simd/common.hpp>\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_barrier.hpp\"\n#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_mutex.hpp\""
 	_eng_cpp "${_eng_cpp}")
+# The engine's own mutex becomes one the block loop can stand aside on, so a
+# patch too heavy for the device cannot starve the interface thread of the
+# lock (port/engine_mutex.hpp). Every use in Engine.cpp names the type.
+string(REPLACE "SharedMutex" "rackdroid::EngineMutex" _eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_block}" "internal->mutex.letWritersIn(); ${_eng_block}" _eng_cpp "${_eng_cpp}")
 string(REPLACE "SpinBarrier engineBarrier;" "rackdroid::EngineBarrier engineBarrier{true};" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_worker}" "${_eng_worker} rackdroid::engineWorkerStarted();" _eng_cpp "${_eng_cpp}")
 string(REPLACE "HybridBarrier workerBarrier;" "rackdroid::EngineBarrier workerBarrier;" _eng_cpp "${_eng_cpp}")
