@@ -20,6 +20,7 @@
 	<string name="block_frames">%1$d frames</string>
 	<string name="block_delay_note">Añade %1$s ms de retardo. Se queda donde lo pongas.</string>
 	<string name="block_auto_raised">Chasquidos: bloque de audio subido a %1$d</string>
+	<string name="block_auto_raised_ahead">Carga alta: bloque de audio subido a %1$d para evitar crepitaciones</string>
 	<string name="block_auto_lowered">Bloque de audio de vuelta a %1$d</string>
 	<string name="block_crackle_title">El sonido se entrecorta</string>
 	<string name="block_crackle_message">El bloque de audio está fijado en %1$d frames y este dispositivo no puede seguirlo. Un bloque mayor, o Automático, debería detener los chasquidos.</string>
@@ -152,6 +153,7 @@
 	<string name="tutlevel_5">Nivel 5 — Voces avanzadas</string>
 	<string name="modules_loaded">Se han cargado %1$d paquete(s) de módulos adicionales</string>
 	<string name="engine_maxed_out">Este patch necesita más CPU de la que tu dispositivo puede dar, incluso a máxima potencia. Prueba a simplificarlo o a bajar la frecuencia de muestreo.</string>
+	<string name="engine_near_limit">Este parche está cerca del límite de tu dispositivo: puede empezar a crepitar. Simplifícalo o baja la frecuencia de muestreo.</string>
 	<string name="engine_thermal_throttled">Tu dispositivo se ha calentado y se está ralentizando por sí solo; por eso el patch se entrecorta. Déjalo enfriar.</string>
 	<string name="engine_cpu_contended">Otra aplicación está usando casi todo el procesador del teléfono, y por eso el sonido se entrecorta. Tu patch está bien: cierra lo que tengas abierto.</string>
 	<string name="installing_modules">Instalando módulos…</string>

@@ -1688,6 +1688,7 @@ class MainActivity : NativeActivity() {
 					0 -> Toast.makeText(this, getString(R.string.block_auto_raised, b), Toast.LENGTH_LONG).show()
 					1 -> Toast.makeText(this, getString(R.string.block_auto_lowered, b), Toast.LENGTH_LONG).show()
 					2 -> showBlockCrackleNotice(a, b)
+					3 -> Toast.makeText(this, getString(R.string.block_auto_raised_ahead, b), Toast.LENGTH_LONG).show()
 				}
 			}
 		}
@@ -2043,6 +2044,7 @@ class MainActivity : NativeActivity() {
 		val res = when (kind) {
 			1 -> R.string.engine_thermal_throttled
 			2 -> R.string.engine_cpu_contended
+			3 -> R.string.engine_near_limit
 			else -> R.string.engine_maxed_out
 		}
 		showToastFromNative(getString(res))

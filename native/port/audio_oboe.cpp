@@ -15,7 +15,9 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <thread>
 #include <cstdio>
 #include <cstring>
@@ -198,8 +200,20 @@ of a second of callbacks has come in on time, or two seconds have gone by --
 a patch too heavy for the device never has an on-time fifth of a second, and
 it still has to be heard. */
 static std::atomic<bool> g_warmupWanted{true};
+/** How long the silence may last, in seconds: long after a patch arrives, when
+the thread tuner has a search ahead of it, short after a mere reopen. */
+static std::atomic<int> g_warmupLimitSec{6};
+/** The longest any callback has taken since audioTrimBuffer() last looked, in
+ns. What the buffer is sized from before anything underruns. */
+static std::atomic<int64_t> g_callbackPeakNanos{0};
 /** Audio ports on the device, for threads that may not look at the device. */
 static std::atomic<int> g_portCount{0};
+/** Goes up each time a port arrives: from outside, a patch being loaded. */
+static std::atomic<int> g_portEpoch{0};
+
+int audioPortEpoch() {
+	return g_portEpoch.load(std::memory_order_relaxed);
+}
 /** How long the last silence lasted, in ms, for the log; -1 once reported. */
 static std::atomic<int32_t> g_warmupEndedMs{-1};
 static std::atomic<int32_t> g_warmupStartUnderruns{0};
@@ -278,7 +292,7 @@ int32_t audioCallbackFrames() {
 }
 
 
-void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
+void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks) {
 	int32_t p = g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
 	int64_t sum = g_loadSumPercent.exchange(0, std::memory_order_relaxed);
 	int32_t n = g_loadCount.exchange(0, std::memory_order_relaxed);
@@ -286,6 +300,8 @@ void audioEngineLoadTake(int32_t* peak, int32_t* mean) {
 		*peak = p;
 	if (mean)
 		*mean = (n > 0) ? (int32_t) (sum / n) : 0;
+	if (callbacks)
+		*callbacks = n;
 }
 
 /** Callbacks that ran badly late, kept for the frame loop to write down.
@@ -413,7 +429,8 @@ void audioReportUnderruns() {
 		AUDIO_WARN("Oboe: audio let out after %d ms of silence (%d underruns fell in it)%s",
 			warm, g_totalUnderruns.load(std::memory_order_relaxed)
 				- g_warmupStartUnderruns.load(std::memory_order_relaxed),
-			warm >= 2000 ? " -- it never settled; playing anyway" : "");
+			warm >= g_warmupLimitSec.load(std::memory_order_relaxed) * 1000
+				? " -- it never settled; playing anyway" : "");
 
 	static int32_t lastReported = 0;
 	static double nextReportAt = 0.0;
@@ -841,6 +858,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// a log full of underruns with no way to tell which rung of
 		// checkBlockSizeOverload()'s ladder was in effect at the time.
 		AUDIO_WARN("Oboe: openStreams took %.0f ms", (rack::system::getTime() - t0) * 1000.0);
+		// A reopen by itself -- a block size step -- is not a new patch: two
+		// seconds, unless a patch load already asked for longer just now.
+		if (!g_warmupWanted.load(std::memory_order_relaxed))
+			g_warmupLimitSec.store(2, std::memory_order_relaxed);
 		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: stream started (%s), sampleRate=%g block=%d callback=%d burst=%d buffer=%d "
 			"capacity=%d sharing=%s performance=%s api=%s",
@@ -1052,11 +1073,19 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (rate <= 0 || numFrames <= 0)
 			return;
 		if (warming) {
-			// On time, with room to spare: under four fifths of what it had.
-			bool onTime = elapsedNanos * rate < (int64_t) numFrames * 800000000LL;
+			// On time: back before the frames it was asked for have played.
+			// (Not "with room to spare" -- a patch running clean at 90% of
+			// its deadline never has room to spare and was kept silent for
+			// the whole timeout.)
+			bool onTime = elapsedNanos * rate < (int64_t) numFrames * 1000000000LL;
 			warmGoodFrames = onTime ? warmGoodFrames + numFrames : 0;
 			warmFrames += numFrames;
-			if (warmGoodFrames >= rate / 5 || warmFrames >= rate * 2) {
+			// Six seconds, because what is being waited for after a patch
+			// loads is the thread tuner, and it needs four or five to walk to
+			// the count a heavy patch wants: with two, an SM-S901E let out ten
+			// seconds of 450 underruns a second while it did.
+			if (warmGoodFrames >= rate / 5
+					|| warmFrames >= rate * g_warmupLimitSec.load(std::memory_order_relaxed)) {
 				warming = false;
 				g_warmupEndedMs.store((int32_t) ((int64_t) warmFrames * 1000 / rate),
 					std::memory_order_relaxed);
@@ -1169,6 +1198,14 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		int64_t elapsed = (int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
 			+ (t1.tv_nsec - t0.tv_nsec);
 		applyWarmup(output, stream->getChannelCount(), numFrames, stream->getSampleRate(), elapsed);
+		// Not while the silence is on: those are the start-up callbacks, and a
+		// buffer sized for them would be sized for nothing that will happen again.
+		if (!warming) {
+			int64_t seenNs = g_callbackPeakNanos.load(std::memory_order_relaxed);
+			while (elapsed > seenNs && !g_callbackPeakNanos.compare_exchange_weak(
+					seenNs, elapsed, std::memory_order_relaxed))
+				;
+		}
 		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
 		if (reportToAdpf)
 			adpfReportNanos(elapsed);
@@ -1256,6 +1293,8 @@ struct OboeDriver : rack::audio::Driver {
 		port->device = device;
 		device->subscribe(port);
 		g_portCount.store((int) device->subscribed.size(), std::memory_order_relaxed);
+		g_portEpoch.fetch_add(1, std::memory_order_relaxed);
+		g_warmupLimitSec.store(6, std::memory_order_relaxed);
 		g_warmupWanted.store(true, std::memory_order_relaxed);
 		AUDIO_WARN("Oboe: port subscribed (%d now)", (int) device->subscribed.size());
 		return device;
@@ -1486,6 +1525,52 @@ void audioTrimBuffer() {
 	double now = rack::system::getTime();
 	float rate = (float) g_driver->device->getSampleRate();
 
+	// What the buffer has to hold, worked out before anything is heard. A
+	// callback that takes T to return leaves the device playing from the
+	// buffer for T, so a buffer shorter than the longest callback of the last
+	// minute has already been outrun once and only luck says when it clicks.
+	// Until now the size was found from below: trimmed every quiet twenty
+	// seconds until it underran, then put back -- "underran at a 384-frame
+	// buffer; back up to 768" on a Nothing A024 whose callbacks had been
+	// reaching 12 ms, 570 frames, the whole time. Each of those was a click
+	// spent to learn a number the callback had been reporting all along.
+	// The margin is the user's own setting: how much delay for how much safety.
+	static int64_t peakBySecond[60];
+	static int peakSlot = 0;
+	static double peakSlotAt = 0.0;
+	if (rackdroid::audioSecondsSinceStreamOpen() < 1.0) {
+		std::fill(std::begin(peakBySecond), std::end(peakBySecond), (int64_t) 0);
+		g_callbackPeakNanos.store(0, std::memory_order_relaxed);
+	}
+	if (now - peakSlotAt >= 1.0) {
+		peakSlotAt = now;
+		peakSlot = (peakSlot + 1) % 60;
+		peakBySecond[peakSlot] = 0;
+	}
+	int64_t peakNow = g_callbackPeakNanos.exchange(0, std::memory_order_relaxed);
+	if (peakNow > peakBySecond[peakSlot])
+		peakBySecond[peakSlot] = peakNow;
+	int64_t peakNs = *std::max_element(std::begin(peakBySecond), std::end(peakBySecond));
+	int mode = g_latencyMode.load(std::memory_order_relaxed);
+	float margin = (mode == 0) ? 1.5f : (mode == 2) ? 3.f : 2.f;
+	int32_t neededFrames = 0;
+	if (rate > 0.f && peakNs > 0) {
+		neededFrames = (int32_t) (peakNs * 1e-9 * rate * margin);
+		neededFrames = (neededFrames + burst - 1) / burst * burst;
+		int32_t most = stream->getBufferCapacityInFrames() - burst;
+		if (neededFrames > most)
+			neededFrames = most;
+	}
+	if (neededFrames > size && rackdroid::audioSecondsSinceStreamOpen() >= 2.0) {
+		auto grown = stream->setBufferSizeInFrames(neededFrames);
+		if (grown && grown.value() > size) {
+			AUDIO_WARN("Oboe: callbacks have taken up to %.1f ms; buffer %d -> %d "
+				"frames before that is heard", peakNs * 1e-6, size, grown.value());
+			size = grown.value();
+			quietSince = now;
+		}
+	}
+
 	if (underruns != lastUnderruns) {
 		bool first = lastUnderruns < 0;
 		int32_t added = first ? 0 : underruns - lastUnderruns;
@@ -1599,6 +1684,9 @@ void audioTrimBuffer() {
 		tooSmall = 0; // old news; worth asking again
 	if (tooSmall > 0 && tooSmall * 2 > floorFrames)
 		floorFrames = tooSmall * 2;
+	// And never below what the callbacks of the last minute have needed.
+	if (neededFrames > floorFrames)
+		floorFrames = neededFrames;
 	if (size <= floorFrames) {
 		// Already where it belongs. Record that and restart the clock, or the
 		// regrowth counter above keeps climbing every frame and re-announces

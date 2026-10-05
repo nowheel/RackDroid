@@ -22,6 +22,7 @@
 	<string name="block_frames">%1$d frames</string>
 	<string name="block_delay_note">Adds %1$s ms of delay. Stays where you put it.</string>
 	<string name="block_auto_raised">Crackling: audio block raised to %1$d</string>
+	<string name="block_auto_raised_ahead">High load: audio block raised to %1$d to keep it from crackling</string>
 	<string name="block_auto_lowered">Audio block back down to %1$d</string>
 	<string name="block_crackle_title">The sound is breaking up</string>
 	<string name="block_crackle_message">The audio block is fixed at %1$d frames and this device is not keeping up with it. A bigger block, or Automatic, should stop the crackling.</string>
@@ -547,6 +548,7 @@
 	<string name="t30_s6">Drone teaches the deepest lesson: modular is about listening, not playing.</string>
 	<string name="modules_loaded">Loaded %1$d extra module pack(s)</string>
 	<string name="engine_maxed_out">This patch needs more CPU than your device can give, even at full power. Try simplifying it or lowering the sample rate.</string>
+	<string name="engine_near_limit">This patch is close to what your device can do: it may start to crackle. Lighten it or lower the sample rate.</string>
 	<string name="engine_thermal_throttled">Your device has heated up and is slowing itself down, which is why this patch is stuttering. Let it cool off.</string>
 	<string name="engine_cpu_contended">Another app is using most of your phone\'s processor right now, which is why this is stuttering. Your patch is fine — close what else is running.</string>
 	<string name="installing_modules">Installing modules…</string>

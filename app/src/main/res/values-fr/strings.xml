@@ -20,6 +20,7 @@
 	<string name="block_frames">%1$d frames</string>
 	<string name="block_delay_note">Ajoute %1$s ms de retard. Reste où vous le mettez.</string>
 	<string name="block_auto_raised">Craquements : bloc audio monté à %1$d</string>
+	<string name="block_auto_raised_ahead">Charge élevée : bloc audio porté à %1$d pour éviter les grésillements</string>
 	<string name="block_auto_lowered">Bloc audio revenu à %1$d</string>
 	<string name="block_crackle_title">Le son se coupe</string>
 	<string name="block_crackle_message">Le bloc audio est fixé à %1$d frames et cet appareil ne suit pas. Un bloc plus grand, ou Automatique, devrait arrêter les craquements.</string>
@@ -152,6 +153,7 @@
 	<string name="tutlevel_5">Niveau 5 — Voix avancées</string>
 	<string name="modules_loaded">%1$d paquet(s) de modules supplémentaires chargé(s)</string>
 	<string name="engine_maxed_out">Ce patch demande plus de CPU que votre appareil ne peut en fournir, même à pleine puissance. Essayez de le simplifier ou de baisser la fréquence d\'échantillonnage.</string>
+	<string name="engine_near_limit">Ce patch est proche de la limite de votre appareil : il peut se mettre à grésiller. Allégez-le ou baissez la fréquence d\'échantillonnage.</string>
 	<string name="engine_thermal_throttled">Votre appareil a chauffé et ralentit de lui-même, c\'est pourquoi le patch saccade. Laissez-le refroidir.</string>
 	<string name="engine_cpu_contended">Une autre application utilise presque tout le processeur de ton téléphone, et c\'est pour cela que le son saccade. Ton patch va bien : ferme ce qui tourne à côté.</string>
 	<string name="installing_modules">Installation des modules…</string>

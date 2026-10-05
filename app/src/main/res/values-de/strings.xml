@@ -20,6 +20,7 @@
 	<string name="block_frames">%1$d Frames</string>
 	<string name="block_delay_note">Fügt %1$s ms Verzögerung hinzu. Bleibt, wo du ihn hinstellst.</string>
 	<string name="block_auto_raised">Knacksen: Audioblock auf %1$d erhöht</string>
+	<string name="block_auto_raised_ahead">Hohe Last: Audioblock auf %1$d erhöht, um Knistern zu vermeiden</string>
 	<string name="block_auto_lowered">Audioblock zurück auf %1$d</string>
 	<string name="block_crackle_title">Der Klang setzt aus</string>
 	<string name="block_crackle_message">Der Audioblock ist auf %1$d Frames festgelegt, und dieses Gerät kommt damit nicht mit. Ein größerer Block oder Automatisch sollte das Knacksen beenden.</string>
@@ -152,6 +153,7 @@
 	<string name="tutlevel_5">Stufe 5 — Fortgeschrittene Stimmen</string>
 	<string name="modules_loaded">%1$d zusätzliche Modulpakete geladen</string>
 	<string name="engine_maxed_out">Dieses Patch benötigt mehr Rechenleistung, als dein Gerät selbst mit voller Leistung bieten kann. Vereinfache es oder senke die Abtastrate.</string>
+	<string name="engine_near_limit">Dieses Patch ist nahe an der Grenze deines Geräts: Es kann zu knistern beginnen. Vereinfache es oder senke die Abtastrate.</string>
 	<string name="engine_thermal_throttled">Dein Gerät ist heiß gelaufen und drosselt sich selbst – deshalb stockt das Patch. Lass es abkühlen.</string>
 	<string name="engine_cpu_contended">Eine andere App beansprucht gerade fast den gesamten Prozessor deines Telefons – deshalb stottert der Ton. Dein Patch ist in Ordnung: Schließe, was sonst noch läuft.</string>
 	<string name="installing_modules">Module werden installiert…</string>

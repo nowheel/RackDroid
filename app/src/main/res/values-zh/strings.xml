@@ -20,6 +20,7 @@
 	<string name="block_frames">%1$d 帧</string>
 	<string name="block_delay_note">增加 %1$s 毫秒延迟。保持你设定的值。</string>
 	<string name="block_auto_raised">出现爆音：音频块已提高到 %1$d</string>
+	<string name="block_auto_raised_ahead">负载较高：音频块已提高到 %1$d 以防止爆音</string>
 	<string name="block_auto_lowered">音频块已恢复到 %1$d</string>
 	<string name="block_crackle_title">声音断断续续</string>
 	<string name="block_crackle_message">音频块固定为 %1$d 帧，这台设备跟不上。更大的块或自动应该能消除爆音。</string>
@@ -152,6 +153,7 @@
 	<string name="tutlevel_5">第 5 级 — 进阶音色</string>
 	<string name="modules_loaded">已加载 %1$d 个额外模块包</string>
 	<string name="engine_maxed_out">此补丁所需的 CPU 性能超过了设备满载时能提供的上限。请尝试简化补丁或降低采样率。</string>
+	<string name="engine_near_limit">此工程已接近设备的极限，可能开始出现爆音。请简化工程或降低采样率。</string>
 	<string name="engine_thermal_throttled">设备过热并自行降速,这就是补丁卡顿的原因。请让设备冷却一下。</string>
 	<string name="engine_cpu_contended">另一个应用正在占用手机的大部分处理器资源，所以声音会卡顿。你的音色链没有问题：请关闭其他正在运行的应用。</string>
 	<string name="installing_modules">正在安装模块…</string>

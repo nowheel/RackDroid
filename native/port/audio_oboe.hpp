@@ -51,7 +51,7 @@ times a second rather than whenever something goes wrong, which is what lets
 the thread search in main_android.cpp reject a count in a fraction of a second
 instead of waiting five for an underrun that may or may not arrive. Written by
 the audio thread, read by the render thread. Either pointer may be null. */
-void audioEngineLoadTake(int32_t* peak, int32_t* mean);
+void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks = nullptr);
 
 /** Frames the last audio callback was actually asked to produce, or 0 before
 the first one. NOT the engine's block size: alignToBurst() rounds the request to
@@ -164,6 +164,9 @@ false (no-op) if no device is open. */
 remembered for the next launch until stepping back down has been tried and has
 failed (see g_raisedFrom in audio_oboe.cpp). */
 bool audioSetBlockSize(int blockSize, bool ladderRaise = false);
+
+/** Counts audio ports arriving. A change means a patch has been loaded. */
+int audioPortEpoch();
 
 /** The largest block size worth asking the live stream for: the biggest power
 of two that still fits inside its buffer capacity, capped at 1024 (the

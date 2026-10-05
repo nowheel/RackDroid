@@ -1163,6 +1163,57 @@ audio priority leave the interface no CPU on a small device: on a TB-X306X a
 133-module patch took the File menu up to eight seconds to open. */
 static bool g_engineOverloaded = false;
 
+/** The share of its deadline the callback used in the last window that ran
+clean, or 0 before there has been one. What the block-size steps consult
+before giving headroom back: a patch clean at 90% is clean because of the
+headroom it has. */
+static int32_t g_lastCleanLoad = 0;
+
+/** The load the engine is parked at while g_engineOverloaded, and a request
+from the thread tuner for one step more of block size before anything is
+heard. A bigger block does buy load on some devices -- an SM-S901E went from
+116% of its deadline at 128 frames to a clean 85% at 256 -- so the ladder is
+worth a step while the shortfall is of that order, and worth nothing once it
+is several times over (128 -> 1024 changed nothing at 150-240%). */
+static int32_t g_overloadPercent = 0;
+static bool g_blockRaiseWanted = false;
+
+/** What each block size has cost this patch: the share of the deadline at the
+thread count the tuner ended on, clean or not, and when that was learned. The
+ladder used to know only "up". It is not that simple: on an SM-S901E one patch
+measured 116% at 128 frames, a clean 81% at 256, 119% at 512 and 115% at 1024
+-- and the ladder, answering a handful of underruns at 256, climbed past the
+one size that worked and sat at 1024 underrunning forty times a second with
+nothing to bring it back. Indexed by log2 of the size. */
+static int32_t g_blockLoad[16];
+static double g_blockLoadAt[16];
+static const double BLOCK_LOAD_TTL_SEC = 600.0;
+
+static int blockSlot(int block) {
+	int slot = 0;
+	while (block > 1 && slot < 15) {
+		block >>= 1;
+		slot++;
+	}
+	return slot;
+}
+
+static void noteBlockLoad(int32_t percent) {
+	int block = rackdroid::audioBlockSize();
+	if (block <= 0 || percent <= 0)
+		return;
+	g_blockLoad[blockSlot(block)] = percent;
+	g_blockLoadAt[blockSlot(block)] = system::getTime();
+}
+
+/** The load `block` is known to cost, or 0 if nobody has measured it lately. */
+static int32_t knownBlockLoad(int block) {
+	int slot = blockSlot(block);
+	if (g_blockLoad[slot] <= 0 || system::getTime() - g_blockLoadAt[slot] > BLOCK_LOAD_TTL_SEC)
+		return 0;
+	return g_blockLoad[slot];
+}
+
 /** Set the first time a thread count runs a window clean, and never cleared.
 Not a claim that the engine is settled NOW -- it is a claim that the opening
 search is over, which is the only thing anyone else needs to wait for.
@@ -1383,6 +1434,46 @@ static void checkThreadCount() {
 		return;
 	}
 
+	// A different patch is a different question, and everything the tuner
+	// knows is about the last one: a count proven clean, scores, a settled
+	// state that makes it wait five-second windows and forgive a few
+	// underruns. Carried over, that had an SM-S901E play ten seconds of solid
+	// underruns after a 133-module patch replaced a light one, patiently
+	// re-deciding what it had settled for the other patch. Start the search
+	// again, from where it is, with the short windows a search uses.
+	static int portEpoch = 0;
+	static int tunedBlock = 0;
+	static bool resetLate = false;
+	// A different block size is a different question too: the same patch that
+	// overran every count at 128 frames ran clean at 256.
+	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock) {
+		bool portChanged = rackdroid::audioPortEpoch() != portEpoch;
+		portEpoch = rackdroid::audioPortEpoch();
+		tunedBlock = rackdroid::audioBlockSize();
+		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {
+			scores[i] = -1;
+			scoreAt[i] = 0.0;
+			loads[i] = 0;
+			provenClean[i] = false;
+		}
+		settledAt = -1;
+		resetLate = true;
+		g_engineOverloaded = false;
+		g_threadTunerExhausted = false; // or the ladder acts on the last patch's verdict
+		g_lastCleanLoad = 0;
+		if (portChanged) {
+			// A different patch: what the block sizes cost the last one is gone.
+			for (int i = 0; i < 16; i++)
+				g_blockLoad[i] = 0;
+		}
+		windowStartedAt = now;
+		windowStartCount = total;
+		windowTouched = false;
+		// The load itself: modules being created with the engine held off.
+		if (warmupUntil < now + 1.5)
+			warmupUntil = now + 1.5;
+	}
+
 	// Starting up is not a measurement. The patch is still loading and the
 	// Oboe stream reopens several times while the Audio module settles, which
 	// on an 8T cost fifteen underruns in the first five seconds and was enough
@@ -1433,15 +1524,21 @@ static void checkThreadCount() {
 	// callback reads well over its deadline: measured at 139% here, on a rung
 	// that was about to run clean at 20%. A peak remembers a single spike
 	// forever, so the spike has to be kept out rather than argued with.
-	int32_t peakNow = 0, meanNow = 0;
-	rackdroid::audioEngineLoadTake(&peakNow, &meanNow);
+	int32_t peakNow = 0, meanNow = 0, callbacksNow = 0;
+	rackdroid::audioEngineLoadTake(&peakNow, &meanNow, &callbacksNow);
 	if (now - windowStartedAt >= MIN_WINDOW_SEC
 			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC) {
 		if (peakNow > windowLoadPeak)
 			windowLoadPeak = peakNow;
-		if (meanNow > 0) {
-			windowLoadSum += meanNow;
-			windowLoadSamples++;
+		// Weighted by the callbacks each reading covers, and counted in
+		// callbacks. Counting readings instead meant counting frames: a
+		// TB-X306X drawing a heavy patch at a few frames a second never
+		// reached four of them in a window, so its load was "unknown" in
+		// exactly the situation the load exists to recognise, and the block
+		// ladder climbed to 1024 on underruns alone.
+		if (meanNow > 0 && callbacksNow > 0) {
+			windowLoadSum += (int64_t) meanNow * callbacksNow;
+			windowLoadSamples += callbacksNow;
 		}
 	}
 	int32_t windowLoadMean = (windowLoadSamples > 0)
@@ -1475,7 +1572,7 @@ static void checkThreadCount() {
 	// sample, and the tuner then thrashed 3 -> 4 -> 5 -> 6 -> 7 -> 3 -> 5 -> 7
 	// in ten seconds on the strength of it. Below the bar, fall back to
 	// counting underruns: slower, and right.
-	static const int32_t LOAD_MIN_SAMPLES = 4;
+	static const int32_t LOAD_MIN_SAMPLES = 8; // callbacks
 	bool hopeless = settledAt < 0 && windowLoadMean > LOAD_HOPELESS_PERCENT
 		&& windowLoadSamples >= LOAD_MIN_SAMPLES
 		&& now - windowStartedAt >= MIN_WINDOW_SEC;
@@ -1591,13 +1688,17 @@ static void checkThreadCount() {
 		return; // and do not record it as this rung's score
 	}
 
-	// Clearly past the deadline, not brushing it: between 90 and this a bigger
-	// block or one more thread can still be the answer.
 	// Once parked on an overload it takes dropping back under the line the
 	// search itself calls hopeless to leave it: an 8T sitting at 97-128% of its
 	// deadline crossed a single threshold every few seconds, and each crossing
 	// set the ladder walking again.
-	static const int32_t OVERLOAD_PERCENT = 110;
+	// Past the deadline on average is not keeping up, by definition. This was
+	// 110, to leave the band below it to the older rule that compares counts
+	// by underruns -- and in that band a TB-X306X at 102% re-walked all six
+	// counts every minute, seven Workers included, for as long as the patch
+	// stayed loaded. The bigger block that band was being kept for is tried
+	// from the parked state now.
+	static const int32_t OVERLOAD_PERCENT = 100;
 	bool overNow = loadSamples >= LOAD_MIN_SAMPLES
 		&& loadMean > (g_engineOverloaded ? LOAD_HOPELESS_PERCENT : OVERLOAD_PERCENT);
 	if (current >= 1 && current <= MAX_TRACKED_THREADS) {
@@ -1656,6 +1757,14 @@ static void checkThreadCount() {
 	static double cleanSince = 0.0;
 	static int probedFrom = -1;
 
+	if (resetLate) {
+		// The rest of what a new patch forgets; these live further down.
+		resetLate = false;
+		probedFrom = -1;
+		probeAfter = PROBE_AFTER_MIN;
+		cleanSince = 0.0;
+	}
+
 	if (underruns == 0) {
 		toleratedRuns = 0;
 		if (current >= 1 && current <= MAX_TRACKED_THREADS)
@@ -1668,6 +1777,95 @@ static void checkThreadCount() {
 			cleanSince = now;
 		}
 		rememberThreadCount(current);
+
+		// Everything above this point waits for an underrun before it moves,
+		// and an underrun is a click somebody has already heard. The share of
+		// its deadline the callback is using says the same thing earlier: a
+		// count running clean at 87% is one notification away from not being.
+		// So a window that is clean but close counts against the count it was
+		// measured at, and two in a row are acted on.
+		static const int32_t NEAR_LIMIT_PERCENT = 85;
+		static int nearLimitWindows = 0;
+		static int raisedFrom = -1;
+		static int32_t raisedFromLoad = 0;
+		static double noRaiseUntil = 0.0;
+		bool loadKnown = loadSamples >= LOAD_MIN_SAMPLES;
+		if (loadKnown) {
+			nearLimitWindows = (loadMean >= NEAR_LIMIT_PERCENT) ? nearLimitWindows + 1 : 0;
+			g_lastCleanLoad = loadMean;
+			noteBlockLoad(loadMean);
+		}
+		if (probedFrom >= 0 && loadKnown && loadMean >= NEAR_LIMIT_PERCENT - 5) {
+			// Fewer threads did not underrun in this window, and would have in
+			// the next busy one. Not good enough to stay.
+			LOGI("Engine: %d threads ran clean but at %d%% of the audio deadline; "
+				"%d it is, then", current, loadMean, probedFrom);
+			settings::threadCount = probedFrom;
+			windowTouched = true;
+			// Settled there, not searching: a search rules a count out at 90%
+			// of the deadline without waiting for an underrun, which is right
+			// while looking for somewhere to stand and wrong for a count that
+			// has been standing at 91% for minutes. Going back "to search" sent
+			// an SM-S901E from a clean four threads down to two and 200
+			// underruns.
+			settledAt = probedFrom;
+			probedFrom = -1;
+			probeAfter = (probeAfter * 2.0 > PROBE_AFTER_MAX) ? PROBE_AFTER_MAX : probeAfter * 2.0;
+			cleanSince = now;
+			nearLimitWindows = 0;
+			return;
+		}
+		if (raisedFrom >= 0) {
+			// The first clean window after going up ahead of trouble: it has to
+			// have bought something, or the extra Worker is heat for nothing.
+			if (loadKnown && loadMean + 5 > raisedFromLoad) {
+				LOGI("Engine: %d threads is no easier than %d was (%d%% against %d%%); "
+					"going back", current, raisedFrom, loadMean, raisedFromLoad);
+				settings::threadCount = raisedFrom;
+				windowTouched = true;
+				noRaiseUntil = now + 600.0;
+				settledAt = raisedFrom; // settled, not searching: see above
+				raisedFrom = -1;
+				cleanSince = now;
+				nearLimitWindows = 0;
+				return;
+			}
+			raisedFrom = -1;
+		}
+		if (nearLimitWindows >= 2) {
+			nearLimitWindows = 0;
+			int upper = current + 1;
+			bool upperKnownBad = known(upper) && scores[upper] > 0;
+			if (upper <= ceiling && !upperKnownBad && now >= noRaiseUntil) {
+				LOGW("Engine: clean at %d threads but at %d%% of the audio deadline; "
+					"trying %d before it is heard", current, loadMean, upper);
+				raisedFrom = current;
+				raisedFromLoad = loadMean;
+				settledAt = upper; // judged on a full window, like any settled count
+				cleanSince = 0.0;
+				settings::threadCount = upper;
+				windowTouched = true;
+				return;
+			}
+			// No thread count left to try: ask for a bigger block, which costs
+			// a short silence now instead of crackle later. If that cannot be
+			// had either, the honest thing that remains is to say so before
+			// the crackle does.
+			if (rackdroid::audioBlockChoice() == 0 && !rackdroid::audioIsRecording()
+					&& rackdroid::audioBlockSize() * 2 <= rackdroid::audioMaxUsefulBlockSize()) {
+				g_blockRaiseWanted = true;
+				return;
+			}
+			static double warnedAt = -1e9;
+			if (now - warnedAt >= 600.0) {
+				warnedAt = now;
+				LOGW("Engine: clean but at %d%% of the audio deadline at %d threads, "
+					"with no better count known; telling the user it is close",
+					loadMean, current);
+				rackdroid::showEngineNotice(3);
+			}
+		}
+
 		if (probedFrom >= 0) {
 			// The probe held: the smaller count is doing the job.
 			LOGI("Engine: %d threads is enough after all; staying here instead "
@@ -1683,8 +1881,15 @@ static void checkThreadCount() {
 		// phone stayed "known bad" for the rest of the session, and the engine
 		// sat a rung higher than it needed to, for ever.
 		bool worthProbing = !known(lower) || scores[lower] == 0;
+		// And only where one thread fewer would plausibly still fit. The same
+		// work on one thread less costs about current/lower as much of the
+		// deadline; if that lands near the limit the probe is not a question,
+		// it is a crackle with a foregone answer -- four threads at 90% were
+		// probed down to three at 94% and two at 110% on an SM-S901E.
+		bool roomToProbe = !loadKnown || lower < 1
+			|| loadMean * current / lower < NEAR_LIMIT_PERCENT - 10;
 		if (cleanSince > 0.0 && now - cleanSince >= probeAfter
-				&& lower >= floorCount && worthProbing) {
+				&& lower >= floorCount && worthProbing && roomToProbe) {
 			LOGI("Engine: clean at %d threads for %.0fs; trying %d to see if "
 				"fewer will do", current, now - cleanSince, lower);
 			probedFrom = current;
@@ -1754,6 +1959,8 @@ static void checkThreadCount() {
 		if (best != current && (nothingLeft || bestLoad * 115 < ownLoad * 100))
 			candidate = best;
 		else if (!g_engineOverloaded) {
+			g_overloadPercent = loadMean;
+			noteBlockLoad(loadMean);
 			LOGW("Engine: no thread count keeps up with this patch; staying at %d "
 				"(%d%% of the audio deadline), %s", current, loadMean,
 				nothingLeft ? "the fewest threads, to leave the device usable"
@@ -1778,6 +1985,10 @@ static void checkThreadCount() {
 	}
 	if (candidate < 0) {
 		g_threadTunerExhausted = true;
+		// A verdict on this block size too, when the load is known: the best
+		// this patch does at it.
+		if (loadSamples >= LOAD_MIN_SAMPLES)
+			noteBlockLoad(loadMean);
 		return; // nothing known to be better; stay where we are
 	}
 
@@ -1854,6 +2065,39 @@ static void checkBlockSizeOverload() {
 		return;
 	}
 
+	// Asked for by the thread tuner, ahead of any underrun: the patch is
+	// running clean but within a breath of its deadline and no thread count
+	// eases it. This is the one step taken on what is about to happen rather
+	// than on what was heard.
+	// The next size up is not tried again while it is remembered as no easier
+	// than this one.
+	int32_t hereLoad = knownBlockLoad(current);
+	int32_t upLoad = knownBlockLoad(current * 2);
+	bool upKnownNoBetter = upLoad > 0 && hereLoad > 0 && upLoad + 5 >= hereLoad;
+	// Nor where it would reach the device as the very same callback: on a
+	// Lenovo TB-X306X every block from 128 to 1024 arrives as one 960-frame
+	// burst, and a patch measured 103-106% of its deadline at all four while
+	// the ladder spent three reopens finding that out.
+	if (rackdroid::audioAlignedCallbackFrames(current * 2) > 0
+			&& rackdroid::audioAlignedCallbackFrames(current * 2)
+				== rackdroid::audioAlignedCallbackFrames(current))
+		upKnownNoBetter = true;
+	if (g_blockRaiseWanted) {
+		g_blockRaiseWanted = false;
+		if (rackdroid::audioBlockChoice() == 0 && !rackdroid::audioIsRecording()
+				&& !upKnownNoBetter
+				&& current * 2 <= cap && rackdroid::audioSecondsSinceStreamOpen() >= 10.0) {
+			LOGW("Engine: clean but at %d%% of the audio deadline with no thread "
+				"count that eases it; block size %d instead of %d before it is heard",
+				g_lastCleanLoad, current * 2, current);
+			if (g_autoRaisedFrom <= 0)
+				g_autoRaisedFrom = current;
+			rackdroid::audioSetBlockSize(current * 2, true);
+			rackdroid::nativeAudioNotice(3, current, current * 2);
+			return;
+		}
+	}
+
 	// The spent ladder only silences Auto; a fixed size still gets its notice.
 	if ((g_blockSizeTried && rackdroid::audioBlockChoice() == 0) || !freshCeilingUnderrun)
 		return;
@@ -1875,7 +2119,9 @@ static void checkBlockSizeOverload() {
 	// block: three devices each went 128 -> 1024 in twenty seconds on a patch
 	// too heavy for them, three reopens and three toasts, and underran exactly
 	// as before. The same goes for telling someone their fixed size is too small.
-	if (g_engineOverloaded)
+	// ...at any block the ladder can reach, that is. Within half again of the
+	// deadline a bigger block has been seen to close the gap, so it is tried.
+	if (g_engineOverloaded && g_overloadPercent > 150)
 		return;
 	// And never during a recording. Changing the block size reopens the
 	// stream, which takes the callback away for the best part of a second --
@@ -1901,8 +2147,8 @@ static void checkBlockSizeOverload() {
 		}
 		return;
 	}
-	if (current >= cap) {
-		g_blockSizeTried = true; // ladder fully spent
+	if (current >= cap || upKnownNoBetter) {
+		g_blockSizeTried = true; // ladder fully spent, or its next rung known useless
 		return;
 	}
 	// One step, then time to see what it did. It used to take the next step
@@ -2122,7 +2368,15 @@ static void checkBlockSizeStepDown() {
 	// The ladder went up in this session and things have been quiet since: one
 	// step back down. This is the half that was missing -- a block raised once
 	// stayed raised, and the patch then saved it.
-	bool undo = done && g_autoRaisedFrom > 0 && current > g_autoRaisedFrom
+	// Not while the patch is clean only just. The bigger block is part of why
+	// it is clean, and "quiet for a minute" at 85% of the deadline is not
+	// spare capacity: an SM-S901E stepped 256 -> 128 after exactly such a
+	// minute and took 380 underruns in the next two seconds.
+	// Low enough that the smaller block does not land straight back in the
+	// band where it gets raised again: the step has been worth about a third.
+	static const int32_t ROOM_TO_STEP_DOWN_PERCENT = 55;
+	bool room = g_lastCleanLoad > 0 && g_lastCleanLoad < ROOM_TO_STEP_DOWN_PERCENT;
+	bool undo = done && room && g_autoRaisedFrom > 0 && current > g_autoRaisedFrom
 		&& now >= undoAt && rackdroid::audioSecondsSinceUnderrun() >= 60.0
 		&& rackdroid::audioSecondsSinceStreamOpen() >= 60.0;
 	if (done && !undo)
@@ -2134,6 +2388,15 @@ static void checkBlockSizeStepDown() {
 	// And not while the thread search is still moving: see g_threadTunerSettled.
 	if (!g_threadTunerSettled)
 		return;
+	// The launch-time probe asks the same question and gets the same answer.
+	if (!undo && !room) {
+		if (g_lastCleanLoad >= ROOM_TO_STEP_DOWN_PERCENT) {
+			done = true;
+			LOGI("Engine: at %d%% of the audio deadline there is no room to try "
+				"a smaller block; staying at %d frames", g_lastCleanLoad, current);
+		}
+		return;
+	}
 	done = true;
 	probeIsUndo = undo;
 	// Whatever stops an undo below, it is asked again in a minute rather than
@@ -2143,6 +2406,9 @@ static void checkBlockSizeStepDown() {
 
 	int want = current / 2;
 	if (want < BLOCK_FLOOR)
+		return;
+	// Not towards a size this patch is remembered as being too much at.
+	if (knownBlockLoad(want) >= 85)
 		return;
 	// A smaller block only buys latency if it actually reaches the device as a
 	// smaller callback. Where the burst is larger than the block, it does not:
@@ -2185,6 +2451,62 @@ static void checkBlockSizeStepDown() {
 	rackdroid::audioSetBlockSize(want);
 }
 
+
+/** Goes back to a block size that is remembered as clearly easier than the one
+in use, once the tuner has a verdict on this one and that verdict is poor.
+Either direction: this is what brings the engine back from a step up that made
+things worse. */
+static void checkBlockByLoad() {
+	if (rackdroid::audioBlockChoice() > 0 || rackdroid::audioIsRecording())
+		return;
+	if (rackdroid::audioSecondsSinceStreamOpen() < 8.0)
+		return;
+	int current = rackdroid::audioBlockSize();
+	if (current <= 0)
+		return;
+	int slot = blockSlot(current);
+	// A verdict on this size, reached since the stream last opened at it.
+	if (g_blockLoad[slot] <= 0
+			|| system::getTime() - g_blockLoadAt[slot] > rackdroid::audioSecondsSinceStreamOpen())
+		return;
+	int32_t here = g_blockLoad[slot];
+	if (here < 85)
+		return; // comfortable enough; not worth a reopen
+	int best = 0;
+	int32_t bestLoad = here;
+	int cap = rackdroid::audioMaxUsefulBlockSize();
+	for (int b = 64; b <= 4096; b *= 2) {
+		int32_t l = knownBlockLoad(b);
+		if (b != current && (cap <= 0 || b <= cap) && l > 0 && l + 10 < bestLoad) {
+			bestLoad = l;
+			best = b;
+		}
+	}
+	if (best <= 0) {
+		// Nothing clearly easier. Then at least not a bigger block than one
+		// that does the same job: the smallest size remembered as no worse
+		// than this one, which is how a raise that bought nothing is undone.
+		for (int b = 64; b < current; b *= 2) {
+			int32_t l = knownBlockLoad(b);
+			if (l > 0 && l <= here + 5) {
+				best = b;
+				bestLoad = l;
+				break;
+			}
+		}
+		if (best <= 0)
+			return;
+		LOGW("Engine: a %d-frame block bought nothing over %d (%d%% of the "
+			"deadline against %d%%); going back to it", current, best, here, bestLoad);
+	}
+	else
+		LOGW("Engine: this patch was easier at a %d-frame block (%d%% of the deadline "
+			"against %d%% at %d); going back to it", best, bestLoad, here, current);
+	if (best < current && g_autoRaisedFrom >= best)
+		g_autoRaisedFrom = 0;
+	rackdroid::audioSetBlockSize(best, best > current);
+	rackdroid::nativeAudioNotice(best > current ? 3 : 1, current, best);
+}
 
 static void checkMaxedOutOverload() {
 	// Sample first and unconditionally: the share is a delta between two
@@ -2326,6 +2648,7 @@ void android_main(android_app* app) {
 				rackdroid::audioApplyBlockChoice();
 				checkBlockSizeOverload();
 				checkBlockSizeStepDown();
+				checkBlockByLoad();
 
 				// The rest needs a surface: input, the scene, a dialog to
 				// show, or a restart the user would not see coming.

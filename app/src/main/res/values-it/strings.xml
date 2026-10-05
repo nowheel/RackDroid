@@ -18,6 +18,7 @@
 	<string name="block_frames">%1$d frame</string>
 	<string name="block_delay_note">Aggiunge %1$s ms di ritardo. Resta dove lo metti.</string>
 	<string name="block_auto_raised">Crackling: blocco audio alzato a %1$d</string>
+	<string name="block_auto_raised_ahead">Carico alto: blocco audio alzato a %1$d per prevenire i crepitii</string>
 	<string name="block_auto_lowered">Blocco audio riportato a %1$d</string>
 	<string name="block_crackle_title">Il suono si interrompe</string>
 	<string name="block_crackle_message">Il blocco audio è fisso a %1$d frame e questo dispositivo non riesce a starci dietro. Un blocco più grande, o Automatico, dovrebbe fermare il crackling.</string>
@@ -542,6 +543,7 @@
 	<string name="t30_s6">Il drone insegna la lezione più profonda: il modulare è ascoltare, non suonare.</string>
 	<string name="modules_loaded">Caricati %1$d pack di moduli extra</string>
 	<string name="engine_maxed_out">Questa patch richiede più CPU di quanta il tuo device possa dare, anche al massimo. Prova a semplificarla o ad abbassare la frequenza di campionamento.</string>
+	<string name="engine_near_limit">Questa patch è vicina al limite del dispositivo: potrebbe iniziare a gracchiare. Alleggeriscila o abbassa la frequenza di campionamento.</string>
 	<string name="engine_thermal_throttled">Il tuo device si è scaldato e sta rallentando da solo: è per questo che la patch scatta. Lascialo raffreddare.</string>
 	<string name="engine_cpu_contended">Un\'altra app sta usando quasi tutto il processore del telefono, ed è per questo che il suono scatta. La tua patch va bene: chiudi quello che hai aperto.</string>
 	<string name="installing_modules">Installazione moduli…</string>
