@@ -680,6 +680,8 @@ static std::vector<int> collectWorkerThreads() {
 			workers.push_back(tid);
 	}
 	closedir(dir);
+	// Directory order is not promised to repeat, and callers compare sets.
+	std::sort(workers.begin(), workers.end());
 	return workers;
 }
 
@@ -958,9 +960,26 @@ both need to be redone every time Engine::setThreadCount recreates them. */
 static void checkWorkerPriority() {
 	static int lastThreadCount = -1;
 	static double applyAt = 0.0;
+	// The Workers that have been given their priority and cores so far.
+	static std::vector<int> servedWorkers;
 	if (settings::threadCount != lastThreadCount) {
 		lastThreadCount = settings::threadCount;
 		applyAt = system::getTime() + 0.5;
+	}
+	// Half a second was a guess at how long the engine takes to replace its
+	// Workers after the count changes, and it was also the only trigger: a
+	// patch loaded later than that got Workers nobody was waiting for, which
+	// ran at ordinary priority on whatever cores they were born on until the
+	// next thing happened to ask. A Nothing A024 logged its pin 0.57 s after a
+	// patch had loaded and 504 underruns in that same second; a OnePlus 8T
+	// 0.5 s after. So look, twenty times a second, and serve a new set the
+	// moment it is complete. The timer stays for the first launch of the set.
+	static double scanAt = 0.0;
+	if (system::getTime() >= scanAt) {
+		scanAt = system::getTime() + 0.05;
+		std::vector<int> now = collectWorkerThreads();
+		if (now != servedWorkers && (int) now.size() == settings::threadCount - 1)
+			applyAt = system::getTime();
 	}
 	// A reopened stream (block size change, route change) calls back on a new
 	// thread, which is neither pinned nor known to ADPF. No delay needed: the
@@ -986,6 +1005,7 @@ static void checkWorkerPriority() {
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
 		std::vector<int> workers = collectWorkerThreads();
+		servedWorkers = workers;
 		applyWorkerPriority(workers);
 		applyWorkerAffinity(workers);
 		applyAdpfThreads(workers);
@@ -1718,14 +1738,26 @@ static void checkThreadCount() {
 				best = i;
 			}
 		}
+		// Past twice the deadline there is no audio left to protect -- nothing
+		// coming out is recognisable at any count -- and what the engine can
+		// still do for the user is get out of the way. Parked at five Workers
+		// on a 353-module patch (1500% of the deadline), a TB-X306X drew its own
+		// status bar once every ten seconds and took eight seconds to act on a
+		// tap in File > Open. So there the fewest threads win, whatever they
+		// measure.
+		static const int32_t NOTHING_LEFT_PERCENT = 200;
+		bool nothingLeft = bestLoad > NOTHING_LEFT_PERCENT;
+		if (nothingLeft)
+			best = floorCount;
 		// The margin is for the same reason as below, and wide because these
 		// windows are short and their readings move by a tenth on their own.
-		if (best != current && bestLoad * 115 < ownLoad * 100)
+		if (best != current && (nothingLeft || bestLoad * 115 < ownLoad * 100))
 			candidate = best;
 		else if (!g_engineOverloaded) {
 			LOGW("Engine: no thread count keeps up with this patch; staying at %d "
-				"(%d%% of the audio deadline), the closest any came", current,
-				loadMean);
+				"(%d%% of the audio deadline), %s", current, loadMean,
+				nothingLeft ? "the fewest threads, to leave the device usable"
+					: "the closest any came");
 			g_engineOverloaded = true;
 		}
 	}
