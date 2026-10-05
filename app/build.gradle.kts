@@ -30,6 +30,16 @@ plugins {
 // native/CMakeLists.txt. Keyed by entry name, not by searching for the word --
 // "Requires Rack 2.6+" really does mean upstream Rack, and TipWindow's mentions
 // of the VCV Library and the Rack SDK are other people's product names.
+// JSON string bodies, so the line breaks are written as the two characters \n.
+val missingModules = mapOf(
+	"en" to "This patch includes modules that are not installed:\\n\\n%s\\n\\nThey come in an optional module pack. Install it with the download button in the toolbar, then open the patch again.",
+	"it" to "Questa patch include moduli non installati:\\n\\n%s\\n\\nFanno parte di un pacchetto di moduli opzionale. Installalo con il pulsante di download nella barra degli strumenti, poi riapri la patch.",
+	"de" to "Dieses Patch enthält Module, die nicht installiert sind:\\n\\n%s\\n\\nSie gehören zu einem optionalen Modulpaket. Installiere es über die Download-Schaltfläche in der Werkzeugleiste und öffne das Patch erneut.",
+	"es" to "Este parche incluye módulos que no están instalados:\\n\\n%s\\n\\nPertenecen a un paquete de módulos opcional. Instálalo con el botón de descarga de la barra de herramientas y vuelve a abrir el parche.",
+	"fr" to "Ce patch inclut des modules qui ne sont pas installés :\\n\\n%s\\n\\nIls font partie d'un pack de modules optionnel. Installez-le avec le bouton de téléchargement de la barre d'outils, puis rouvrez le patch.",
+	"ja" to "このパッチには未インストールのモジュールが含まれています：\\n\\n%s\\n\\nこれらは追加のモジュールパックに含まれています。ツールバーのダウンロードボタンからインストールして、もう一度パッチを開いてください。",
+	"zh" to "此工程包含未安装的模块：\\n\\n%s\\n\\n它们属于可选的模块包。请用工具栏上的下载按钮安装，然后重新打开此工程。")
+
 val rebrandTranslations = tasks.register("rebrandTranslations") {
 	val src = rootProject.file("third_party/Rack/translations")
 	val out = layout.buildDirectory.dir("rebranded-translations")
@@ -54,6 +64,17 @@ val rebrandTranslations = tasks.register("rebrandTranslations") {
 						m.groupValues[2].replace(Regex("\\bRack\\b"), "RackDroid") +
 						m.groupValues[3]
 				}
+			}
+			// And one message is replaced outright. Rack asks whether to show
+			// the missing modules on the VCV Library and opens a browser on
+			// yes; here that does nothing at all (no xdg-open on Android), and
+			// the modules are not on any library -- they are in a module pack
+			// the user installs from the toolbar. One of the demo patches the
+			// app seeds needs such a pack, so this is the first thing a new
+			// user reads after tapping it.
+			missingModules[f.name.removeSuffix(".json")]?.let { value ->
+				val entry = Regex("(\"patch\\.unavailableModules\"\\s*:\\s*\")((?:[^\"\\\\]|\\\\.)*)(\")")
+				text = entry.replace(text) { m -> m.groupValues[1] + value + m.groupValues[3] }
 			}
 			File(dir, f.name).writeText(text, Charsets.UTF_8)
 		}
