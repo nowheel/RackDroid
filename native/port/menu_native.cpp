@@ -391,13 +391,47 @@ static void closeAll() {
 }
 
 
+/** True while `item` is still a row of the menu on show, and that menu still
+ * hangs off the captured overlay. The rows are raw pointers taken when the
+ * sheet was built; Rack may have deleted the menu or its items since -- a
+ * submenu replaced, an action that rebuilt its parent -- and a tap that was
+ * already on its way from the Java sheet then arrives for a row that no longer
+ * exists. Found by random input on a OnePlus 8T: a segfault on
+ * item->createChildMenu(), through a null vtable. */
+static bool menuAlive() {
+	if (!g.overlay || !g.menu)
+		return false;
+	for (widget::Widget* c : g.overlay->children) {
+		for (ui::Menu* m = dynamic_cast<ui::Menu*>(c); m; m = m->childMenu) {
+			if (m == g.menu)
+				return true;
+		}
+	}
+	return false;
+}
+
+static bool rowAlive(ui::MenuItem* item) {
+	if (!menuAlive())
+		return false;
+	for (widget::Widget* c : g.menu->children) {
+		if (c == item)
+			return true;
+	}
+	return false;
+}
+
+
 static void handleSelect(int idx) {
 	if (idx < 0 || idx >= (int) g.rows.size())
 		return;
 	Row& row = g.rows[idx];
 
 	if (row.flags & ROW_BACK) {
-		ui::Menu* parent = g.menu ? g.menu->parentMenu : NULL;
+		if (!menuAlive()) {
+			closeAll();
+			return;
+		}
+		ui::Menu* parent = g.menu->parentMenu;
 		if (parent) {
 			parent->setChildMenu(NULL); // deletes current submenu
 			present(parent);
@@ -432,6 +466,11 @@ static void handleSelect(int idx) {
 		return;
 
 	ui::MenuItem* item = row.item;
+	if (!rowAlive(item)) {
+		LOGE("menu row %d is gone; closing the sheet", idx);
+		closeAll();
+		return;
+	}
 	ui::Menu* child = item->createChildMenu();
 	if (child) {
 		g.menu->setChildMenu(child); // attach so the overlay owns it
