@@ -1626,11 +1626,26 @@ static void checkThreadCount() {
 		// A count is comfortable under this share of its deadline, and the
 		// fewest comfortable threads are what is wanted -- not the lowest load,
 		// which more Workers can always buy a few points of.
-		static const int32_t COMFORT_PERCENT = SWEEP_ENOUGH_PERCENT;
+		// Eighty, not sixty: this is measured with nobody touching the screen,
+		// and what a count costs once they do grows with the Workers the callback
+		// has to wait for. A Nothing A024 read 1:72% 2:94% 3:65% 4:61% 5:51%,
+		// took five as the only one under sixty, and a pinch then held callbacks
+		// of 2 ms of work for 5 to 15 ms -- 400 underruns in a window -- where
+		// the build before, on two threads at 84%, had got through the same
+		// zooming with four short bursts. Kept under the 85 that counts as close
+		// to the limit below, or the choice would be argued with at once.
+		static const int32_t COMFORT_PERCENT = 80;
 		int comfy = 0;
 		for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS && comfy == 0; c++)
 			if (loads[c] > 0 && loads[c] < COMFORT_PERCENT)
 				comfy = c;
+		// One point must not decide it: 4:81% 5:79% on an SM-S901E took five.
+		for (int c = floorCount; c < comfy; c++) {
+			if (loads[c] > 0 && loads[c] <= loads[comfy] + 5) {
+				comfy = c;
+				break;
+			}
+		}
 		bool sweepOn = !stuck && (sweepCount > 0 || !light);
 		if (!stuck && comfy > 0) {
 			// Something fits: then the question is how few threads will do,
@@ -1705,9 +1720,10 @@ static void checkThreadCount() {
 		// Believe the winner only once it has been measured twice: the first
 		// reading may have caught the patch in a quiet moment. If the second
 		// is worse it is kept, and the choice is made again.
-		// A comfortable count needs no second look: its reading is already the
-		// worst of three slices and it has forty points to spare.
-		if (!stuck && comfy == 0 && sweepCount > 0 && sweepVerifyOf != best && sweepVerifies < 3) {
+		// A count well inside its deadline needs no second look: its reading is
+		// already the worst of three slices and it has forty points to spare.
+		if (!stuck && (comfy == 0 || loads[comfy] >= SWEEP_ENOUGH_PERCENT) && sweepCount > 0
+				&& sweepVerifyOf != best && sweepVerifies < 3) {
 			sweepVerifyOf = best;
 			sweepVerifies++;
 			settings::threadCount = best;
@@ -1997,6 +2013,43 @@ static void checkThreadCount() {
 	}
 	if (!overNow)
 		g_engineOverloaded = false;
+
+	// A count that had proved itself and then went over its deadline with the
+	// patch unchanged was pushed there by something else -- another process, a
+	// hot phone -- and the counts measured again in the middle of that are
+	// measured under it. A TB-X306X five minutes clean on two threads at 69%
+	// read 138% while seventy shell commands were being started beside it, was
+	// measured there and then ( 1:132% 2:138% 3:118% 4:107% 5:104% ), and sat
+	// on five threads at 95%, underrunning, long after they had gone. So the
+	// count it came from is remembered and gone back to, half a minute later
+	// and, if whatever it was is still there and sends it over again, after two
+	// minutes and after eight. A try that fails costs a second or two: the
+	// count just left is by then known to fit better and is gone back to
+	// without another measurement.
+	static int priorCount = -1;
+	static double priorTryAt = 0.0;
+	static double priorWait = 30.0;
+	if (resetLate)
+		priorCount = -1;
+	if (priorCount > 0 && now >= priorTryAt) {
+		if (priorCount == current) {
+			if (!overNow)
+				priorCount = -1; // back, and holding
+		}
+		else if (priorWait > 500.0 || priorCount > ceiling)
+			priorCount = -1;
+		else {
+			LOGI("Engine: back to the %d threads this patch was running clean on "
+				"before it was pushed over its deadline (%d now, at %d%%)",
+				priorCount, current, loadMean);
+			priorWait *= 4.0;
+			priorTryAt = now + priorWait;
+			settings::threadCount = priorCount;
+			windowTouched = true;
+			settledAt = priorCount; // settled, not searching: judged on a full window
+			return;
+		}
+	}
 
 	// A score is only evidence while the conditions that produced it still
 	// hold. Past this, treat the rung as never measured and let the search go
@@ -2290,11 +2343,33 @@ static void checkThreadCount() {
 			if (loads[i] > 0 && now - scoreAt[i] < 600.0 && loads[i] < lightest)
 				lightest = loads[i];
 		bool nothingLeft = overWindows >= 2 && lightest > NOTHING_LEFT_PERCENT;
+		// A count the silent measurement found inside the deadline, where this
+		// one has turned out not to be: that is known, not a guess, so it is
+		// gone to. The fewest such, and clearly better than here.
+		int fits = -1;
+		for (int i = floorCount; overWindows >= 2 && fits < 0 && i <= ceiling
+				&& i <= MAX_TRACKED_THREADS; i++)
+			if (i != current && loads[i] > 0 && now - scoreAt[i] < 600.0
+					&& loads[i] < OVERLOAD_PERCENT && loads[i] + 10 < loadMean)
+				fits = i;
+		// The measurement stops at the first count that fits, so it may have
+		// seen two of them; before calling the patch too heavy, see the rest.
+		int countsThere = ceiling - floorCount + 1;
 		if (nothingLeft && current != floorCount)
 			candidate = floorCount;
-		else if (overWindows >= 2 && mayMeasure
-				&& (measuredCounts < 2 || now - sweptAt > 300.0)) {
+		else if (fits > 0) {
+			candidate = fits;
 			overWindows = 0;
+		}
+		else if (overWindows >= 2 && mayMeasure
+				&& (measuredCounts < (countsThere < 3 ? countsThere : 3)
+					|| now - sweptAt > 300.0)) {
+			overWindows = 0;
+			if (proven) {
+				priorCount = current;
+				priorWait = 30.0;
+				priorTryAt = now + 40.0; // the measurement itself takes a few seconds
+			}
 			measureAgain("and over its deadline");
 			return;
 		}
