@@ -31,6 +31,14 @@ jobs:
             build-essential cmake ninja-build xxd \
             libegl1-mesa-dev libgles-dev libgl1-mesa-dri
 
+      - name: Port-layer logic tests (no device needed)
+        # The thread-count decision against readings real devices gave, and
+        # the engine barrier under stress. Seconds each; first, so a broken
+        # decision fails before the twenty-minute build does.
+        run: |
+          g++ -std=c++17 -Wall native/port/thread_choice_test.cpp -o /tmp/thread_choice_test && /tmp/thread_choice_test
+          g++ -O2 -pthread native/port/engine_barrier_test.cpp -o /tmp/barrier_test && /tmp/barrier_test
+
       - name: Build, load and render every plugin model
         # Stages every plugin manifest/resource directory, requires all 21
         # optional libraries to load, then instantiates every registered model.
@@ -52,6 +60,11 @@ jobs:
           java-version: "21"
 
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # The action's default also asks for "tools", a package Google's
+          # repository no longer has: sdkmanager then fails the step. Gradle
+          # fetches the platform, the NDK and CMake itself.
+          packages: platform-tools
 
       - name: Build APK, AAB and all plugin libraries
         # -PdevKeystore: the private key is deliberately not in the repo, so CI
