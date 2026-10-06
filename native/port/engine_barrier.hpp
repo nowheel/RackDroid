@@ -23,6 +23,14 @@
  * block then began by waking them, and the callback's load rose from 8% to
  * 16% of its deadline on the Lenovo and from 6% to 26% (peak 136%) on the
  * Samsung, whose callback is 2 ms long. Headroom is what this app is short of.
+ *
+ * Measured again on a heavy patch, where the Workers have little time between
+ * blocks to sleep in (133 modules, 4 threads at 81% of the deadline, the same
+ * SM-S901E, switched twice): the three Workers fell from 99.6% of a core each
+ * to 87%, the whole app from 417% to 381%, and the callback's own CPU rose
+ * from 82.7% to 84.3%. Nine per cent of the heat for a point and a half of
+ * headroom; still not taken. The other 87% is the Workers spinning for each
+ * other INSIDE the block, twice a sample, and no sleep fits in 21 us.
  */
 #pragma once
 

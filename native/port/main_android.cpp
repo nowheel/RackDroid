@@ -2369,6 +2369,15 @@ static void checkThreadCount() {
 		else if (fits > 0) {
 			candidate = fits;
 			overWindows = 0;
+			// And back again if this was a passing thing: seen on an SM-S901E,
+			// where the app going to the background and returning put five
+			// threads at 83% over for two windows, and three at 92% is where
+			// it then stayed.
+			if (proven) {
+				priorCount = current;
+				priorWait = 30.0;
+				priorTryAt = now + 40.0;
+			}
 		}
 		else if (overWindows >= 2 && mayMeasure
 				&& (measuredCounts < (countsThere < 3 ? countsThere : 3)
