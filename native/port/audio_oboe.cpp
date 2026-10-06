@@ -1603,23 +1603,33 @@ void audioTrimBuffer() {
 	// reaching 12 ms, 570 frames, the whole time. Each of those was a click
 	// spent to learn a number the callback had been reporting all along.
 	// The margin is the user's own setting: how much delay for how much safety.
-	static int64_t peakBySecond[60];
+	// Remembered in ten-second slots, for as long as the setting says: one
+	// minute when playing, five when balanced, fifteen when listening. It was
+	// one minute for everybody, and a minute is how long a hand stays off the
+	// screen: on a Nothing A024 the buffer was walked back down to 384 frames
+	// during a quiet spell and the next pinch -- a 9 ms callback -- underran
+	// it. What stalls a callback comes back; the buffer should still be there.
+	static const int PEAK_SLOTS = 90;
+	static int64_t peakBySlot[PEAK_SLOTS];
 	static int peakSlot = 0;
 	static double peakSlotAt = 0.0;
 	if (rackdroid::audioSecondsSinceStreamOpen() < 1.0) {
-		std::fill(std::begin(peakBySecond), std::end(peakBySecond), (int64_t) 0);
+		std::fill(std::begin(peakBySlot), std::end(peakBySlot), (int64_t) 0);
 		g_callbackPeakNanos.store(0, std::memory_order_relaxed);
 	}
-	if (now - peakSlotAt >= 1.0) {
+	if (now - peakSlotAt >= 10.0) {
 		peakSlotAt = now;
-		peakSlot = (peakSlot + 1) % 60;
-		peakBySecond[peakSlot] = 0;
+		peakSlot = (peakSlot + 1) % PEAK_SLOTS;
+		peakBySlot[peakSlot] = 0;
 	}
 	int64_t peakNow = g_callbackPeakNanos.exchange(0, std::memory_order_relaxed);
-	if (peakNow > peakBySecond[peakSlot])
-		peakBySecond[peakSlot] = peakNow;
-	int64_t peakNs = *std::max_element(std::begin(peakBySecond), std::end(peakBySecond));
+	if (peakNow > peakBySlot[peakSlot])
+		peakBySlot[peakSlot] = peakNow;
 	int mode = g_latencyMode.load(std::memory_order_relaxed);
+	int slotsBack = (mode == 0) ? 6 : (mode == 2) ? PEAK_SLOTS : 30;
+	int64_t peakNs = 0;
+	for (int i = 0; i < slotsBack; i++)
+		peakNs = std::max(peakNs, peakBySlot[(peakSlot - i + PEAK_SLOTS) % PEAK_SLOTS]);
 	float margin = (mode == 0) ? 1.5f : (mode == 2) ? 3.f : 2.f;
 	int32_t neededFrames = 0;
 	if (rate > 0.f && peakNs > 0) {

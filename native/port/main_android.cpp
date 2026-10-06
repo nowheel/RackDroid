@@ -2251,18 +2251,14 @@ static void checkThreadCount() {
 	// that had been playing clean on four. When the counts have to be looked
 	// at again they are looked at the way a new patch is -- in silence, by
 	// load -- and not more than once a minute.
-	static int badWindows = 0;
 	int candidate = -1;
 	if (!overNow) {
 		// Underrunning, but inside its deadline on average: jitter, which the
-		// buffer is for, or something outside this app. Two bad windows in a
-		// row are worth one silent look; otherwise it stays where it is.
-		badWindows = (underruns >= 20) ? badWindows + 1 : 0;
-		if (badWindows >= 2 && mayMeasure) {
-			badWindows = 0;
-			measureAgain("for the second window running");
-			return;
-		}
+		// buffer is for, or something outside this app. Nothing is done about
+		// it here. For one build two such windows in a row brought on a silent
+		// re-measurement, and a drag across the rack on an SM-S901E was enough
+		// to earn six seconds of silence in the middle of a patch that was
+		// playing. A few clicks are a smaller thing than that.
 	}
 	else if (measuredCounts < 2 && mayMeasure) {
 		// Over its deadline at a count chosen without measuring the others
@@ -2434,6 +2430,14 @@ static void checkBlockSizeOverload() {
 	// ...at any block the ladder can reach, that is. Within half again of the
 	// deadline a bigger block has been seen to close the gap, so it is tried.
 	if (g_engineOverloaded && g_overloadPercent > 150)
+		return;
+	// And it is only tried for an engine that is over its deadline. For one
+	// that is inside it and underruns now and then -- a stall when the screen
+	// is pinched, a volume key -- a bigger block is latency and nothing else:
+	// on a Nothing A024 a patch clean at 74% went to 256 frames after one
+	// underrun and to 512 after three more, and measured 79% and 80% there.
+	// Those underruns are the buffer's business, which is sized ahead of them.
+	if (!g_engineOverloaded && rackdroid::audioBlockChoice() == 0)
 		return;
 	// And never during a recording. Changing the block size reopens the
 	// stream, which takes the callback away for the best part of a second --
@@ -2784,12 +2788,12 @@ static void checkBlockByLoad() {
 			|| system::getTime() - g_blockLoadAt[slot] > rackdroid::audioSecondsSinceStreamOpen())
 		return;
 	int32_t here = g_blockLoad[slot];
-	if (here < 85)
-		return; // comfortable enough; not worth a reopen
 	int best = 0;
 	int32_t bestLoad = here;
 	int cap = rackdroid::audioMaxUsefulBlockSize();
-	for (int b = 64; b <= 4096; b *= 2) {
+	// A clearly easier size is only worth a reopen for an engine that is
+	// short of room; a smaller one that is no worse always is, below.
+	for (int b = 64; b <= 4096 && here >= 85; b *= 2) {
 		int32_t l = knownBlockLoad(b);
 		if (b != current && (cap <= 0 || b <= cap) && l > 0 && l + 10 < bestLoad) {
 			bestLoad = l;
