@@ -85,6 +85,14 @@ struct PanelLabelOverlay : widget::Widget {
 
 		widget::Widget* ref = APP->scene->rack;
 
+		// Zoomed far enough out the labels are a few pixels of noise, and they
+		// are a fifth of the frame: 12 ms of 82 on an SM-S901E with a
+		// 133-module rack at zoom 0.25, every frame, with the audio underrunning
+		// beside it. Below seven physical pixels of text only the glows are drawn.
+		float xform[6];
+		nvgCurrentTransform(args.vg, xform);
+		bool tooSmall = 6.5f * xform[0] < 7.f; // the transform already carries the pixel ratio
+
 		// Module currently being dragged. Only when the drag target IS the
 		// ModuleWidget itself (finger on the panel body): knob/port drags
 		// target their own child widgets and must not light the module up.
@@ -139,6 +147,8 @@ struct PanelLabelOverlay : widget::Widget {
 					nvgStroke(args.vg);
 				}
 			}
+			if (tooSmall)
+				continue;
 			// Module name across the top -- but only for plugins shipping
 			// RackDroid's regenerated panels. Those panels carry their name
 			// as an SVG <text> element, which nanosvg (Rack's SVG renderer)

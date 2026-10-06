@@ -41,6 +41,8 @@
 #include <blendish.h>
 
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 #include "window_android.hpp"
 #include "touch_input.hpp"
@@ -513,6 +515,22 @@ void Window::step() {
 	internal->frame++;
 	reportSlowFrame(frameGap, spent, internal->fbCount,
 		pinchFreezesFramebuffers());
+
+	// Half rate (above) means nothing to a frame that takes five vsyncs. A
+	// 133-module rack at zoom 0.25 costs 80 ms a frame on an SM-S901E; left
+	// playing like that with nobody touching it, the render thread never
+	// pauses, and the phone went from thermal status 1 to 3 in three minutes
+	// and to 4 -- its CPU held to 55% -- in forty, where the patch that had
+	// been running clean at 82% of its deadline underran 470 times a second.
+	// With the phone cool the same view cost the audio nothing at all: the
+	// drawing does its damage as heat. So once the screen has been left alone
+	// for five seconds, an expensive frame is followed by twice as long a
+	// rest. The next touch may wait for the end of one; hence the cap.
+	double work = 0.0;
+	for (int i = rackdroid::RENDER_STEP; i <= rackdroid::RENDER_SWAP; i++)
+		work += spent[i];
+	if (frameTime - internal->lastInteraction > 5.0 && work > 0.016)
+		std::this_thread::sleep_for(std::chrono::duration<double>(work < 0.075 ? 2.0 * work : 0.15));
 }
 
 
