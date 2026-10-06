@@ -1982,6 +1982,31 @@ static void checkThreadCount() {
 	static double cleanSince = 0.0;
 	static int probedFrom = -1;
 
+	auto measureAgain = [&](const char* why) {
+		LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline, "
+			"peak %d%%), %s; measuring the thread counts again, in silence",
+			rawUnderruns, windowLen, current, loadMean, loadPeak, why);
+		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {
+			scores[i] = -1;
+			loads[i] = 0;
+		}
+		g_engineOverloaded = false;
+		g_threadTunerExhausted = false;
+		sweepWanted = true;
+		sweepCount = 1; // the whole ladder, whatever the first reading says
+		sweepConfirming = false;
+		sweepStepAt = now;
+		sweepSum = 0;
+		sweepCallbacks = 0;
+		settledAt = -1;
+		rackdroid::audioWarmupBegin();
+	};
+	int measuredCounts = 0;
+	for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
+		if (loads[i] > 0 && now - scoreAt[i] < 600.0)
+			measuredCounts++;
+	// Never into a recording: the silence would be on the tape.
+	bool mayMeasure = now - sweptAt >= 60.0 && !rackdroid::audioIsRecording();
 	if (resetLate) {
 		// The rest of what a new patch forgets; these live further down.
 		resetLate = false;
@@ -2079,6 +2104,15 @@ static void checkThreadCount() {
 				windowTouched = true;
 				return;
 			}
+			// Close to the limit on a count that was never compared with the
+			// others -- a patch waved through at launch, when the phone was
+			// cool and boosted, and now running at 87% on one thread on a
+			// OnePlus 8T. Compare them now, in silence, rather than wait for
+			// the underruns to ask.
+			if (measuredCounts < 2 && mayMeasure) {
+				measureAgain("clean but close to the limit, and the other counts unmeasured");
+				return;
+			}
 			// No count known to be easier. A bigger block was tried here as the
 			// next resort, ahead of any underrun, and on the one phone it could
 			// be measured on it bought nothing three times out of three (85%
@@ -2158,31 +2192,6 @@ static void checkThreadCount() {
 	// that had been playing clean on four. When the counts have to be looked
 	// at again they are looked at the way a new patch is -- in silence, by
 	// load -- and not more than once a minute.
-	auto measureAgain = [&](const char* why) {
-		LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline, "
-			"peak %d%%), %s; measuring the thread counts again, in silence",
-			rawUnderruns, windowLen, current, loadMean, loadPeak, why);
-		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {
-			scores[i] = -1;
-			loads[i] = 0;
-		}
-		g_engineOverloaded = false;
-		g_threadTunerExhausted = false;
-		sweepWanted = true;
-		sweepCount = 1; // the whole ladder, whatever the first reading says
-		sweepConfirming = false;
-		sweepStepAt = now;
-		sweepSum = 0;
-		sweepCallbacks = 0;
-		settledAt = -1;
-		rackdroid::audioWarmupBegin();
-	};
-	int measuredCounts = 0;
-	for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
-		if (loads[i] > 0 && now - scoreAt[i] < 600.0)
-			measuredCounts++;
-	// Never into a recording: the silence would be on the tape.
-	bool mayMeasure = now - sweptAt >= 60.0 && !rackdroid::audioIsRecording();
 	static int badWindows = 0;
 	int candidate = -1;
 	if (!overNow) {
