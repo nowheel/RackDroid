@@ -1376,13 +1376,16 @@ static void checkThreadCount() {
 	if (ceiling <= 1)
 		return; // a single-core device has no choice to make
 
-	// Never walk down to one. One thread is no parallelism at all, and no
-	// measurement taken on any device has ever made it the best rung: on the
-	// 8T one and two were both clean, on the S22 one produced seventy-eight
-	// underruns in a window where two produced seven. Trying it gains nothing
-	// and occasionally costs five seconds of ruined audio, so the ladder
-	// stops at two wherever there are two to have.
-	int floorCount = (ceiling >= 2) ? 2 : 1;
+	// One thread is a count like any other, and where a patch fits on it the
+	// best there is. It used to be ruled out -- "no measurement has ever made
+	// it the best rung" -- when rungs were judged by trying them and counting
+	// underruns. But one thread is the only count at which the callback waits
+	// for nobody: every other one has it meet its Workers twice a sample, and
+	// a Worker the system parks for five milliseconds stops the audio for
+	// five milliseconds. That is what a volume key did on a Nothing A024.
+	// Every other audio app on the platform computes in the callback alone
+	// for this reason. So the fewest threads that leave the patch room.
+	int floorCount = 1;
 
 	if (rackdroid::audioBlockSize() <= 0)
 		return; // no audio device open yet: nothing to measure with
@@ -1591,7 +1594,22 @@ static void checkThreadCount() {
 			sweepCallbacks = 0;
 			return;
 		}
+		// A count is comfortable under this share of its deadline, and the
+		// fewest comfortable threads are what is wanted -- not the lowest load,
+		// which more Workers can always buy a few points of.
+		static const int32_t COMFORT_PERCENT = SWEEP_ENOUGH_PERCENT;
+		int comfy = 0;
+		for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS && comfy == 0; c++)
+			if (loads[c] > 0 && loads[c] < COMFORT_PERCENT)
+				comfy = c;
 		bool sweepOn = !stuck && (sweepCount > 0 || !light);
+		if (!stuck && comfy > 0) {
+			// Something fits: see whether one thread fewer does too, and stop
+			// at the first that does not.
+			sweepOn = false;
+			if (comfy - 1 >= floorCount && loads[comfy - 1] == 0)
+				next = comfy - 1;
+		}
 		if (sweepOn) {
 			// Outwards from the lightest count found so far, and not past a
 			// count that is already much worse than it: the curve has one
@@ -1625,18 +1643,25 @@ static void checkThreadCount() {
 			settings::threadCount = next;
 			return;
 		}
-		// Done. The lightest count, and of two within a few points the smaller:
-		// the difference is noise and the extra Worker is heat.
+		// Done. The fewest threads the patch is comfortable on; where it is
+		// comfortable on none, the lightest count, and of two within a few
+		// points the smaller.
 		int best = measured;
 		int32_t bestLoad = load > 0 ? load : 1000;
-		for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++) {
-			if (loads[c] > 0 && (loads[c] + 3 < bestLoad
-					|| (c < best && loads[c] <= bestLoad + 3))) {
-				best = c;
-				bestLoad = loads[c];
+		if (comfy > 0) {
+			best = comfy;
+			bestLoad = loads[comfy];
+		}
+		else {
+			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++) {
+				if (loads[c] > 0 && (loads[c] + 3 < bestLoad
+						|| (c < best && loads[c] <= bestLoad + 3))) {
+					best = c;
+					bestLoad = loads[c];
+				}
 			}
 		}
-		if (sweepCount > 0) {
+		if (sweepCount > 0 || best != measured) {
 			std::string seen;
 			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++)
 				if (loads[c] > 0)
@@ -1995,7 +2020,7 @@ static void checkThreadCount() {
 			g_lastCleanLoad = loadMean;
 			noteBlockLoad(loadMean);
 		}
-		if (probedFrom >= 0 && loadKnown && loadMean >= NEAR_LIMIT_PERCENT - 5) {
+		if (probedFrom >= 0 && loadKnown && loadMean >= NEAR_LIMIT_PERCENT - 25) {
 			// Fewer threads did not underrun in this window, and would have in
 			// the next busy one. Not good enough to stay.
 			LOGI("Engine: %d threads ran clean but at %d%% of the audio deadline; "
@@ -2095,7 +2120,7 @@ static void checkThreadCount() {
 			&& loads[lower] > 0 && now - scoreAt[lower] < 600.0;
 		bool roomToProbe = loadKnown && lower >= 1
 			&& (lowerMeasured ? loads[lower] < NEAR_LIMIT_PERCENT - 25
-				: loadMean * current / lower < NEAR_LIMIT_PERCENT - 10);
+				: loadMean * current / lower < NEAR_LIMIT_PERCENT - 30);
 		if (cleanSince > 0.0 && now - cleanSince >= probeAfter
 				&& lower >= floorCount && worthProbing && roomToProbe) {
 			LOGI("Engine: clean at %d threads for %.0fs; trying %d to see if "
