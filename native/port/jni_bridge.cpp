@@ -39,6 +39,10 @@ static JavaVM* vm = NULL;
 static jobject activityObj = NULL; // global ref
 static jclass activityCls = NULL;  // global ref
 static jclass stringCls = NULL;    // global ref (java/lang/String)
+/** The clipboard and dialog methods were all found. The dialogs used to ask
+"is midClipboardSet set?" for this, which told nobody which of them was
+missing when one was. */
+static bool bridgeReady = false;
 static jmethodID midClipboardSet;
 static jmethodID midClipboardGet;
 static jmethodID midDialogMessage;
@@ -147,6 +151,15 @@ void jniInit(ANativeActivity* activity) {
 	midDialogMessage = env->GetMethodID(activityCls, "dialogMessageAsync", "(IILjava/lang/String;)V");
 	midDialogPrompt = env->GetMethodID(activityCls, "dialogPromptAsync", "(Ljava/lang/String;Ljava/lang/String;)V");
 	midDialogFile = env->GetMethodID(activityCls, "dialogFileAsync", "(ZLjava/lang/String;Ljava/lang/String;)V");
+	bridgeReady = midClipboardSet && midClipboardGet && midDialogMessage && midDialogPrompt
+		&& midDialogFile && !env->ExceptionCheck();
+	if (!bridgeReady) {
+		env->ExceptionClear();
+		LOGE("jniInit: clipboard/dialog methods not found (set=%p get=%p message=%p prompt=%p "
+			"file=%p); dialogs and clipboard disabled", (void*) midClipboardSet,
+			(void*) midClipboardGet, (void*) midDialogMessage, (void*) midDialogPrompt,
+			(void*) midDialogFile);
+	}
 	midMenuShow = env->GetMethodID(activityCls, "showNativeMenu", "([Ljava/lang/String;[Ljava/lang/String;[I)V");
 	midMenuDismiss = env->GetMethodID(activityCls, "dismissNativeMenu", "()V");
 	midBrowserShow = env->GetMethodID(activityCls, "showNativeBrowser", "()V");
@@ -177,7 +190,7 @@ void jniInit(ANativeActivity* activity) {
 	if (env->ExceptionCheck())
 		env->ExceptionClear();
 	// Checked (and logged) separately from the generic catch-all below, which
-	// only nulls midClipboardSet -- a silent miss here would otherwise look
+	// only clears bridgeReady -- a silent miss here would otherwise look
 	// identical to the notice simply never being shown.
 	if (!midThermalStatus || !midShowToast || !midShowEngineNotice || !midRequestAudioFocus)
 		LOGE("jniInit: engine-notice methods not found (thermal=%p toast=%p notice=%p focus=%p)",
@@ -185,8 +198,9 @@ void jniInit(ANativeActivity* activity) {
 			(void*) midRequestAudioFocus);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
-		LOGE("jniInit: MainActivity methods missing; dialogs/clipboard disabled");
-		midClipboardSet = NULL;
+		LOGE("jniInit: a MainActivity method is missing (exception pending at the end of "
+			"jniInit); dialogs/clipboard disabled");
+		bridgeReady = false;
 	}
 }
 
@@ -336,7 +350,7 @@ static std::string jstringToStd(JNIEnv* env, jstring js) {
 
 void clipboardSet(const std::string& text) {
 	JNIEnv* env = getEnv();
-	if (!env || !midClipboardSet)
+	if (!env || !bridgeReady)
 		return;
 	jstring js = env->NewStringUTF(text.c_str());
 	env->CallVoidMethod(activityObj, midClipboardSet, js);
@@ -348,7 +362,7 @@ void clipboardSet(const std::string& text) {
 
 std::string clipboardGet() {
 	JNIEnv* env = getEnv();
-	if (!env || !midClipboardSet)
+	if (!env || !bridgeReady)
 		return "";
 	jstring js = (jstring) env->CallObjectMethod(activityObj, midClipboardGet);
 	if (env->ExceptionCheck()) {
@@ -474,7 +488,7 @@ void loadUserPluginsBlocking() {
 
 int dialogMessage(int level, int buttons, const std::string& message) {
 	JNIEnv* env = getEnv();
-	if (!env || !midClipboardSet)
+	if (!env || !bridgeReady)
 		return 1; // behave like the headless stub: proceed with OK
 	dialogDone = false;
 	jstring js = env->NewStringUTF(message.c_str());
@@ -492,7 +506,7 @@ int dialogMessage(int level, int buttons, const std::string& message) {
 
 bool dialogPrompt(const std::string& title, const std::string& text, std::string& result) {
 	JNIEnv* env = getEnv();
-	if (!env || !midClipboardSet)
+	if (!env || !bridgeReady)
 		return false;
 	// Logged both ways because the render thread waits here for as long as the
 	// prompt is up, and from outside that looks exactly like a frozen app with
@@ -521,7 +535,7 @@ bool dialogPrompt(const std::string& title, const std::string& text, std::string
 
 bool dialogFile(bool save, const std::string& dir, const std::string& filename, std::string& path) {
 	JNIEnv* env = getEnv();
-	if (!env || !midClipboardSet)
+	if (!env || !bridgeReady)
 		return false;
 	dialogDone = false;
 	jstring jDir = env->NewStringUTF(dir.c_str());

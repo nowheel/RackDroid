@@ -58,6 +58,7 @@
 #include "selection_glow.hpp"
 #include "tour_demo.hpp"
 #include "engine_barrier.hpp"
+#include "thread_choice.hpp"
 
 // Both sinks, always. logcat needs a USB cable and a developer at the other
 // end of it; user/log.txt is the one a user can export and paste into an
@@ -1621,69 +1622,13 @@ static void checkThreadCount() {
 				loads[measured] = load;
 			scoreAt[measured] = now;
 		}
-		// The next count nobody has measured yet, nearest first.
-		int next = -1;
+		// What to measure next, and below what to play on: thread_choice.hpp,
+		// which has the reasons and a test that runs without a phone.
+		const int top = ceiling < MAX_TRACKED_THREADS ? ceiling : MAX_TRACKED_THREADS;
 		bool light = load > 0 && load < SWEEP_ENOUGH_PERCENT;
-		// A count is comfortable under this share of its deadline, and the
-		// fewest comfortable threads are what is wanted -- not the lowest load,
-		// which more Workers can always buy a few points of.
-		// Eighty, not sixty: this is measured with nobody touching the screen,
-		// and what a count costs once they do grows with the Workers the callback
-		// has to wait for. A Nothing A024 read 1:72% 2:94% 3:65% 4:61% 5:51%,
-		// took five as the only one under sixty, and a pinch then held callbacks
-		// of 2 ms of work for 5 to 15 ms -- 400 underruns in a window -- where
-		// the build before, on two threads at 84%, had got through the same
-		// zooming with four short bursts. Kept under the 85 that counts as close
-		// to the limit below, or the choice would be argued with at once.
-		static const int32_t COMFORT_PERCENT = 80;
-		int comfy = 0;
-		for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS && comfy == 0; c++)
-			if (loads[c] > 0 && loads[c] < COMFORT_PERCENT)
-				comfy = c;
-		// One point must not decide it: 4:81% 5:79% on an SM-S901E took five.
-		for (int c = floorCount; c < comfy; c++) {
-			if (loads[c] > 0 && loads[c] <= loads[comfy] + 5) {
-				comfy = c;
-				break;
-			}
-		}
-		bool sweepOn = !stuck && (sweepCount > 0 || !light);
-		if (!stuck && comfy > 0) {
-			// Something fits: then the question is how few threads will do,
-			// asked from the bottom -- one first, which is where a light patch
-			// belongs and is then settled in two readings instead of a walk
-			// down through every count above it (six seconds of silence for
-			// a 45-module patch coming after a heavy one, on an SM-S901E).
-			sweepOn = false;
-			for (int c = floorCount; c < comfy && next < 0; c++)
-				if (loads[c] == 0)
-					next = c;
-		}
-		if (sweepOn) {
-			// Outwards from the lightest count found so far, and not past a
-			// count that is already much worse than it: the curve has one
-			// bottom, and seven Workers on a tablet that is happiest with
-			// four measured 872% of the deadline for the half second it took
-			// to find that out.
-			int low = 0;
-			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++)
-				if (loads[c] > 0 && (low == 0 || loads[c] < loads[low]))
-					low = c;
-			for (int dir : {-1, 1}) {
-				for (int c = low + dir; c >= floorCount && c <= ceiling
-						&& c <= MAX_TRACKED_THREADS; c += dir) {
-					if (loads[c] == 0) {
-						if (next < 0)
-							next = c;
-						break;
-					}
-					if (loads[c] > loads[low] + 25)
-						break; // far side of the bottom: stop looking this way
-				}
-				if (next > 0)
-					break;
-			}
-		}
+		int comfy = rackdroid::ThreadChoice::comfortable(loads, floorCount, top);
+		int next = stuck ? -1
+			: rackdroid::ThreadChoice::next(loads, floorCount, top, sweepCount > 0 || !light);
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
@@ -1695,37 +1640,10 @@ static void checkThreadCount() {
 			settings::threadCount = next;
 			return;
 		}
-		// Done. The fewest threads the patch is comfortable on; where it is
-		// comfortable on none, the lightest count, and of two within a few
-		// points the smaller.
-		int best = measured;
-		int32_t bestLoad = load > 0 ? load : 1000;
-		if (comfy > 0) {
-			best = comfy;
-			bestLoad = loads[comfy];
-		}
-		else {
-			best = 0;
-			bestLoad = 1000000;
-			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++) {
-				if (loads[c] > 0 && loads[c] < bestLoad) {
-					best = c;
-					bestLoad = loads[c];
-				}
-			}
-			// And of two within a few points, the smaller, as above.
-			for (int c = floorCount; c < best; c++) {
-				if (loads[c] > 0 && loads[c] <= bestLoad + 5) {
-					best = c;
-					bestLoad = loads[c];
-					break;
-				}
-			}
-			if (best == 0) {
-				best = measured;
-				bestLoad = load;
-			}
-		}
+		// Done.
+		int best = rackdroid::ThreadChoice::best(loads, floorCount, top);
+		if (best == 0)
+			best = measured;
 		// Believe the winner only once it has been measured twice: the first
 		// reading may have caught the patch in a quiet moment. If the second
 		// is worse it is kept, and the choice is made again.

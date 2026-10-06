@@ -64,6 +64,7 @@ namespace {
 
 struct WavRecorder {
 	static const size_t RING_FLOATS = 1 << 20; // ~5.5s stereo @48k
+	std::atomic<size_t> droppedFloats{0};
 	std::vector<float> ring;
 	// One cache line each. Adjacent, they share one, and every push from the
 	// audio thread then invalidates the line the writer thread is reading --
@@ -139,8 +140,10 @@ struct WavRecorder {
 		size_t h = head.load(std::memory_order_relaxed);
 		size_t t = tail.load(std::memory_order_acquire);
 		size_t freeSpace = RING_FLOATS - (h - t);
-		if (n > freeSpace)
+		if (n > freeSpace) {
+			droppedFloats.fetch_add(n - freeSpace, std::memory_order_relaxed);
 			n = freeSpace;
+		}
 		for (size_t i = 0; i < n; i++)
 			ring[(h + i) % RING_FLOATS] = samples[i];
 		head.store(h + n, std::memory_order_release);
@@ -165,6 +168,13 @@ struct WavRecorder {
 			std::fwrite(chunk.data(), 2, n, file);
 			dataBytes += n * 2;
 			tail.store(t + n, std::memory_order_release);
+			// The writer stalled for longer than the ring holds and audio was
+			// left out of the file. Said here, never from the callback.
+			size_t lost = droppedFloats.exchange(0, std::memory_order_relaxed);
+			if (lost > 0)
+				AUDIO_WARN("Recorder: the file writer fell behind; %.2f s of audio is missing "
+					"from the recording", (double) lost / (channels > 0 ? channels : 2)
+					/ (sampleRate > 0 ? sampleRate : 48000));
 		}
 	}
 };

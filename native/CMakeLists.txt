@@ -220,6 +220,13 @@ string(REPLACE "#include <simd/common.hpp>"
 # The engine's own mutex becomes one the block loop can stand aside on, so a
 # patch too heavy for the device cannot starve the interface thread of the
 # lock (port/engine_mutex.hpp). Every use in Engine.cpp names the type.
+# A blanket replace, so count what it will touch: a use upstream adds or drops
+# is a place this patch has not been read against.
+string(REGEX MATCHALL "SharedMutex" _eng_mutex_uses "${_eng_cpp}")
+list(LENGTH _eng_mutex_uses _eng_mutex_count)
+if(NOT _eng_mutex_count EQUAL 30)
+	message(FATAL_ERROR "Engine.cpp names SharedMutex ${_eng_mutex_count} times, not 30: read the new uses against port/engine_mutex.hpp, then update this number")
+endif()
 string(REPLACE "SharedMutex" "rackdroid::EngineMutex" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_block}" "internal->mutex.letWritersIn(); ${_eng_block}" _eng_cpp "${_eng_cpp}")
 string(REPLACE "SpinBarrier engineBarrier;" "rackdroid::EngineBarrier engineBarrier{true};" _eng_cpp "${_eng_cpp}")
