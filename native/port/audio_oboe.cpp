@@ -208,6 +208,37 @@ silence then does not end on the first on-time fifth of a second, which any
 count can have, but when the tuner has picked one -- or the limit runs out. */
 static std::atomic<bool> g_warmupHold{false};
 
+/** Starts the silence by hand: the thread tuner about to measure again. */
+void audioWarmupBegin() {
+	g_warmupLimitSec.store(8, std::memory_order_relaxed);
+	g_warmupHold.store(true, std::memory_order_relaxed);
+	g_warmupWanted.store(true, std::memory_order_relaxed);
+}
+
+/** Audio focus, as Android reports it to MainActivity: whether it is ours at
+the moment, and when that last changed. Losing it for a moment is what a
+volume key does on a Nothing A024 -- the system plays its own tick -- and for
+those three seconds the callback there was held up 30 ms at a time and
+underran four hundred times a second. Nothing in this app causes that and
+nothing in it can be tuned to prevent it; what it can do is not mistake it for
+the patch, which it did: the thread tuner answered with ten more seconds of
+trying counts out loud and the block ladder with a step up. */
+static std::atomic<bool> g_focusLost{false};
+static std::atomic<double> g_focusChangedAt{-1e9};
+
+bool audioFocusDisturbed() {
+	return g_focusLost.load(std::memory_order_relaxed)
+		|| rack::system::getTime() - g_focusChangedAt.load(std::memory_order_relaxed) < 5.0;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rackdroid_MainActivity_nativeAudioFocusChanged(JNIEnv*, jobject, jint change) {
+	// AudioManager.AUDIOFOCUS_GAIN and its variants are positive, every loss
+	// negative.
+	g_focusLost.store(change < 0, std::memory_order_relaxed);
+	g_focusChangedAt.store(rack::system::getTime(), std::memory_order_relaxed);
+}
+
 void audioWarmupHold(bool hold) {
 	// Whoever holds it has a few seconds of measuring to do, whatever opened
 	// the stream: a reopen alone would have allowed two.

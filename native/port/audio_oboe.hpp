@@ -171,6 +171,11 @@ int audioPortEpoch();
 /** Keeps the start-up silence on (up to its limit) while the caller is still
 deciding how the patch should be run. */
 void audioWarmupHold(bool hold);
+void audioWarmupBegin();
+
+/** True while another app has the audio focus and for five seconds after it
+changes hands: underruns then are the system's, not the patch's. */
+bool audioFocusDisturbed();
 
 /** The largest block size worth asking the live stream for: the biggest power
 of two that still fits inside its buffer capacity, capped at 1024 (the

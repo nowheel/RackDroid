@@ -2090,6 +2090,9 @@ class MainActivity : NativeActivity() {
 					.setAudioAttributes(attrs)
 					.setOnAudioFocusChangeListener { change ->
 						jlog("AudioManager focus change: $change (engine keeps running regardless -- see requestAudioFocusFromNative)")
+						// The engine does keep running; its tuning is told to
+						// look away meanwhile (audioFocusDisturbed).
+						runCatching { nativeAudioFocusChanged(change) }
 					}
 					.build()
 				val granted = am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
@@ -2710,6 +2713,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeDialogString(s: String?)
 	private external fun nativeRecordStart(path: String): Boolean
 	private external fun nativeHasAudioOutput(): Boolean
+	private external fun nativeAudioFocusChanged(change: Int)
 	private external fun nativeRecordStop()
 	private external fun nativeHistoryAction(action: Int)
 	private external fun nativeSetLockMode(mode: Int)

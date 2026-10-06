@@ -1177,6 +1177,12 @@ allowed its steps while the shortfall is of that order, and none once it is
 several times over (128 -> 1024 changed nothing at 150-240%). */
 static int32_t g_overloadPercent = 0;
 
+/** When the thread tuner last finished measuring a patch in silence. The
+block ladder gives the count it chose fifteen seconds before judging it: it
+used to step up 1.2 s after the audio was let out, on underruns from the
+silence itself, and bought four more seconds of silence for the re-measuring. */
+static double g_sweptAt = -1e9;
+
 /** What each block size has cost this patch: the share of the deadline at the
 thread count the tuner ended on, clean or not, and when that was learned. The
 ladder used to know only "up". It is not that simple: on an SM-S901E one patch
@@ -1466,6 +1472,7 @@ static void checkThreadCount() {
 	static double sweepStepAt = 0.0;
 	static int64_t sweepSum = 0;
 	static int32_t sweepCallbacks = 0;
+	static double sweptAt = -1e9;
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock) {
@@ -1517,6 +1524,19 @@ static void checkThreadCount() {
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
+		return;
+	}
+
+	// While another app has the audio focus, and just after: nothing is judged
+	// and nothing is counted. See audioFocusDisturbed().
+	if (rackdroid::audioFocusDisturbed() && !sweepWanted) {
+		windowStartedAt = now;
+		windowStartCount = total;
+		windowTouched = false;
+		windowLoadPeak = 0;
+		windowLoadSum = 0;
+		windowLoadSamples = 0;
+		rackdroid::audioEngineLoadTake(NULL, NULL);
 		return;
 	}
 
@@ -1620,6 +1640,8 @@ static void checkThreadCount() {
 			}
 		}
 		sweepWanted = false;
+		sweptAt = now;
+		g_sweptAt = now;
 		settings::threadCount = best;
 		rackdroid::audioWarmupHold(false);
 		windowStartedAt = now;
@@ -2081,16 +2103,56 @@ static void checkThreadCount() {
 	}
 	toleratedRuns = 0;
 
-	// An unmeasured neighbour first -- nearest, and downward before upward,
-	// since the barrier cost is the commoner problem on a phone. Exploration
-	// terminates because each count is only unmeasured once, until its score
-	// goes stale.
+	// No count is tried out loud any more. This used to be where the search
+	// went to "an unmeasured neighbour" and listened: after one volume key on a
+	// Nothing A024 it walked 3, 2, 4, 5, 6, 7, 4, 5 over ten seconds of a patch
+	// that had been playing clean on four. When the counts have to be looked
+	// at again they are looked at the way a new patch is -- in silence, by
+	// load -- and not more than once a minute.
+	auto measureAgain = [&](const char* why) {
+		LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline, "
+			"peak %d%%), %s; measuring the thread counts again, in silence",
+			rawUnderruns, windowLen, current, loadMean, loadPeak, why);
+		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {
+			scores[i] = -1;
+			loads[i] = 0;
+		}
+		g_engineOverloaded = false;
+		g_threadTunerExhausted = false;
+		sweepWanted = true;
+		sweepCount = 1; // the whole ladder, whatever the first reading says
+		sweepStepAt = now;
+		sweepSum = 0;
+		sweepCallbacks = 0;
+		settledAt = -1;
+		rackdroid::audioWarmupBegin();
+	};
+	int measuredCounts = 0;
+	for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
+		if (loads[i] > 0 && now - scoreAt[i] < 600.0)
+			measuredCounts++;
+	// Never into a recording: the silence would be on the tape.
+	bool mayMeasure = now - sweptAt >= 60.0 && !rackdroid::audioIsRecording();
+	static int badWindows = 0;
 	int candidate = -1;
-	if (current - 1 >= floorCount && !known(current - 1))
-		candidate = current - 1;
-	else if (current + 1 <= ceiling && !known(current + 1))
-		candidate = current + 1;
-	else if (overNow) {
+	if (!overNow) {
+		// Underrunning, but inside its deadline on average: jitter, which the
+		// buffer is for, or something outside this app. Two bad windows in a
+		// row are worth one silent look; otherwise it stays where it is.
+		badWindows = (underruns >= 20) ? badWindows + 1 : 0;
+		if (badWindows >= 2 && mayMeasure) {
+			badWindows = 0;
+			measureAgain("for the second window running");
+			return;
+		}
+	}
+	else if (measuredCounts < 2 && mayMeasure) {
+		// Over its deadline at a count chosen without measuring the others
+		// (a patch that started comfortably never had them measured).
+		measureAgain("and the other counts unmeasured");
+		return;
+	}
+	if (overNow) {
 		// Nothing keeps up, so underruns no longer tell the rungs apart. Go to
 		// the one that came closest and stay: it wastes the least CPU and heat
 		// on audio that is broken either way, and on every device measured it
@@ -2134,21 +2196,6 @@ static void checkThreadCount() {
 					: "the closest any came");
 			g_engineOverloaded = true;
 		}
-	}
-	else {
-		// Everything nearby is known: go to the best of it, but only if it is
-		// clearly better. Without that margin two counts that both underrun a
-		// little would swap places every window forever.
-		int best = current;
-		int32_t bestScore = underruns;
-		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
-			if (known(i) && scores[i] < bestScore) {
-				bestScore = scores[i];
-				best = i;
-			}
-		}
-		if (best != current && bestScore * 2 < underruns)
-			candidate = best;
 	}
 	if (candidate < 0) {
 		g_threadTunerExhausted = true;
@@ -2228,6 +2275,10 @@ static void checkBlockSizeOverload() {
 		return;
 	}
 
+	// Not on what happens while another app has the audio focus, nor on what
+	// was left over from measuring a patch.
+	if (rackdroid::audioFocusDisturbed() || system::getTime() - g_sweptAt < 15.0)
+		return;
 	// The next size up is not tried again while it is remembered as no easier
 	// than this one.
 	int32_t hereLoad = knownBlockLoad(current);
