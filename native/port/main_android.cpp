@@ -1477,6 +1477,13 @@ static void checkThreadCount() {
 	static int32_t sweepCallbacks = 0;
 	static double sweptAt = -1e9;
 	static bool sweepConfirming = false;
+	// A step's reading is the worst of its 0.2 s slices, not its mean, and the
+	// count finally chosen is measured a second time before it is believed.
+	static int32_t sweepWorst = 0;
+	static int sweepSlices = 0;
+	static double sweepSliceAt = 0.0;
+	static int sweepVerifyOf = 0;
+	static int sweepVerifies = 0;
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock) {
@@ -1499,11 +1506,19 @@ static void checkThreadCount() {
 			for (int i = 0; i < 16; i++)
 				g_blockLoad[i] = 0;
 		}
-		// And the count is chosen before the patch is heard: see the sweep below.
-		sweepWanted = true;
-		sweepCount = 0;
-		sweepConfirming = false;
-		rackdroid::audioWarmupHold(true);
+		// And for a new patch the count is chosen before it is heard: see the
+		// sweep below. Not for a new block size alone: the counts keep their
+		// order across block sizes closely enough, and measuring them all
+		// again cost up to ten seconds of silence after every step of the
+		// block ladder on an SM-S901E.
+		if (portChanged) {
+			sweepWanted = true;
+			sweepCount = 0;
+			sweepConfirming = false;
+			sweepVerifyOf = 0;
+			sweepVerifies = 0;
+			rackdroid::audioWarmupHold(true);
+		}
 		windowStartedAt = now;
 		windowStartCount = total;
 		windowTouched = false;
@@ -1529,6 +1544,9 @@ static void checkThreadCount() {
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
+		sweepWorst = 0;
+		sweepSlices = 0;
+		sweepSliceAt = now;
 		return;
 	}
 
@@ -1556,7 +1574,13 @@ static void checkThreadCount() {
 	// others too, then start the patch on the best of them.
 	if (sweepWanted) {
 		static const double SWEEP_SETTLE_SEC = 0.2; // Workers relaunching
-		static const double SWEEP_MEASURE_SEC = 0.3;
+		// Three slices of a fifth of a second, and the worst of them is the
+		// reading. A patch does not cost the same from one moment to the next
+		// -- a sequencer steps, envelopes open -- and one 0.3 s mean read 68%
+		// for a 177-module patch on one thread of a Nothing A024 that then
+		// ran at 109%. The engine has to fit the patch's busy moments.
+		static const double SWEEP_SLICE_SEC = 0.2;
+		static const double SWEEP_MEASURE_SEC = 0.6;
 		// Under this, twice running, the count in use is left alone and the
 		// others are not measured. It was 70 on one reading, and one reading
 		// taken half a second after a 177-module patch loaded on a Nothing A024
@@ -1567,33 +1591,38 @@ static void checkThreadCount() {
 		static const int32_t SWEEP_ENOUGH_PERCENT = 60;
 		int32_t meanNow = 0, callbacksNow = 0;
 		rackdroid::audioEngineLoadTake(NULL, &meanNow, &callbacksNow);
-		if (now - sweepStepAt >= SWEEP_SETTLE_SEC && callbacksNow > 0) {
+		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
+			sweepSliceAt = now;
+		else if (callbacksNow > 0) {
 			sweepSum += (int64_t) meanNow * callbacksNow;
 			sweepCallbacks += callbacksNow;
+		}
+		if (now - sweepSliceAt >= SWEEP_SLICE_SEC && sweepCallbacks >= 4) {
+			int32_t slice = (int32_t) (sweepSum / sweepCallbacks);
+			if (slice > sweepWorst)
+				sweepWorst = slice;
+			sweepSlices++;
+			sweepSum = 0;
+			sweepCallbacks = 0;
+			sweepSliceAt = now;
 		}
 		// A step that never gets its callbacks (no stream, a stalled one) must
 		// not hold the patch silent: two seconds and the sweep is abandoned.
 		bool stuck = now - sweepStepAt > 2.0;
 		if (!stuck && (now - sweepStepAt < SWEEP_SETTLE_SEC + SWEEP_MEASURE_SEC
-				|| sweepCallbacks < 8))
+				|| sweepSlices < 2))
 			return;
 		int measured = settings::threadCount;
-		int32_t load = (sweepCallbacks > 0) ? (int32_t) (sweepSum / sweepCallbacks) : 0;
+		int32_t load = sweepWorst;
 		if (!stuck && measured >= 1 && measured <= MAX_TRACKED_THREADS) {
-			loads[measured] = load;
+			// A second look at a count keeps the worse of the two.
+			if (!(sweepVerifyOf == measured && loads[measured] > load))
+				loads[measured] = load;
 			scoreAt[measured] = now;
 		}
 		// The next count nobody has measured yet, nearest first.
 		int next = -1;
 		bool light = load > 0 && load < SWEEP_ENOUGH_PERCENT;
-		if (!stuck && sweepCount == 0 && light && !sweepConfirming) {
-			// Looks comfortable. Look once more before believing it.
-			sweepConfirming = true;
-			sweepStepAt = now;
-			sweepSum = 0;
-			sweepCallbacks = 0;
-			return;
-		}
 		// A count is comfortable under this share of its deadline, and the
 		// fewest comfortable threads are what is wanted -- not the lowest load,
 		// which more Workers can always buy a few points of.
@@ -1604,11 +1633,15 @@ static void checkThreadCount() {
 				comfy = c;
 		bool sweepOn = !stuck && (sweepCount > 0 || !light);
 		if (!stuck && comfy > 0) {
-			// Something fits: see whether one thread fewer does too, and stop
-			// at the first that does not.
+			// Something fits: then the question is how few threads will do,
+			// asked from the bottom -- one first, which is where a light patch
+			// belongs and is then settled in two readings instead of a walk
+			// down through every count above it (six seconds of silence for
+			// a 45-module patch coming after a heavy one, on an SM-S901E).
 			sweepOn = false;
-			if (comfy - 1 >= floorCount && loads[comfy - 1] == 0)
-				next = comfy - 1;
+			for (int c = floorCount; c < comfy && next < 0; c++)
+				if (loads[c] == 0)
+					next = c;
 		}
 		if (sweepOn) {
 			// Outwards from the lightest count found so far, and not past a
@@ -1638,6 +1671,9 @@ static void checkThreadCount() {
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
+		sweepWorst = 0;
+		sweepSlices = 0;
+		sweepSliceAt = now;
 		if (next > 0) {
 			sweepCount++;
 			settings::threadCount = next;
@@ -1653,13 +1689,29 @@ static void checkThreadCount() {
 			bestLoad = loads[comfy];
 		}
 		else {
+			best = 0;
+			bestLoad = 1000000;
 			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++) {
-				if (loads[c] > 0 && (loads[c] + 3 < bestLoad
-						|| (c < best && loads[c] <= bestLoad + 3))) {
+				if (loads[c] > 0 && loads[c] < bestLoad) {
 					best = c;
 					bestLoad = loads[c];
 				}
 			}
+			if (best == 0) {
+				best = measured;
+				bestLoad = load;
+			}
+		}
+		// Believe the winner only once it has been measured twice: the first
+		// reading may have caught the patch in a quiet moment. If the second
+		// is worse it is kept, and the choice is made again.
+		// A comfortable count needs no second look: its reading is already the
+		// worst of three slices and it has forty points to spare.
+		if (!stuck && comfy == 0 && sweepCount > 0 && sweepVerifyOf != best && sweepVerifies < 3) {
+			sweepVerifyOf = best;
+			sweepVerifies++;
+			settings::threadCount = best;
+			return;
 		}
 		if (sweepCount > 0 || best != measured) {
 			std::string seen;
@@ -1684,6 +1736,8 @@ static void checkThreadCount() {
 		}
 		sweepWanted = false;
 		sweepConfirming = false;
+		sweepVerifyOf = 0;
+		sweepVerifies = 0;
 		// Only a real measurement of the ladder counts as one: this is what
 		// stops another from being asked for inside a minute, and a patch
 		// waved through on its first reading has had none.
@@ -1995,9 +2049,14 @@ static void checkThreadCount() {
 		sweepWanted = true;
 		sweepCount = 1; // the whole ladder, whatever the first reading says
 		sweepConfirming = false;
+		sweepVerifyOf = 0;
+		sweepVerifies = 0;
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
+		sweepWorst = 0;
+		sweepSlices = 0;
+		sweepSliceAt = now;
 		settledAt = -1;
 		rackdroid::audioWarmupBegin();
 	};
@@ -2211,21 +2270,17 @@ static void checkThreadCount() {
 		measureAgain("and the other counts unmeasured");
 		return;
 	}
+	static int overWindows = 0;
 	if (overNow) {
-		// Nothing keeps up, so underruns no longer tell the rungs apart. Go to
-		// the one that came closest and stay: it wastes the least CPU and heat
-		// on audio that is broken either way, and on every device measured it
-		// sits mid-ladder, which leaves the interface cores to draw with.
-		int best = current;
-		int32_t ownLoad = (current <= MAX_TRACKED_THREADS && loads[current] > 0)
-			? loads[current] : loadMean;
-		int32_t bestLoad = ownLoad;
-		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++) {
-			if (known(i) && loads[i] > 0 && loads[i] < bestLoad) {
-				bestLoad = loads[i];
-				best = i;
-			}
-		}
+		// Over its deadline. One such window is not a verdict -- a stall
+		// somewhere in the system puts every count over for half a second,
+		// and acting on it sent a Nothing A024 through 3, 4, 6 and 2 threads
+		// in four seconds, each of them heard. Two in a row are. And then the
+		// answer is not to hop to whichever count last read lower, out loud:
+		// it is to measure them again in silence where that has not just been
+		// done, and otherwise to stay on what the measurement chose and say
+		// that the patch is too much.
+		overWindows++;
 		// Past twice the deadline there is no audio left to protect -- nothing
 		// coming out is recognisable at any count -- and what the engine can
 		// still do for the user is get out of the way. Parked at five Workers
@@ -2234,28 +2289,31 @@ static void checkThreadCount() {
 		// tap in File > Open. So there the fewest threads win, whatever they
 		// measure.
 		static const int32_t NOTHING_LEFT_PERCENT = 200;
-		bool nothingLeft = bestLoad > NOTHING_LEFT_PERCENT;
-		if (nothingLeft)
-			best = floorCount;
-		// A count that fits its deadline beats one that does not by any
-		// margin at all. The margin below is for telling two overloads apart;
-		// applied here it kept that A024 at 101% beside a count it knew ran
-		// at 91%, because 91 is not fifteen per cent less than 101.
-		bool bestKeepsUp = bestLoad <= 100 && ownLoad > 100;
-		// The margin is for the same reason as below, and wide because these
-		// windows are short and their readings move by a tenth on their own.
-		if (best != current && (nothingLeft || bestKeepsUp || bestLoad * 115 < ownLoad * 100))
-			candidate = best;
-		else if (!g_engineOverloaded) {
+		int32_t lightest = loadMean;
+		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
+			if (loads[i] > 0 && now - scoreAt[i] < 600.0 && loads[i] < lightest)
+				lightest = loads[i];
+		bool nothingLeft = overWindows >= 2 && lightest > NOTHING_LEFT_PERCENT;
+		if (nothingLeft && current != floorCount)
+			candidate = floorCount;
+		else if (overWindows >= 2 && mayMeasure
+				&& (measuredCounts < 2 || now - sweptAt > 300.0)) {
+			overWindows = 0;
+			measureAgain("and over its deadline");
+			return;
+		}
+		else if (overWindows >= 2 && !g_engineOverloaded) {
 			g_overloadPercent = loadMean;
 			noteBlockLoad(loadMean);
 			LOGW("Engine: no thread count keeps up with this patch; staying at %d "
 				"(%d%% of the audio deadline), %s", current, loadMean,
 				nothingLeft ? "the fewest threads, to leave the device usable"
-					: "the closest any came");
+					: "the best that was measured");
 			g_engineOverloaded = true;
 		}
 	}
+	else
+		overWindows = 0;
 	if (candidate < 0) {
 		g_threadTunerExhausted = true;
 		return; // nothing known to be better; stay where we are

@@ -243,7 +243,7 @@ void audioWarmupHold(bool hold) {
 	// Whoever holds it has a few seconds of measuring to do, whatever opened
 	// the stream: a reopen alone would have allowed two.
 	if (hold)
-		g_warmupLimitSec.store(8, std::memory_order_relaxed);
+		g_warmupLimitSec.store(10, std::memory_order_relaxed);
 	g_warmupHold.store(hold, std::memory_order_relaxed);
 }
 /** The longest any callback has taken since audioTrimBuffer() last looked, in
