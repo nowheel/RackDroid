@@ -317,6 +317,18 @@ only ever one reader, the tuner. */
 static std::atomic<int32_t> g_loadPeakPercent{0};
 static std::atomic<int64_t> g_loadSumPercent{0};
 static std::atomic<int32_t> g_loadCount{0};
+/** The same sum with each callback counted as no more than three deadlines.
+For the silent measurement of thread counts only. A thread that keeps its core
+busy at real-time priority is taken off it by the kernel for a fixed slice of
+every period -- on a Nothing A024, 95 to 120 ms every 1.35 s, with 2 to 4 ms of
+work in the callback and no voluntary switch; on an SM-S901E 65 to 80 ms every
+second -- and one of those in a 0.2 s slice of the measurement adds fifty
+points to it. The same 177-module patch read 1:72% 3:65% one day and 1:201%
+3:136% the next, on a phone that was running the light patch at the same 22%
+both days: the two counts that looked hopeless were the two a stall had
+landed in, and the count left standing was the one at 95%. */
+static std::atomic<int64_t> g_loadSumClipped{0};
+static const int32_t LOAD_CLIP_PERCENT = 300;
 
 /** Frames the last callback was actually asked to produce.
 
@@ -338,7 +350,8 @@ int32_t audioCallbackFrames() {
 }
 
 
-void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks) {
+void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks, int32_t* clippedMean) {
+	int64_t clipped = g_loadSumClipped.exchange(0, std::memory_order_relaxed);
 	int32_t p = g_loadPeakPercent.exchange(0, std::memory_order_relaxed);
 	int64_t sum = g_loadSumPercent.exchange(0, std::memory_order_relaxed);
 	int32_t n = g_loadCount.exchange(0, std::memory_order_relaxed);
@@ -348,6 +361,8 @@ void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks) {
 		*mean = (n > 0) ? (int32_t) (sum / n) : 0;
 	if (callbacks)
 		*callbacks = n;
+	if (clippedMean)
+		*clippedMean = (n > 0) ? (int32_t) (clipped / n) : 0;
 }
 
 /** Callbacks that ran badly late, kept for the frame loop to write down.
@@ -1278,6 +1293,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			meterLoad += ((float) percent - meterLoad) * weight;
 			g_loadForMeter.store((int32_t) (meterLoad + 0.5f), std::memory_order_relaxed);
 			g_loadSumPercent.fetch_add(percent, std::memory_order_relaxed);
+			g_loadSumClipped.fetch_add(percent < LOAD_CLIP_PERCENT ? percent : LOAD_CLIP_PERCENT,
+				std::memory_order_relaxed);
 			g_loadCount.fetch_add(1, std::memory_order_relaxed);
 			if (percent >= SLOW_CALLBACK_PERCENT)
 				recordSlowCallback(elapsed, percent, cpu0, ru0, cpuStart, phaseStart);

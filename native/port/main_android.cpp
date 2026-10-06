@@ -1590,7 +1590,8 @@ static void checkThreadCount() {
 		// it found three threads at 64%.
 		static const int32_t SWEEP_ENOUGH_PERCENT = 60;
 		int32_t meanNow = 0, callbacksNow = 0;
-		rackdroid::audioEngineLoadTake(NULL, &meanNow, &callbacksNow);
+		// The mean with stalls clipped: see g_loadSumClipped.
+		rackdroid::audioEngineLoadTake(NULL, NULL, &callbacksNow, &meanNow);
 		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
 			sweepSliceAt = now;
 		else if (callbacksNow > 0) {
@@ -1710,6 +1711,14 @@ static void checkThreadCount() {
 				if (loads[c] > 0 && loads[c] < bestLoad) {
 					best = c;
 					bestLoad = loads[c];
+				}
+			}
+			// And of two within a few points, the smaller, as above.
+			for (int c = floorCount; c < best; c++) {
+				if (loads[c] > 0 && loads[c] <= bestLoad + 5) {
+					best = c;
+					bestLoad = loads[c];
+					break;
 				}
 			}
 			if (best == 0) {
