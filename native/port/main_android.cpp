@@ -1473,6 +1473,7 @@ static void checkThreadCount() {
 	static int64_t sweepSum = 0;
 	static int32_t sweepCallbacks = 0;
 	static double sweptAt = -1e9;
+	static bool sweepConfirming = false;
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock) {
@@ -1498,6 +1499,7 @@ static void checkThreadCount() {
 		// And the count is chosen before the patch is heard: see the sweep below.
 		sweepWanted = true;
 		sweepCount = 0;
+		sweepConfirming = false;
 		rackdroid::audioWarmupHold(true);
 		windowStartedAt = now;
 		windowStartCount = total;
@@ -1552,7 +1554,14 @@ static void checkThreadCount() {
 	if (sweepWanted) {
 		static const double SWEEP_SETTLE_SEC = 0.2; // Workers relaunching
 		static const double SWEEP_MEASURE_SEC = 0.3;
-		static const int32_t SWEEP_ENOUGH_PERCENT = 70;
+		// Under this, twice running, the count in use is left alone and the
+		// others are not measured. It was 70 on one reading, and one reading
+		// taken half a second after a 177-module patch loaded on a Nothing A024
+		// came in under it: the patch started on the five threads remembered
+		// from the day before, at 105-126% of its deadline, and crackled for
+		// twenty seconds until something else made the tuner measure -- when
+		// it found three threads at 64%.
+		static const int32_t SWEEP_ENOUGH_PERCENT = 60;
 		int32_t meanNow = 0, callbacksNow = 0;
 		rackdroid::audioEngineLoadTake(NULL, &meanNow, &callbacksNow);
 		if (now - sweepStepAt >= SWEEP_SETTLE_SEC && callbacksNow > 0) {
@@ -1573,7 +1582,16 @@ static void checkThreadCount() {
 		}
 		// The next count nobody has measured yet, nearest first.
 		int next = -1;
-		bool sweepOn = !stuck && (sweepCount > 0 || load >= SWEEP_ENOUGH_PERCENT);
+		bool light = load > 0 && load < SWEEP_ENOUGH_PERCENT;
+		if (!stuck && sweepCount == 0 && light && !sweepConfirming) {
+			// Looks comfortable. Look once more before believing it.
+			sweepConfirming = true;
+			sweepStepAt = now;
+			sweepSum = 0;
+			sweepCallbacks = 0;
+			return;
+		}
+		bool sweepOn = !stuck && (sweepCount > 0 || !light);
 		if (sweepOn) {
 			// Outwards from the lightest count found so far, and not past a
 			// count that is already much worse than it: the curve has one
@@ -1640,8 +1658,14 @@ static void checkThreadCount() {
 			}
 		}
 		sweepWanted = false;
-		sweptAt = now;
-		g_sweptAt = now;
+		sweepConfirming = false;
+		// Only a real measurement of the ladder counts as one: this is what
+		// stops another from being asked for inside a minute, and a patch
+		// waved through on its first reading has had none.
+		if (sweepCount > 0) {
+			sweptAt = now;
+			g_sweptAt = now;
+		}
 		settings::threadCount = best;
 		rackdroid::audioWarmupHold(false);
 		windowStartedAt = now;
@@ -2121,6 +2145,7 @@ static void checkThreadCount() {
 		g_threadTunerExhausted = false;
 		sweepWanted = true;
 		sweepCount = 1; // the whole ladder, whatever the first reading says
+		sweepConfirming = false;
 		sweepStepAt = now;
 		sweepSum = 0;
 		sweepCallbacks = 0;
