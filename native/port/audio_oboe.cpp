@@ -249,6 +249,9 @@ void audioWarmupHold(bool hold) {
 /** The longest any callback has taken since audioTrimBuffer() last looked, in
 ns. What the buffer is sized from before anything underruns. */
 static std::atomic<int64_t> g_callbackPeakNanos{0};
+/** The share of its deadline the callback has been using, smoothed over about
+half a second: what the toolbar's load meter shows. */
+static std::atomic<int32_t> g_loadForMeter{0};
 /** Audio ports on the device, for threads that may not look at the device. */
 static std::atomic<int> g_portCount{0};
 /** Goes up each time a port arrives: from outside, a patch being loaded. */
@@ -792,6 +795,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	int32_t warmGoodFrames = 0;
 	int32_t warmFrames = 0;
 	float warmGain = 0.f;
+	float meterLoad = 0.f;
 
 	OboeDevice() {
 		openStreams("device created");
@@ -1266,6 +1270,13 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			while (percent > seen && !g_loadPeakPercent.compare_exchange_weak(
 					seen, percent, std::memory_order_relaxed))
 				;
+			// Half a second of memory whatever the callback size: 2 ms ones
+			// and 20 ms ones should read the same patch the same way.
+			float weight = (float) numFrames / (rate * 0.5f);
+			if (weight > 1.f)
+				weight = 1.f;
+			meterLoad += ((float) percent - meterLoad) * weight;
+			g_loadForMeter.store((int32_t) (meterLoad + 0.5f), std::memory_order_relaxed);
 			g_loadSumPercent.fetch_add(percent, std::memory_order_relaxed);
 			g_loadCount.fetch_add(1, std::memory_order_relaxed);
 			if (percent >= SLOW_CALLBACK_PERCENT)
@@ -1825,6 +1836,14 @@ callback, and a patch with no Audio module has no stream and no callback: the
 button then "recorded" for as long as it was held on and saved a 44-byte file,
 a header and nothing else, with a toast saying where. Found on a OnePlus 8T
 after File > New. */
+/** For the load meter on the toolbar; 0 with no patch playing. */
+extern "C" JNIEXPORT jint JNICALL
+Java_org_rackdroid_MainActivity_nativeEngineLoad(JNIEnv*, jobject) {
+	if (g_portCount.load(std::memory_order_relaxed) <= 0)
+		return 0;
+	return g_loadForMeter.load(std::memory_order_relaxed);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_rackdroid_MainActivity_nativeHasAudioOutput(JNIEnv*, jobject) {
 	return g_portCount.load(std::memory_order_relaxed) > 0;

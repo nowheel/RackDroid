@@ -733,10 +733,50 @@ class MainActivity : NativeActivity() {
 			deleteButton, lockButton, fullLockButton)
 			.forEachIndexed { index, view -> addTool(view, index) }
 		menuRow.setBackgroundColor(Color.TRANSPARENT)
-		val menuDivider = View(this).apply {
-			setBackgroundColor(AppTheme.withAlpha(Color.WHITE, 10))
-			layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
-				.apply { setMargins(dp(10), dp(3), dp(10), dp(4)) }
+		// The line between the menus and the tools is also the load meter: how
+		// much of its time the audio engine is using, filled from the left.
+		// Every DAW shows this somewhere, because on a phone the limit is real
+		// and close, and the only way to stay under it is to see it coming.
+		// The accent colour while there is room, amber from 70%, red from 90%.
+		val menuDivider = object : View(this) {
+			var load = 0
+			val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+			val tick = object : Runnable {
+				override fun run() {
+					val now = runCatching { nativeEngineLoad() }.getOrDefault(0)
+					if (now != load) {
+						load = now
+						contentDescription = getString(R.string.engine_load_meter, load)
+						invalidate()
+					}
+					uiHandler.postDelayed(this, 400L)
+				}
+			}
+			override fun onAttachedToWindow() {
+				super.onAttachedToWindow()
+				uiHandler.post(tick)
+			}
+			override fun onDetachedFromWindow() {
+				uiHandler.removeCallbacks(tick)
+				super.onDetachedFromWindow()
+			}
+			override fun onDraw(canvas: android.graphics.Canvas) {
+				val w = width.toFloat()
+				val h = height.toFloat()
+				val r = h / 2f
+				paint.color = AppTheme.withAlpha(Color.WHITE, 10)
+				canvas.drawRoundRect(0f, 0f, w, h, r, r, paint)
+				if (load <= 0) return
+				paint.color = when {
+					load >= 90 -> Color.parseColor("#FF6B6B")
+					load >= 70 -> Color.parseColor("#FFB454")
+					else -> AppTheme.current.accent
+				}
+				canvas.drawRoundRect(0f, 0f, w * load.coerceAtMost(100) / 100f, h, r, r, paint)
+			}
+		}.apply {
+			layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3))
+				.apply { setMargins(dp(10), dp(2), dp(10), dp(3)) }
 		}
 
 		// Single floating glass card at the TOP (user: tools back on top):
@@ -2713,6 +2753,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeDialogString(s: String?)
 	private external fun nativeRecordStart(path: String): Boolean
 	private external fun nativeHasAudioOutput(): Boolean
+	private external fun nativeEngineLoad(): Int
 	private external fun nativeAudioFocusChanged(change: Int)
 	private external fun nativeRecordStop()
 	private external fun nativeHistoryAction(action: Int)

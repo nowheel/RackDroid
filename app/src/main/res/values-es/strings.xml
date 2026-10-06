@@ -154,6 +154,7 @@
 	<string name="modules_loaded">Se han cargado %1$d paquete(s) de módulos adicionales</string>
 	<string name="engine_maxed_out">Este patch necesita más CPU de la que tu dispositivo puede dar, incluso a máxima potencia. Prueba a simplificarlo o a bajar la frecuencia de muestreo.</string>
 	<string name="engine_near_limit">Este parche está cerca del límite de tu dispositivo: puede empezar a crepitar. Simplifícalo o baja la frecuencia de muestreo.</string>
+	<string name="engine_load_meter">Carga del motor %1$d%%</string>
 	<string name="engine_thermal_throttled">Tu dispositivo se ha calentado y se está ralentizando por sí solo; por eso el patch se entrecorta. Déjalo enfriar.</string>
 	<string name="engine_cpu_contended">Otra aplicación está usando casi todo el procesador del teléfono, y por eso el sonido se entrecorta. Tu patch está bien: cierra lo que tengas abierto.</string>
 	<string name="installing_modules">Instalando módulos…</string>
