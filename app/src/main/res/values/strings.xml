@@ -550,6 +550,10 @@
 	<string name="engine_maxed_out">This patch needs more CPU than your device can give, even at full power. Try simplifying it or lowering the sample rate.</string>
 	<string name="engine_near_limit">This patch is close to what your device can do: it may start to crackle. Lighten it or lower the sample rate.</string>
 	<string name="engine_load_meter">Engine load %1$d%%</string>
+	<string name="engine_heavy_title">This patch is heavy for this device</string>
+	<string name="engine_lower_rate">Lower to %1$s kHz</string>
+	<string name="engine_rate_lowered">The engine now runs at %1$s kHz: about half the work, a little duller in the highs. Engine ▸ Sample rate ▸ Auto brings it back.</string>
+	<string name="engine_rate_reminder">The engine sample rate is lowered to %1$s kHz. For lighter patches, set Engine ▸ Sample rate to Auto.</string>
 	<string name="engine_thermal_throttled">Your device has heated up and is slowing itself down, which is why this patch is stuttering. Let it cool off.</string>
 	<string name="engine_cpu_contended">Another app is using most of your phone\'s processor right now, which is why this is stuttering. Your patch is fine — close what else is running.</string>
 	<string name="installing_modules">Installing modules…</string>

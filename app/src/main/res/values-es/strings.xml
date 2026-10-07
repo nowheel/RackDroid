@@ -155,6 +155,10 @@
 	<string name="engine_maxed_out">Este patch necesita más CPU de la que tu dispositivo puede dar, incluso a máxima potencia. Prueba a simplificarlo o a bajar la frecuencia de muestreo.</string>
 	<string name="engine_near_limit">Este parche está cerca del límite de tu dispositivo: puede empezar a crepitar. Simplifícalo o baja la frecuencia de muestreo.</string>
 	<string name="engine_load_meter">Carga del motor %1$d%%</string>
+	<string name="engine_heavy_title">Este patch es pesado para este dispositivo</string>
+	<string name="engine_lower_rate">Bajar a %1$s kHz</string>
+	<string name="engine_rate_lowered">El motor funciona ahora a %1$s kHz: cerca de la mitad del trabajo, agudos algo más apagados. Procesador ▸ Frecuencia de muestreo ▸ Auto lo restaura.</string>
+	<string name="engine_rate_reminder">La frecuencia de muestreo del motor está bajada a %1$s kHz. Para patches más ligeros, pon Procesador ▸ Frecuencia de muestreo en Auto.</string>
 	<string name="engine_thermal_throttled">Tu dispositivo se ha calentado y se está ralentizando por sí solo; por eso el patch se entrecorta. Déjalo enfriar.</string>
 	<string name="engine_cpu_contended">Otra aplicación está usando casi todo el procesador del teléfono, y por eso el sonido se entrecorta. Tu patch está bien: cierra lo que tengas abierto.</string>
 	<string name="installing_modules">Instalando módulos…</string>

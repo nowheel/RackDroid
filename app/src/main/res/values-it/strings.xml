@@ -545,6 +545,10 @@
 	<string name="engine_maxed_out">Questa patch richiede più CPU di quanta il tuo device possa dare, anche al massimo. Prova a semplificarla o ad abbassare la frequenza di campionamento.</string>
 	<string name="engine_near_limit">Questa patch è vicina al limite del dispositivo: potrebbe iniziare a gracchiare. Alleggeriscila o abbassa la frequenza di campionamento.</string>
 	<string name="engine_load_meter">Carico del motore %1$d%%</string>
+	<string name="engine_heavy_title">Questa patch è pesante per questo dispositivo</string>
+	<string name="engine_lower_rate">Abbassa a %1$s kHz</string>
+	<string name="engine_rate_lowered">Il motore ora gira a %1$s kHz: circa metà del lavoro, acuti un po\' meno brillanti. Motore ▸ Frequenza di campionamento ▸ Auto la riporta com\'era.</string>
+	<string name="engine_rate_reminder">La frequenza di campionamento del motore è abbassata a %1$s kHz. Per patch più leggere, imposta Motore ▸ Frequenza di campionamento su Auto.</string>
 	<string name="engine_thermal_throttled">Il tuo device si è scaldato e sta rallentando da solo: è per questo che la patch scatta. Lascialo raffreddare.</string>
 	<string name="engine_cpu_contended">Un\'altra app sta usando quasi tutto il processore del telefono, ed è per questo che il suono scatta. La tua patch va bene: chiudi quello che hai aperto.</string>
 	<string name="installing_modules">Installazione moduli…</string>

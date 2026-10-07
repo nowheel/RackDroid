@@ -155,6 +155,10 @@
 	<string name="engine_maxed_out">このパッチはデバイスが全力を出しても足りないCPU性能を必要としています。パッチを簡略化するか、サンプルレートを下げてみてください。</string>
 	<string name="engine_near_limit">このパッチは端末の限界に近く、音が途切れ始めるかもしれません。パッチを軽くするか、サンプルレートを下げてください。</string>
 	<string name="engine_load_meter">エンジン負荷 %1$d%%</string>
+	<string name="engine_heavy_title">このパッチはこの端末には重すぎます</string>
+	<string name="engine_lower_rate">%1$s kHz に下げる</string>
+	<string name="engine_rate_lowered">エンジンは %1$s kHz で動作中です。負荷は約半分になり、高域が少し鈍くなります。エンジン ▸ サンプルレート ▸ 自動 で元に戻せます。</string>
+	<string name="engine_rate_reminder">エンジンのサンプルレートは %1$s kHz に下げられています。軽いパッチでは エンジン ▸ サンプルレート を 自動 にしてください。</string>
 	<string name="engine_thermal_throttled">デバイスが熱くなり自ら速度を落としています。そのためパッチがカクついています。冷めるまでお待ちください。</string>
 	<string name="engine_cpu_contended">他のアプリが端末のプロセッサをほぼ占有しているため、音が途切れています。パッチに問題はありません。他のアプリを閉じてください。</string>
 	<string name="installing_modules">モジュールをインストール中…</string>

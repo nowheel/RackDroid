@@ -51,6 +51,8 @@ times a second rather than whenever something goes wrong, which is what lets
 the thread search in main_android.cpp reject a count in a fraction of a second
 instead of waiting five for an underrun that may or may not arrive. Written by
 the audio thread, read by the render thread. Either pointer may be null. */
+/** The engine's sample rate, told by the render thread for the Java side to read. */
+void audioNoteEngineRate(int rate);
 void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks = nullptr,
 	int32_t* clippedMean = nullptr);
 

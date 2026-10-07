@@ -645,6 +645,15 @@ user's size. In a file of its own beside the block-size memo, because it is a
 setting and that is a measurement. */
 static std::atomic<int> g_blockChoice{-1};
 static std::atomic<int> g_blockChoicePending{-1};
+/** An engine sample rate asked for from the "patch is heavy" notice, applied
+where the block choice is: -1 none, 0 Auto, otherwise Hz. */
+static std::atomic<int> g_sampleRatePending{-1};
+/** The rate the engine is running at, as the render thread last saw it. */
+static std::atomic<int> g_engineRateSeen{0};
+
+void audioNoteEngineRate(int rate) {
+	g_engineRateSeen.store(rate, std::memory_order_relaxed);
+}
 
 static bool validBlockSize(int v) {
 	return v >= 64 && v <= 1024 && (v & (v - 1)) == 0;
@@ -1436,6 +1445,14 @@ int audioBlockSize() {
 
 
 void audioApplyBlockChoice() {
+	int rate = g_sampleRatePending.exchange(-1, std::memory_order_relaxed);
+	if (rate >= 0) {
+		// The setting Rack's own Engine > Sample rate writes; the Audio module
+		// hands it to the engine at its next block.
+		rack::settings::sampleRate = (float) rate;
+		AUDIO_WARN("Oboe: engine sample rate set to %d Hz from the heavy-patch notice "
+			"(0 is Auto)", rate);
+	}
 	int choice = g_blockChoicePending.exchange(-1, std::memory_order_relaxed);
 	if (choice < 0)
 		return;
@@ -1941,6 +1958,24 @@ Java_org_rackdroid_MainActivity_nativeGetBlockInfo(JNIEnv* env, jobject) {
 extern "C" JNIEXPORT void JNICALL
 Java_org_rackdroid_MainActivity_nativeSetBlockChoice(JNIEnv*, jobject, jint choice) {
 	rackdroid::audioRequestBlockChoice((int) choice);
+}
+
+/** [the rate the engine is running at, the rate it is fixed at or 0 for Auto]. */
+extern "C" JNIEXPORT jintArray JNICALL
+Java_org_rackdroid_MainActivity_nativeEngineSampleRates(JNIEnv* env, jobject) {
+	// Not through the Rack context: that is thread-local, and this is called
+	// on the Java UI thread, where there is none.
+	jint v[2] = {(jint) g_engineRateSeen.load(std::memory_order_relaxed),
+		(jint) rack::settings::sampleRate};
+	jintArray out = env->NewIntArray(2);
+	env->SetIntArrayRegion(out, 0, 2, v);
+	return out;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rackdroid_MainActivity_nativeSetEngineSampleRate(JNIEnv*, jobject, jint rate) {
+	if (rate == 0 || (rate >= 11025 && rate <= 192000))
+		g_sampleRatePending.store((int) rate, std::memory_order_relaxed);
 }
 
 extern "C" JNIEXPORT void JNICALL

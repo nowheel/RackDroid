@@ -155,6 +155,10 @@
 	<string name="engine_maxed_out">Dieses Patch benötigt mehr Rechenleistung, als dein Gerät selbst mit voller Leistung bieten kann. Vereinfache es oder senke die Abtastrate.</string>
 	<string name="engine_near_limit">Dieses Patch ist nahe an der Grenze deines Geräts: Es kann zu knistern beginnen. Vereinfache es oder senke die Abtastrate.</string>
 	<string name="engine_load_meter">Engine-Last %1$d%%</string>
+	<string name="engine_heavy_title">Dieser Patch ist schwer für dieses Gerät</string>
+	<string name="engine_lower_rate">Auf %1$s kHz senken</string>
+	<string name="engine_rate_lowered">Die Engine läuft jetzt mit %1$s kHz: etwa die halbe Arbeit, die Höhen etwas matter. System ▸ Samplerate ▸ Auto stellt es zurück.</string>
+	<string name="engine_rate_reminder">Die Samplerate der Engine ist auf %1$s kHz gesenkt. Für leichtere Patches System ▸ Samplerate auf Auto stellen.</string>
 	<string name="engine_thermal_throttled">Dein Gerät ist heiß gelaufen und drosselt sich selbst – deshalb stockt das Patch. Lass es abkühlen.</string>
 	<string name="engine_cpu_contended">Eine andere App beansprucht gerade fast den gesamten Prozessor deines Telefons – deshalb stottert der Ton. Dein Patch ist in Ordnung: Schließe, was sonst noch läuft.</string>
 	<string name="installing_modules">Module werden installiert…</string>

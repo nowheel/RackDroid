@@ -1487,8 +1487,21 @@ static void checkThreadCount() {
 	static int sweepVerifies = 0;
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
-	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock) {
-		bool portChanged = rackdroid::audioPortEpoch() != portEpoch;
+	// And so is a different engine sample rate: at half the rate the same patch
+	// is about half the work, and the count it needed before is more than it
+	// needs now. Measured again like a new patch.
+	static float tunedRate = 0.f;
+	float engineRate = APP->engine->getSampleRate();
+	rackdroid::audioNoteEngineRate((int) engineRate);
+	if (tunedRate == 0.f)
+		tunedRate = engineRate;
+	if (rackdroid::audioPortEpoch() != portEpoch || rackdroid::audioBlockSize() != tunedBlock
+			|| engineRate != tunedRate) {
+		bool portChanged = rackdroid::audioPortEpoch() != portEpoch || engineRate != tunedRate;
+		if (engineRate != tunedRate)
+			LOGI("Engine: sample rate %g -> %g Hz; measuring the thread counts again",
+				tunedRate, engineRate);
+		tunedRate = engineRate;
 		portEpoch = rackdroid::audioPortEpoch();
 		tunedBlock = rackdroid::audioBlockSize();
 		for (int i = 0; i <= MAX_TRACKED_THREADS; i++) {

@@ -2087,7 +2087,53 @@ class MainActivity : NativeActivity() {
 			3 -> R.string.engine_near_limit
 			else -> R.string.engine_maxed_out
 		}
+		// "Lower the sample rate" was advice with nowhere to tap. Where the
+		// patch itself is the load (not heat, not another app) and the engine
+		// is still at a full rate, the notice offers to halve it.
+		if (kind == 0 || kind == 3) {
+			uiHandler.post { runCatching { showHeavyPatchNotice(getString(res)) } }
+			return
+		}
 		showToastFromNative(getString(res))
+	}
+
+	/** "Ignore" on the heavy-patch notice: quiet until the next launch. */
+	private var heavyNoticeMuted = false
+
+	private fun showHeavyPatchNotice(message: String) {
+		if (isFinishing) return
+		val rates = runCatching { nativeEngineSampleRates() }.getOrNull()
+		val running = rates?.getOrNull(0) ?: 0
+		// Half of 44.1 or 48 kHz still carries everything up to 11 kHz; half of
+		// that again does not sound like the same instrument, so it is offered
+		// once and not twice.
+		if (heavyNoticeMuted || running < 44100) {
+			Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+			return
+		}
+		val lower = running / 2
+		val builder = AlertDialog.Builder(this)
+			.setTitle(R.string.engine_heavy_title)
+			.setMessage(message)
+			.setNegativeButton(R.string.block_crackle_ignore) { _, _ -> heavyNoticeMuted = true }
+			.setPositiveButton(getString(R.string.engine_lower_rate, kHz(lower))) { _, _ ->
+				nativeSetEngineSampleRate(lower)
+				Toast.makeText(this, getString(R.string.engine_rate_lowered, kHz(lower)),
+					Toast.LENGTH_LONG).show()
+			}
+		trackTopWindow(builder.show())
+	}
+
+	private fun kHz(rate: Int): String =
+		if (rate % 1000 == 0) (rate / 1000).toString()
+		else String.format(java.util.Locale.US, "%.2f", rate / 1000f).trimEnd('0')
+
+	/** At launch: a rate lowered for one heavy patch stays lowered (it is
+	 * Rack's own setting), and nothing on screen says so. Say so once. */
+	private fun remindLoweredSampleRate() {
+		val fixed = runCatching { nativeEngineSampleRates() }.getOrNull()?.getOrNull(1) ?: 0
+		if (fixed in 1..44099)
+			Toast.makeText(this, getString(R.string.engine_rate_reminder, kHz(fixed)), Toast.LENGTH_LONG).show()
 	}
 
 	// ---- Audio focus (called from native, once, before the Oboe stream opens) ----
@@ -2728,6 +2774,7 @@ class MainActivity : NativeActivity() {
 			runCatching { nativeBrowserRequestBuild() }
 			runCatching { modulePalette.show() }
 			showStartupRecoveryDialog()
+			runCatching { remindLoweredSampleRate() }
 		}
 	}
 
@@ -2759,6 +2806,8 @@ class MainActivity : NativeActivity() {
 	private external fun nativeHistoryAction(action: Int)
 	private external fun nativeSetLockMode(mode: Int)
 	private external fun nativeSetLatencyMode(mode: Int)
+	private external fun nativeEngineSampleRates(): IntArray
+	private external fun nativeSetEngineSampleRate(rate: Int)
 	private external fun nativeGetBlockInfo(): IntArray
 	private external fun nativeSetBlockChoice(choice: Int)
 	private external fun nativeSetMultiSelect(on: Boolean)

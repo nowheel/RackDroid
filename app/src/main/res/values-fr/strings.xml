@@ -155,6 +155,10 @@
 	<string name="engine_maxed_out">Ce patch demande plus de CPU que votre appareil ne peut en fournir, même à pleine puissance. Essayez de le simplifier ou de baisser la fréquence d\'échantillonnage.</string>
 	<string name="engine_near_limit">Ce patch est proche de la limite de votre appareil : il peut se mettre à grésiller. Allégez-le ou baissez la fréquence d\'échantillonnage.</string>
 	<string name="engine_load_meter">Charge du moteur %1$d%%</string>
+	<string name="engine_heavy_title">Ce patch est lourd pour cet appareil</string>
+	<string name="engine_lower_rate">Baisser à %1$s kHz</string>
+	<string name="engine_rate_lowered">Le moteur tourne maintenant à %1$s kHz : environ moitié moins de travail, des aigus un peu plus ternes. Système ▸ Fréquence d\'échantillonnage ▸ Auto rétablit le réglage.</string>
+	<string name="engine_rate_reminder">La fréquence d\'échantillonnage du moteur est baissée à %1$s kHz. Pour des patchs plus légers, mettez Système ▸ Fréquence d\'échantillonnage sur Auto.</string>
 	<string name="engine_thermal_throttled">Votre appareil a chauffé et ralentit de lui-même, c\'est pourquoi le patch saccade. Laissez-le refroidir.</string>
 	<string name="engine_cpu_contended">Une autre application utilise presque tout le processeur de ton téléphone, et c\'est pour cela que le son saccade. Ton patch va bien : ferme ce qui tourne à côté.</string>
 	<string name="installing_modules">Installation des modules…</string>
