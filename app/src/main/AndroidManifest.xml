@@ -38,7 +38,14 @@
 			android:name=".MainActivity"
 			android:exported="true"
 			android:launchMode="singleTask"
-			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density">
+			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|touchscreen|uiMode|density">
+			<!-- keyboard|navigation|touchscreen: plugging in a mouse, a keyboard or
+			     a controller is a configuration change, and one the activity does
+			     not declare has Android destroy and rebuild it. For this app that
+			     is the whole engine stopped and started again under the user: two
+			     seconds of frozen screen, the patch reloaded, and on a tester's
+			     tablet a crash (issue #5, a USB mouse receiver). Nothing here
+			     depends on which input devices exist. -->
 
 			<!-- native_app_glue entry: app/native/port/main_android.cpp -->
 			<meta-data

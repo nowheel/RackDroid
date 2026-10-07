@@ -256,7 +256,14 @@ with a mouse and no keyboard had no way left to move the rack at all (issue
 way the setting stands. */
 static void gestureScroll(rack::math::Vec pos, rack::math::Vec delta, bool zoom) {
 	windowSetMods(zoom != rack::settings::mouseWheelZoom ? GLFW_MOD_CONTROL : 0);
+	// Nor is it the wheel on a knob. With View > Control knobs with mouse wheel
+	// on, Rack offers every scroll to the knob under the pointer before the
+	// rack, and its own guard only holds once the rack is already moving: a
+	// middle-button drag begun over a knob turned it (issue #5 again).
+	bool knobScroll = rack::settings::knobScroll;
+	rack::settings::knobScroll = false;
 	APP->event->handleScroll(pos, delta);
+	rack::settings::knobScroll = knobScroll;
 	windowSetMods(0);
 }
 
