@@ -516,8 +516,11 @@ void audioReportUnderruns() {
 	// arrive one per callback, so reporting each frame wrote a hundred lines a
 	// second into a log file with a size cap -- the evidence of what went
 	// wrong would push itself out of the file it is meant to be found in.
+	// A gate further off than it can have been set is left from a Rack that
+	// ran earlier in this process, on a clock that has since started again:
+	// a Nothing A024 reopened after 34 s said nothing for its first 14.
 	double t = rack::system::getTime();
-	if (t < nextReportAt)
+	if (t < nextReportAt && nextReportAt - t <= 1.0)
 		return;
 	nextReportAt = t + 1.0;
 	uint32_t packed = g_underrunBuffer.load(std::memory_order_relaxed);

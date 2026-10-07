@@ -739,6 +739,28 @@ static bool audioStillPinned() {
 }
 
 
+/** True when a Worker may run on the callback's core again.
+
+Their mask does not stay either. Android moves the whole process to another
+cpuset when it leaves the screen (top-app to foreground on Home, with the
+playback service keeping it alive), and the kernel then hands every thread the
+new set's full mask: on an SM-S901E the Workers went from 1-6 to 0-2,4-7 the
+moment Home was pressed, cpu7 being the callback's, and stayed there -- 300
+underruns in the next five seconds on a patch that had been clean. The
+callback kept its own pin through it, so audioStillPinned() saw nothing. */
+static bool workersLoose(const std::vector<int>& workers) {
+	if (g_pinnedAudioCpu < 0)
+		return false;
+	for (int tid : workers) {
+		cpu_set_t mask;
+		CPU_ZERO(&mask);
+		if (sched_getaffinity(tid, sizeof(mask), &mask) == 0 && CPU_ISSET(g_pinnedAudioCpu, &mask))
+			return true;
+	}
+	return false;
+}
+
+
 /** A core's top clock, or -1 when sysfs will not say. */
 static long cpuMaxFreq(int cpu) {
 	char path[96];
@@ -1011,8 +1033,9 @@ static void checkWorkerPriority() {
 		pinCheckAt = system::getTime() + 0.25;
 		// Only the affinity: priority and ADPF have not changed, and each
 		// would say so in the log every two seconds.
-		if (g_audioPinWanted && !audioStillPinned())
-			applyWorkerAffinity(collectWorkerThreads());
+		std::vector<int> workers = collectWorkerThreads();
+		if (g_audioPinWanted && (!audioStillPinned() || workersLoose(workers)))
+			applyWorkerAffinity(workers);
 	}
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
 		applyAt = 0.0;
