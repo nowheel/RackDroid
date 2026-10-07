@@ -1878,6 +1878,24 @@ void audioTrimBuffer() {
 	// And never below what the callbacks of the last minute have needed.
 	if (neededFrames > floorFrames)
 		floorFrames = neededFrames;
+	// Nor, with Workers, below 32 ms. What the last minutes needed is a floor
+	// for what has been seen, and a callback that waits for Workers can be
+	// held longer than anything seen so far by the first thing that takes
+	// their cores. A Nothing A024 on three threads, clean for fifty seconds
+	// with nothing slower than a few milliseconds, was trimmed 2976 -> 1536
+	// -> 768 frames; then two callbacks of 13.5 and 18.6 ms, 2.6 ms of work in
+	// each, and 124 underruns before the buffer -- grown back at once -- had
+	// refilled. One thread waits for nobody and keeps the short buffer; so
+	// does anyone who chose Response > Playing.
+	if (rack::settings::threadCount > 1 && g_latencyMode.load(std::memory_order_relaxed) != 0
+			&& rate > 0.f && burst > 0) {
+		int32_t withWorkers = (((int32_t) (rate * 0.032f)) + burst - 1) / burst * burst;
+		int32_t ceiling = stream->getBufferCapacityInFrames() - burst;
+		if (withWorkers > ceiling)
+			withWorkers = ceiling;
+		if (withWorkers > floorFrames)
+			floorFrames = withWorkers;
+	}
 	if (size <= floorFrames) {
 		// Already where it belongs. Record that and restart the clock, or the
 		// regrowth counter above keeps climbing every frame and re-announces
