@@ -1325,25 +1325,30 @@ static void checkAdpfTarget() {
 }
 
 
-/** How fast the audio callback's core is running, as a thousandth of the
-fastest it is allowed to go right now.
+/** The audio callback's core frequency as a thousandth of scaling_max_freq --
+FOR THE LOG ONLY. It is not used to judge anything, and that is the lesson of
+two builds.
 
-The load everything here is judged by is time: how much of its deadline a
-callback took. But a phone does not run a core at a fixed speed. The governor
-slows a core that has time to spare until it is busy about four fifths of the
-time, so a callback with half the work does not take half as long -- it takes
-about as long as before, on a slower core. Seen on a Nothing A024: one thread
-at 113% of its deadline at 48 kHz and, with the work halved at 24 kHz, 72%;
-and through a week of logs a load that sat between 65% and 80% whatever was
-done to lighten it. A reading of 72% may be a core at its top speed with a
-quarter to spare, or a core at half speed with nearly two thirds to spare, and
-the meter, the "close to the limit" notice and the choice of thread count
-were treating the two alike.
+The idea was sound as far as it went: a governor slows a core that has time to
+spare, so "72% of the deadline" may be a core flat out or a core idling along,
+and scaling the load by the core's speed would tell the two apart. For two
+builds the meter, the "close to the limit" notice and the thread choice used
+the load scaled that way. A Nothing A024's logs said no, twice:
 
-Read from sysfs, on the render thread, never in the callback. scaling_max_freq
-and not cpuinfo_max_freq: a core held down by heat has no speed above that to
-go to. Where the files cannot be read the answer is 1000 and everything is as
-it was. */
+  read from the render thread: one thread at 24 kHz came out at 30% where
+  three threads, uncorrected, said it had to be near 60%;
+
+  read from the callback itself: ( 1:110%@46 2:98%@56 3:74%@52 ) -- one
+  thread over its deadline on a prime core reading 46% of its top frequency.
+  Either that phone would not run the core faster, for reasons the file does
+  not show (thermal status was 0), or the figure is not speed. Seconds later
+  it took the core away altogether. After the move, on cpu3:
+  ( 1:68%@96 3:49%@96 ).
+
+A number that can be half the truth on one core and right on the next cannot
+decide when to warn someone. What it is good for is this: printed beside each
+reading, it shows when a count was measured on a core being held back, which
+is why this function and the callback's sampling (audio_oboe.cpp) stay. */
 static int32_t callbackCoreSpeed() {
 	static double readAt = -1e9;
 	static long top = 0;
@@ -1378,22 +1383,6 @@ static int32_t callbackCoreSpeed() {
 	}
 	long share = cur * 1000 / top;
 	return (int32_t) (share > 1000 ? 1000 : (share < 100 ? 100 : share));
-}
-
-/** A load as it would be with the callback's core at full speed.
-
-Only with one thread. With Workers the callback also waits for them, they
-spin between blocks and so sit at top speed already, and the callback's core
-alone says nothing about the whole. And never for a load at or over the
-deadline: a callback that was late was late, whatever the core was doing. */
-static int32_t loadAtFullSpeed(int32_t raw) {
-	int32_t speed = callbackCoreSpeed();
-	if (settings::threadCount > 1)
-		speed = 1000;
-	rackdroid::audioNoteCoreSpeed(speed);
-	if (raw <= 0 || raw >= 100)
-		return raw;
-	return (int32_t) ((int64_t) raw * speed / 1000);
 }
 
 static void checkThreadCount() {
@@ -1693,7 +1682,6 @@ static void checkThreadCount() {
 		int32_t meanNow = 0, callbacksNow = 0;
 		// The mean with stalls clipped: see g_loadSumClipped.
 		rackdroid::audioEngineLoadTake(NULL, NULL, &callbacksNow, &meanNow);
-		meanNow = loadAtFullSpeed(meanNow);
 		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
 			sweepSliceAt = now;
 		else if (callbacksNow > 0) {
@@ -1839,7 +1827,6 @@ static void checkThreadCount() {
 	// forever, so the spike has to be kept out rather than argued with.
 	int32_t peakNow = 0, meanNow = 0, callbacksNow = 0;
 	rackdroid::audioEngineLoadTake(&peakNow, &meanNow, &callbacksNow);
-	meanNow = loadAtFullSpeed(meanNow);
 	if (now - windowStartedAt >= MIN_WINDOW_SEC
 			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC) {
 		if (peakNow > windowLoadPeak)
@@ -2166,9 +2153,8 @@ static void checkThreadCount() {
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
 				"on average, peak %d%%)", current, loadMean, loadPeak);
-			if (current == 1 && callbackCoreSpeed() < 950)
-				LOGI("Engine: that is the load at full speed; the core is at %d%% of "
-					"its top frequency now", callbackCoreSpeed() / 10);
+			LOGI("Engine: the callback's core (cpu%d) reads %d%% of its top frequency",
+				rackdroid::audioCallbackCpu(), callbackCoreSpeed() / 10);
 			settledAt = current;
 			cleanSince = now;
 		}
