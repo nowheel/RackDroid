@@ -20,6 +20,7 @@
 #include <GLFW/glfw3.h>
 
 #include <context.hpp>
+#include <settings.hpp>
 #include <widget/event.hpp>
 #include <window/Window.hpp>
 #include <ui/TextField.hpp>
@@ -246,6 +247,19 @@ static TouchState st;
 hence atomic. */
 static std::atomic<bool> mouseSeen{false};
 
+/** A pan or a pinch, handed to Rack as the scroll it understands. Rack decides
+between scrolling and zooming from Ctrl and from View > Mouse wheel, which
+swaps the two -- for the wheel. A finger or a dragged pointer is not the wheel:
+with that setting on, every pan zoomed and every pinch scrolled, and a tester
+with a mouse and no keyboard had no way left to move the rack at all (issue
+#5). So the modifier is chosen here to mean what the gesture means whichever
+way the setting stands. */
+static void gestureScroll(rack::math::Vec pos, rack::math::Vec delta, bool zoom) {
+	windowSetMods(zoom != rack::settings::mouseWheelZoom ? GLFW_MOD_CONTROL : 0);
+	APP->event->handleScroll(pos, delta);
+	windowSetMods(0);
+}
+
 /** Patch lock (toolbar padlocks). 0 = off. 1 = layout lock: module drags
  * and port/cable touches are swallowed, params stay live. 2 = full lock:
  * every single-finger press on the canvas is swallowed -- the patch is
@@ -466,6 +480,24 @@ int touchHandleEvent(AInputEvent* event) {
 				return 1;
 			}
 			case AMOTION_EVENT_ACTION_DOWN: {
+				if (AMotionEvent_getButtonState(event) & AMOTION_EVENT_BUTTON_TERTIARY) {
+					// Middle button: drag the rack, as on the desktop -- from
+					// anywhere, a module's panel included. It is the one-finger
+					// pan with nothing asked of what is under the pointer.
+					st.down = true;
+					st.gesture = false;
+					st.longPressFired = true; // a held middle button is not a long press
+					st.inertiaActive = false;
+					st.selectTarget = NULL;
+					st.panSingle = true;
+					st.panVelocity = rack::math::Vec();
+					st.downTime = rack::system::getTime();
+					st.downPos = pos;
+					st.lastPos = pos;
+					st.lastCentroid = pos;
+					st.lastMoveTime = evTime;
+					return 1;
+				}
 				if (!(AMotionEvent_getButtonState(event) & AMOTION_EVENT_BUTTON_SECONDARY))
 					break;
 				// Right button: the context menu, at once. Nothing else of the
@@ -607,7 +639,7 @@ int touchHandleEvent(AInputEvent* event) {
 			// so the release can coast, exactly like the two-finger pan.
 			if (st.panSingle) {
 				rack::math::Vec delta = pos.minus(st.lastPos);
-				APP->event->handleScroll(pos, delta);
+				gestureScroll(pos, delta, false);
 				double dt = evTime - st.lastMoveTime;
 				if (dt > 1e-4) {
 					rack::math::Vec instV = clampPanVelocity(delta.div(dt));
@@ -665,10 +697,8 @@ int touchHandleEvent(AInputEvent* event) {
 								float apply = clampZoomInToCeiling(st.pendingZoom);
 								st.pendingZoom = 0.f;
 								if (apply != 0.f) {
-									windowSetMods(GLFW_MOD_CONTROL);
-									APP->event->handleScroll(centroid,
-										rack::math::Vec(0.f, apply * PINCH_ZOOM_SPEED * 50.f));
-									windowSetMods(0);
+									gestureScroll(centroid,
+										rack::math::Vec(0.f, apply * PINCH_ZOOM_SPEED * 50.f), true);
 								}
 							}
 						}
@@ -677,7 +707,7 @@ int touchHandleEvent(AInputEvent* event) {
 				// Two-finger pan → scroll
 				rack::math::Vec delta = centroid.minus(st.lastCentroid);
 				if (delta.norm() > 0.f)
-					APP->event->handleScroll(centroid, delta);
+					gestureScroll(centroid, delta, false);
 
 				// Track panning velocity for release inertia (EMA).
 				if (dt > 1e-4) {
@@ -725,10 +755,8 @@ int touchHandleEvent(AInputEvent* event) {
 				// tidying-up step.
 				float flush = clampZoomInToCeiling(st.pendingZoom);
 				if (flush != 0.f && APP->event) {
-					windowSetMods(GLFW_MOD_CONTROL);
-					APP->event->handleScroll(st.lastCentroid,
-						rack::math::Vec(0.f, flush * PINCH_ZOOM_SPEED * 50.f));
-					windowSetMods(0);
+					gestureScroll(st.lastCentroid,
+						rack::math::Vec(0.f, flush * PINCH_ZOOM_SPEED * 50.f), true);
 				}
 				st.pendingZoom = 0.f;
 				// Back to single-finger mode; don't resume the left drag.
@@ -895,7 +923,7 @@ void touchStep() {
 		if (dt <= 0.0 || dt > 0.1)
 			dt = 1.0 / 60.0; // clamp after stalls
 		rack::math::Vec delta = st.inertiaVel.mult(dt);
-		APP->event->handleScroll(st.inertiaCentroid, delta);
+		gestureScroll(st.inertiaCentroid, delta, false);
 		st.inertiaVel = st.inertiaVel.mult(std::exp(-INERTIA_DECAY * dt));
 		windowNoteInteraction(); // keep rendering at full rate while coasting
 		if (st.inertiaVel.norm() < INERTIA_STOP_SPEED)
