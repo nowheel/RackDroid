@@ -320,6 +320,23 @@ if(RACKDROID_UI)
 	file(WRITE ${RACK_PATCH_DIR}/ModuleWidget.cpp "${_mw_cpp}")
 	list(REMOVE_ITEM RACK_APP_SOURCES ${RACK_DIR}/src/app/ModuleWidget.cpp)
 	list(APPEND RACK_APP_SOURCES ${RACK_PATCH_DIR}/ModuleWidget.cpp)
+	# Turning a knob with the mouse wheel adds small steps to its value, and
+	# coming back to zero lands a rounding error away from it: a tester's
+	# tooltip read "Sustain CV: -4.4703e-06%" (issue #5). Upstream does the same
+	# on the desktop. In the patched copy a wheel step that ends within a
+	# ten-thousandth of the knob's range of zero ends on zero.
+	file(READ ${RACK_DIR}/src/app/Knob.cpp _knob_cpp)
+	set(_knob_needle "\tvalue += delta;\n\tpq->setValue(value);\n\n\te.consume(this);")
+	string(FIND "${_knob_cpp}" "${_knob_needle}" _pos)
+	if(_pos EQUAL -1)
+		message(FATAL_ERROR "Knob.cpp: the end of onHoverScroll is not where the wheel-snap patch expects it")
+	endif()
+	string(REPLACE "${_knob_needle}"
+		"\tvalue += delta;\n\tif (std::fabs(value) < 1e-4f * rangeRatio)\n\t\tvalue = 0.f; // RackDroid: see native/CMakeLists.txt\n\tpq->setValue(value);\n\n\te.consume(this);"
+		_knob_cpp "${_knob_cpp}")
+	file(WRITE ${RACK_PATCH_DIR}/Knob.cpp "${_knob_cpp}")
+	list(REMOVE_ITEM RACK_APP_SOURCES ${RACK_DIR}/src/app/Knob.cpp)
+	list(APPEND RACK_APP_SOURCES ${RACK_PATCH_DIR}/Knob.cpp)
 	file(GLOB RACK_CORE_SOURCES ${RACK_DIR}/src/core/*.cpp)
 	list(APPEND RACK_SOURCES
 		${RACK_DIR}/src/context.cpp
