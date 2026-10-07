@@ -51,6 +51,10 @@ times a second rather than whenever something goes wrong, which is what lets
 the thread search in main_android.cpp reject a count in a fraction of a second
 instead of waiting five for an underrun that may or may not arrive. Written by
 the audio thread, read by the render thread. Either pointer may be null. */
+/** The core the audio callback last ran on (-1 before the first callback),
+and the speed the render thread found it at, for the load meter. */
+int audioCallbackCpu();
+void audioNoteCoreSpeed(int permille);
 /** The rate the output stream runs at, which is what a callback's frames are
 counted in -- not the engine's, which the user can set lower. 0 with no stream. */
 float audioDeviceSampleRate();

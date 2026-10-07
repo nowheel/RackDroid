@@ -650,6 +650,19 @@ static std::atomic<int> g_blockChoicePending{-1};
 /** An engine sample rate asked for from the "patch is heavy" notice, applied
 where the block choice is: -1 none, 0 Auto, otherwise Hz. */
 static std::atomic<int> g_sampleRatePending{-1};
+/** The core the callback last ran on, and how fast that core was going as a
+thousandth of its top speed (told by the render thread; 1000 = not corrected). */
+static std::atomic<int> g_callbackCpu{-1};
+static std::atomic<int> g_coreSpeed{1000};
+
+int audioCallbackCpu() {
+	return g_callbackCpu.load(std::memory_order_relaxed);
+}
+
+void audioNoteCoreSpeed(int permille) {
+	g_coreSpeed.store(permille, std::memory_order_relaxed);
+}
+
 /** The rate the engine is running at, as the render thread last saw it. */
 static std::atomic<int> g_engineRateSeen{0};
 
@@ -1257,6 +1270,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		rusage ru0;
 		getrusage(RUSAGE_THREAD, &ru0);
 		int cpuStart = sched_getcpu();
+		g_callbackCpu.store(cpuStart, std::memory_order_relaxed);
 		int phaseStart = windowPhase();
 
 		const float* input = NULL;
@@ -1910,7 +1924,11 @@ extern "C" JNIEXPORT jint JNICALL
 Java_org_rackdroid_MainActivity_nativeEngineLoad(JNIEnv*, jobject) {
 	if (g_portCount.load(std::memory_order_relaxed) <= 0)
 		return 0;
-	return g_loadForMeter.load(std::memory_order_relaxed);
+	// As the tuner reads it: at the core's full speed, unless it was late.
+	int raw = g_loadForMeter.load(std::memory_order_relaxed);
+	if (raw >= 100)
+		return raw;
+	return (int) ((int64_t) raw * g_coreSpeed.load(std::memory_order_relaxed) / 1000);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

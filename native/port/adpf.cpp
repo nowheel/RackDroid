@@ -142,7 +142,7 @@ void adpfSetThreads(const int* tids, size_t count) {
 
 	if (!g_session) {
 		if (openLocked())
-			ADPF_LOG("ADPF: hint session open for %zu threads, target %.2f ms",
+			ADPF_LOG("ADPF: hint session open for %zu threads, deadline %.2f ms",
 				g_tids.size(), g_targetNanos / 1e6);
 		return;
 	}
@@ -180,12 +180,12 @@ void adpfSetTargetNanos(int64_t nanos) {
 		// now" line, which only prints when a session exists. Inferring is not
 		// the same as being told.
 		if (openLocked())
-			ADPF_LOG("ADPF: hint session open for %zu threads, target %.2f ms",
+			ADPF_LOG("ADPF: hint session open for %zu threads, deadline %.2f ms",
 				g_tids.size(), g_targetNanos / 1e6);
 		return;
 	}
 	api().updateTarget(g_session, nanos);
-	ADPF_LOG("ADPF: target now %.2f ms (60%% of the callback's deadline)", nanos / 1e6);
+	ADPF_LOG("ADPF: deadline now %.2f ms", nanos / 1e6);
 }
 
 

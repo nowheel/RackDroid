@@ -1310,27 +1310,97 @@ static void checkAdpfTarget() {
 		rate = APP->engine->getSampleRate();
 	if (rate <= 0.f)
 		return;
-	// And not the whole deadline. The target is what the system steers the
-	// work TOWARDS: over it, the CPU is pushed; under it, the CPU is let go
-	// until the work fills it again. Handing it the full deadline says that
-	// finishing at the last moment is fine, and an audio callback that
-	// finishes at the last moment underruns at the next disturbance. On the
-	// one phone here that grants a session, a Nothing A024, the same
-	// 177-module patch read 72%, 77%, 110% and 114% of its deadline on one
-	// thread on different days, stayed between 69% and 81% whatever was done
-	// to lighten it, and cost as much at half the sample rate as at the full
-	// one -- the pattern of a load being regulated, not of a fixed speed.
-	// Sixty per cent is the share the thread tuner itself calls comfortable.
-	// A hypothesis until a log from that phone says otherwise: no device on
-	// the desk has ADPF to try it on.
-	static const double ADPF_TARGET_SHARE = 0.6;
-	int64_t nanos = (int64_t) (block / (double) rate * 1e9 * ADPF_TARGET_SHARE);
+	// The whole deadline. For one build the target was 60% of it, on the idea
+	// that the system steers the work towards the target and was being told
+	// that finishing at the last moment is fine. On the Nothing A024 it was
+	// meant for, the readings did not move: 1:113% 2:99% 3:79% with it,
+	// 1:111% 2:93% 3:79% and 1:114% 2:100% 3:81% without. What holds the load
+	// where it is turned out to be the frequency governor (see
+	// callbackCoreSpeed below), not this.
+	int64_t nanos = (int64_t) (block / (double) rate * 1e9);
 	if (nanos == lastNanos)
 		return;
 	lastNanos = nanos;
 	rackdroid::adpfSetTargetNanos(nanos);
 }
 
+
+/** How fast the audio callback's core is running, as a thousandth of the
+fastest it is allowed to go right now.
+
+The load everything here is judged by is time: how much of its deadline a
+callback took. But a phone does not run a core at a fixed speed. The governor
+slows a core that has time to spare until it is busy about four fifths of the
+time, so a callback with half the work does not take half as long -- it takes
+about as long as before, on a slower core. Seen on a Nothing A024: one thread
+at 113% of its deadline at 48 kHz and, with the work halved at 24 kHz, 72%;
+and through a week of logs a load that sat between 65% and 80% whatever was
+done to lighten it. A reading of 72% may be a core at its top speed with a
+quarter to spare, or a core at half speed with nearly two thirds to spare, and
+the meter, the "close to the limit" notice and the choice of thread count
+were treating the two alike.
+
+Read from sysfs, on the render thread, never in the callback. scaling_max_freq
+and not cpuinfo_max_freq: a core held down by heat has no speed above that to
+go to. Smoothed, because one reading is one instant. Where the files cannot
+be read the answer is 1000 and everything is as it was. */
+static int32_t callbackCoreSpeed() {
+	static double readAt = -1e9;
+	static float smoothed = 1000.f;
+	static bool saidUnreadable = false;
+	double now = system::getTime();
+	if (now - readAt < 0.05)
+		return (int32_t) smoothed;
+	readAt = now;
+	int cpu = rackdroid::audioCallbackCpu();
+	if (cpu < 0)
+		return (int32_t) smoothed;
+	auto read = [cpu](const char* name) -> long {
+		char path[96];
+		std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/%s", cpu, name);
+		FILE* f = std::fopen(path, "r");
+		if (!f)
+			return -1;
+		long v = -1;
+		if (std::fscanf(f, "%ld", &v) != 1)
+			v = -1;
+		std::fclose(f);
+		return v;
+	};
+	long cur = read("scaling_cur_freq");
+	long top = read("scaling_max_freq");
+	if (cur <= 0 || top <= 0) {
+		if (!saidUnreadable) {
+			saidUnreadable = true;
+			LOGI("Engine: cpu%d's frequency cannot be read here; load is taken as measured", cpu);
+		}
+		smoothed = 1000.f;
+		return 1000;
+	}
+	float share = (float) cur * 1000.f / (float) top;
+	if (share > 1000.f)
+		share = 1000.f;
+	if (share < 100.f)
+		share = 100.f;
+	smoothed += (share - smoothed) * 0.2f;
+	return (int32_t) smoothed;
+}
+
+/** A load as it would be with the callback's core at full speed.
+
+Only with one thread. With Workers the callback also waits for them, they
+spin between blocks and so sit at top speed already, and the callback's core
+alone says nothing about the whole. And never for a load at or over the
+deadline: a callback that was late was late, whatever the core was doing. */
+static int32_t loadAtFullSpeed(int32_t raw) {
+	int32_t speed = callbackCoreSpeed();
+	if (settings::threadCount > 1)
+		speed = 1000;
+	rackdroid::audioNoteCoreSpeed(speed);
+	if (raw <= 0 || raw >= 100)
+		return raw;
+	return (int32_t) ((int64_t) raw * speed / 1000);
+}
 
 static void checkThreadCount() {
 	static const double WINDOW_SEC = 5.0;
@@ -1628,6 +1698,7 @@ static void checkThreadCount() {
 		int32_t meanNow = 0, callbacksNow = 0;
 		// The mean with stalls clipped: see g_loadSumClipped.
 		rackdroid::audioEngineLoadTake(NULL, NULL, &callbacksNow, &meanNow);
+		meanNow = loadAtFullSpeed(meanNow);
 		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
 			sweepSliceAt = now;
 		else if (callbacksNow > 0) {
@@ -1771,6 +1842,7 @@ static void checkThreadCount() {
 	// forever, so the spike has to be kept out rather than argued with.
 	int32_t peakNow = 0, meanNow = 0, callbacksNow = 0;
 	rackdroid::audioEngineLoadTake(&peakNow, &meanNow, &callbacksNow);
+	meanNow = loadAtFullSpeed(meanNow);
 	if (now - windowStartedAt >= MIN_WINDOW_SEC
 			&& rackdroid::audioSecondsSinceStreamOpen() >= STREAM_SETTLE_SEC) {
 		if (peakNow > windowLoadPeak)
@@ -2097,6 +2169,9 @@ static void checkThreadCount() {
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
 				"on average, peak %d%%)", current, loadMean, loadPeak);
+			if (current == 1 && callbackCoreSpeed() < 950)
+				LOGI("Engine: that is the load at full speed; the core is at %d%% of "
+					"its top frequency now", callbackCoreSpeed() / 10);
 			settledAt = current;
 			cleanSince = now;
 		}
