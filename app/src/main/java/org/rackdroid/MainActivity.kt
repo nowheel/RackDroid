@@ -2091,7 +2091,18 @@ class MainActivity : NativeActivity() {
 		// patch itself is the load (not heat, not another app) and the engine
 		// is still at a full rate, the notice offers to halve it.
 		if (kind == 0 || kind == 3) {
-			uiHandler.post { runCatching { showHeavyPatchNotice(getString(res)) } }
+			// Not at once: the engine raises this after a couple of seconds over
+			// its deadline, which is right for a line of text and too soon for
+			// a dialog that sits on the screen until it is answered. A OnePlus
+			// 8T went over for three seconds as a patch settled, then ran at
+			// 47%, with the dialog still up. It is shown only if the load is
+			// still high eight seconds later.
+			val message = getString(res)
+			uiHandler.postDelayed({
+				runCatching {
+					if (nativeEngineLoad() >= 85) showHeavyPatchNotice(message)
+				}
+			}, 8000L)
 			return
 		}
 		showToastFromNative(getString(res))

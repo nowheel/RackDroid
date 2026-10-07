@@ -2047,6 +2047,7 @@ static void checkThreadCount() {
 	static int priorCount = -1;
 	static double priorTryAt = 0.0;
 	static double priorWait = 30.0;
+	static int32_t priorLoad = 0; // what it measured there while clean
 	if (resetLate)
 		priorCount = -1;
 	if (priorCount > 0 && now >= priorTryAt) {
@@ -2056,6 +2057,17 @@ static void checkThreadCount() {
 		}
 		else if (priorWait > 500.0 || priorCount > ceiling)
 			priorCount = -1;
+		else if (loadSamples < LOAD_MIN_SAMPLES)
+			priorTryAt = now + 5.0; // no reading to judge by yet
+		else if (!overNow && priorLoad > 0 && loadMean <= priorLoad + 5) {
+			// Where it is now is no worse than where it was: nothing to go
+			// back for. Without this a OnePlus 8T was taken from two threads
+			// at 47% back to three, twice in five minutes, and each time the
+			// probe that looks for fewer threads brought it down again.
+			LOGI("Engine: staying at %d threads (%d%%); the %d it ran clean on before "
+				"were at %d%%", current, loadMean, priorCount, priorLoad);
+			priorCount = -1;
+		}
 		else {
 			LOGI("Engine: back to the %d threads this patch was running clean on "
 				"before it was pushed over its deadline (%d now, at %d%%)",
@@ -2386,6 +2398,7 @@ static void checkThreadCount() {
 			// it then stayed.
 			if (proven) {
 				priorCount = current;
+				priorLoad = g_lastCleanLoad;
 				priorWait = 30.0;
 				priorTryAt = now + 40.0;
 			}
@@ -2396,6 +2409,7 @@ static void checkThreadCount() {
 			overWindows = 0;
 			if (proven) {
 				priorCount = current;
+				priorLoad = g_lastCleanLoad;
 				priorWait = 30.0;
 				priorTryAt = now + 40.0; // the measurement itself takes a few seconds
 			}
