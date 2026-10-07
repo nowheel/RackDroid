@@ -707,7 +707,8 @@ static int g_pinnedAudioCpu = -1;
 /** There is a core to give it at all (more than two cores). */
 static bool g_audioPinWanted = false;
 /** Cores that refused the callback or let go of it, one bit each: not asked
-again this session. A Snapdragon's prime core is the fastest and also the one
+again this session -- unless every core ends up here, when the list is wiped
+(see applyWorkerAffinity). A Snapdragon's prime core is the fastest and also the one
 the SoC halts whenever the load allows -- an 8T took the pin on cpu7 at 0.8 s
 and dropped it at 4 s, and until the next look the callback wandered over the
 Workers' cores: four callbacks of 43-75 ms, 8 underruns. The second-fastest
@@ -882,6 +883,16 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				g_audioCpusGivenUp |= (uint64_t) 1 << cpu;
 			}
 		}
+		// Every core given up is not the end of it. "Not asked again" is for a
+		// core the SoC really takes away, and losing a pin is not proof of
+		// that: on a Lenovo TB-X306X the system resets the thread's mask
+		// whenever it reshuffles its cores -- under load, and each time the
+		// screen goes off and on -- and six of those in seventy-five seconds
+		// walked the callback down cpu3, 7, 6, 5, 2, 1, 0 to no core at all,
+		// which is how it then stayed for the rest of the session. With none
+		// left the list is wiped, and the next look starts again from the best.
+		if (g_pinnedAudioCpu < 0)
+			g_audioCpusGivenUp = 0;
 		// Said once per outcome, not once per retry.
 		if (g_pinnedAudioCpu != before) {
 			if (g_pinnedAudioCpu < 0)
