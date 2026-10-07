@@ -1342,48 +1342,42 @@ were treating the two alike.
 
 Read from sysfs, on the render thread, never in the callback. scaling_max_freq
 and not cpuinfo_max_freq: a core held down by heat has no speed above that to
-go to. Smoothed, because one reading is one instant. Where the files cannot
-be read the answer is 1000 and everything is as it was. */
+go to. Where the files cannot be read the answer is 1000 and everything is as
+it was. */
 static int32_t callbackCoreSpeed() {
 	static double readAt = -1e9;
-	static float smoothed = 1000.f;
+	static long top = 0;
+	static int topCpu = -1;
 	static bool saidUnreadable = false;
-	double now = system::getTime();
-	if (now - readAt < 0.05)
-		return (int32_t) smoothed;
-	readAt = now;
 	int cpu = rackdroid::audioCallbackCpu();
 	if (cpu < 0)
-		return (int32_t) smoothed;
-	auto read = [cpu](const char* name) -> long {
+		return 1000;
+	// The current frequency is read by the callback itself (audio_oboe.cpp
+	// says why); the ceiling moves only with heat and is read here.
+	rackdroid::audioOpenCoreFreq(cpu);
+	double now = system::getTime();
+	if (cpu != topCpu || now - readAt > 0.5) {
+		readAt = now;
+		topCpu = cpu;
 		char path[96];
-		std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/%s", cpu, name);
-		FILE* f = std::fopen(path, "r");
-		if (!f)
-			return -1;
-		long v = -1;
-		if (std::fscanf(f, "%ld", &v) != 1)
-			v = -1;
-		std::fclose(f);
-		return v;
-	};
-	long cur = read("scaling_cur_freq");
-	long top = read("scaling_max_freq");
+		std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", cpu);
+		top = 0;
+		if (FILE* f = std::fopen(path, "r")) {
+			if (std::fscanf(f, "%ld", &top) != 1)
+				top = 0;
+			std::fclose(f);
+		}
+	}
+	long cur = rackdroid::audioCallbackFreqKHz();
 	if (cur <= 0 || top <= 0) {
-		if (!saidUnreadable) {
+		if (!saidUnreadable && now > 10.0) {
 			saidUnreadable = true;
 			LOGI("Engine: cpu%d's frequency cannot be read here; load is taken as measured", cpu);
 		}
-		smoothed = 1000.f;
 		return 1000;
 	}
-	float share = (float) cur * 1000.f / (float) top;
-	if (share > 1000.f)
-		share = 1000.f;
-	if (share < 100.f)
-		share = 100.f;
-	smoothed += (share - smoothed) * 0.2f;
-	return (int32_t) smoothed;
+	long share = cur * 1000 / top;
+	return (int32_t) (share > 1000 ? 1000 : (share < 100 ? 100 : share));
 }
 
 /** A load as it would be with the callback's core at full speed.
@@ -1456,6 +1450,7 @@ static void checkThreadCount() {
 	// where the window had too few readings to say. What rungs are compared by
 	// once none of them keeps up.
 	static int32_t loads[MAX_TRACKED_THREADS + 1];
+	static int sweepSpeed[MAX_TRACKED_THREADS + 1]; // for the log only
 	static bool provenClean[MAX_TRACKED_THREADS + 1];
 	static bool initialised = false;
 	static int settledAt = -1;
@@ -1726,6 +1721,7 @@ static void checkThreadCount() {
 			// A second look at a count keeps the worse of the two.
 			if (!(sweepVerifyOf == measured && loads[measured] > load))
 				loads[measured] = load;
+			sweepSpeed[measured] = callbackCoreSpeed() / 10;
 			scoreAt[measured] = now;
 		}
 		// What to measure next, and below what to play on: thread_choice.hpp,
@@ -1766,9 +1762,10 @@ static void checkThreadCount() {
 			std::string seen;
 			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++)
 				if (loads[c] > 0)
-					seen += string::f(" %d:%d%%", c, loads[c]);
+					seen += string::f(" %d:%d%%@%d", c, loads[c], sweepSpeed[c]);
 			LOGI("Engine: measured this patch in silence at each thread count "
-				"(%s ); starting it at %d", seen.c_str(), best);
+				"(%s ); starting it at %d  [count:load@speed of the callback's core, "
+				"%% of its top]", seen.c_str(), best);
 			// Known, and known worse than the one chosen: the search below is
 			// not to go trying them out loud.
 			for (int c = floorCount; c <= ceiling && c <= MAX_TRACKED_THREADS; c++) {

@@ -17,6 +17,8 @@
 #include <mutex>
 #include <algorithm>
 #include <atomic>
+#include <fcntl.h>
+#include <unistd.h>
 #include <iterator>
 #include <thread>
 #include <cstdio>
@@ -659,6 +661,32 @@ int audioCallbackCpu() {
 	return g_callbackCpu.load(std::memory_order_relaxed);
 }
 
+/** The callback core's frequency as the CALLBACK finds it, in kHz, smoothed.
+
+Read on the callback thread, ten times a second, from a sysfs file the render
+thread opened beforehand: one pread of a dozen bytes, on a thread that already
+makes two system calls per callback to time itself. It has to be read there.
+Sampled from the render thread instead, the same file said the core was at 40%
+of its top frequency while the callback on it was getting through its work at
+about twice that speed: a core is run faster while a real-time thread is on it
+and slower in the gaps, and another thread's glance lands in either. */
+static std::atomic<int> g_freqFd[16] = {
+	{-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}};
+static std::atomic<int> g_callbackFreqKHz{0};
+
+void audioOpenCoreFreq(int cpu) {
+	if (cpu < 0 || cpu >= 16 || g_freqFd[cpu].load(std::memory_order_relaxed) != -1)
+		return;
+	char path[96];
+	std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu);
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	g_freqFd[cpu].store(fd >= 0 ? fd : -2, std::memory_order_relaxed); // -2: tried, not readable
+}
+
+int audioCallbackFreqKHz() {
+	return g_callbackFreqKHz.load(std::memory_order_relaxed);
+}
+
 void audioNoteCoreSpeed(int permille) {
 	g_coreSpeed.store(permille, std::memory_order_relaxed);
 }
@@ -1295,6 +1323,25 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		int64_t elapsed = (int64_t) (t1.tv_sec - t0.tv_sec) * 1000000000LL
 			+ (t1.tv_nsec - t0.tv_nsec);
 		applyWarmup(output, stream->getChannelCount(), numFrames, stream->getSampleRate(), elapsed);
+		// How fast this core is going while this thread is on it: see g_freqFd.
+		{
+			static thread_local int64_t freqReadAt = 0;
+			int64_t nowNs = (int64_t) t1.tv_sec * 1000000000LL + t1.tv_nsec;
+			if (nowNs - freqReadAt > 100000000LL && cpuStart >= 0 && cpuStart < 16) {
+				freqReadAt = nowNs;
+				int fd = g_freqFd[cpuStart].load(std::memory_order_relaxed);
+				char buf[16];
+				ssize_t n = fd >= 0 ? pread(fd, buf, sizeof(buf) - 1, 0) : 0;
+				if (n > 0) {
+					buf[n] = 0;
+					int khz = atoi(buf);
+					int prev = g_callbackFreqKHz.load(std::memory_order_relaxed);
+					if (khz > 0)
+						g_callbackFreqKHz.store(prev > 0 ? prev + (khz - prev) / 4 : khz,
+							std::memory_order_relaxed);
+				}
+			}
+		}
 		// Not while the silence is on: those are the start-up callbacks, and a
 		// buffer sized for them would be sized for nothing that will happen again.
 		if (!warming) {

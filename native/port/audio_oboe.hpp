@@ -54,6 +54,10 @@ the audio thread, read by the render thread. Either pointer may be null. */
 /** The core the audio callback last ran on (-1 before the first callback),
 and the speed the render thread found it at, for the load meter. */
 int audioCallbackCpu();
+/** Open the frequency file of a core for the callback to read (render
+thread), and what the callback last read there, in kHz (0 = nothing yet). */
+void audioOpenCoreFreq(int cpu);
+int audioCallbackFreqKHz();
 void audioNoteCoreSpeed(int permille);
 /** The rate the output stream runs at, which is what a callback's frames are
 counted in -- not the engine's, which the user can set lower. 0 with no stream. */
