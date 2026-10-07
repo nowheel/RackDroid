@@ -1446,6 +1446,11 @@ int audioBlockSize() {
 }
 
 
+float audioDeviceSampleRate() {
+	return (g_driver && g_driver->device) ? g_driver->device->sampleRate : 0.f;
+}
+
+
 void audioApplyBlockChoice() {
 	int rate = g_sampleRatePending.exchange(-1, std::memory_order_relaxed);
 	if (rate >= 0) {

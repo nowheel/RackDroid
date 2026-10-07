@@ -1299,10 +1299,32 @@ static void checkAdpfTarget() {
 		block = rackdroid::audioBlockSize();
 	if (block <= 0 || !APP->engine)
 		return;
-	float rate = APP->engine->getSampleRate();
+	// The DEVICE's rate: those frames are the stream's. This divided by the
+	// engine's, which is the same number until the engine is set lower -- and
+	// then a Nothing A024 at 24 kHz was told its 96-frame callback had 4 ms
+	// when it has 2. The system slowed the CPU to match, and the patch that
+	// should have cost half ran at 73% of its deadline where it had been 69%
+	// at 48 kHz. (No such effect on a TB-X306X: Android 10 has no ADPF.)
+	float rate = rackdroid::audioDeviceSampleRate();
+	if (rate <= 0.f)
+		rate = APP->engine->getSampleRate();
 	if (rate <= 0.f)
 		return;
-	int64_t nanos = (int64_t) (block / (double) rate * 1e9);
+	// And not the whole deadline. The target is what the system steers the
+	// work TOWARDS: over it, the CPU is pushed; under it, the CPU is let go
+	// until the work fills it again. Handing it the full deadline says that
+	// finishing at the last moment is fine, and an audio callback that
+	// finishes at the last moment underruns at the next disturbance. On the
+	// one phone here that grants a session, a Nothing A024, the same
+	// 177-module patch read 72%, 77%, 110% and 114% of its deadline on one
+	// thread on different days, stayed between 69% and 81% whatever was done
+	// to lighten it, and cost as much at half the sample rate as at the full
+	// one -- the pattern of a load being regulated, not of a fixed speed.
+	// Sixty per cent is the share the thread tuner itself calls comfortable.
+	// A hypothesis until a log from that phone says otherwise: no device on
+	// the desk has ADPF to try it on.
+	static const double ADPF_TARGET_SHARE = 0.6;
+	int64_t nanos = (int64_t) (block / (double) rate * 1e9 * ADPF_TARGET_SHARE);
 	if (nanos == lastNanos)
 		return;
 	lastNanos = nanos;
