@@ -259,6 +259,8 @@ void audioWarmupHold(bool hold) {
 /** The longest any callback has taken since audioTrimBuffer() last looked, in
 ns. What the buffer is sized from before anything underruns. */
 static std::atomic<int64_t> g_callbackPeakNanos{0};
+/** When audioTrimBuffer() last made the stream buffer smaller (render thread only). */
+static double g_lastTrimAt = -1e9;
 /** The share of its deadline the callback has been using, smoothed over about
 half a second: what the toolbar's load meter shows. */
 static std::atomic<int32_t> g_loadForMeter{0};
@@ -1724,7 +1726,14 @@ void audioTrimBuffer() {
 		// 8T that turbulence outlasted a five-second guard: the growth path
 		// fired twenty seconds in and pinned the buffer at the full capacity
 		// before the engine had settled at all.
-		if (!first && rackdroid::audioSecondsSinceStreamOpen() > 30.0) {
+		// Unless the buffer was made smaller a moment ago: then the underruns
+		// are that trim's, whatever the stream's age, and waiting out the
+		// guard is waiting with the cause in hand. A TB-X306X on the Shared
+		// path (960-frame bursts) was trimmed 4104 -> 2052 frames twenty-five
+		// seconds after opening and underran sixteen times a second for the
+		// four seconds it took the guard to expire -- at every launch.
+		bool ownTrim = now - g_lastTrimAt < 30.0;
+		if (!first && (ownTrim || rackdroid::audioSecondsSinceStreamOpen() > 30.0)) {
 			int32_t want = size * 2;
 			int32_t cap = stream->getBufferCapacityInFrames();
 			if (want > cap)
@@ -1824,6 +1833,7 @@ void audioTrimBuffer() {
 	auto result = stream->setBufferSizeInFrames(want);
 	if (!result)
 		return;
+	g_lastTrimAt = rack::system::getTime();
 	AUDIO_WARN("Oboe: quiet for %.0fs; buffer %d -> %d frames (%.1f ms less "
 		"latency, no gap)", now - quietSince, size, result.value(),
 		rate > 0.f ? (size - result.value()) / rate * 1000.f : 0.f);
