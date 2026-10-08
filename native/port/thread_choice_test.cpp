@@ -50,6 +50,10 @@ int main() {
 	expect("A024 heavy, the day five was chosen", {72, 94, 65, 61, 51, 80, 90}, 2, 3);
 	expect("same, coming from five threads", {72, 94, 65, 61, 51, 80, 90}, 5, 3);
 	expect("A024 0.1.2.87, 1:71% 3:65%", {71, 94, 65, 61, 51, 80, 90}, 3, 3);
+	// Two threads at 81% are not "as good as three at 76%": see
+	// PAIR_COMFORT_PERCENT.
+	expect("A024 0.1.2.95, 2:81% 3:76%", {93, 81, 76, 70, 72, 80, 90}, 3, 3);
+	expect("8T, 2:80% 3:78%", {103, 80, 78, 80, 85, 90, 95}, 1, 3);
 	// The same patch on other days.
 	expect("A024 heavy, 0.1.2.66", {110, 95, 125, 130, 140, 150, 160}, 1, 2);
 	expect("A024 heavy, 0.1.2.69", {114, 100, 81, 68, 70, 75, 90}, 2, 4);

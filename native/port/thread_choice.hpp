@@ -71,9 +71,21 @@ struct ThreadChoice {
 	times before that one thread read between 68 and 77. With Workers the
 	callback spends most of each block waiting, and 65% on three was clean. */
 	static constexpr int32_t SOLO_COMFORT_PERCENT = 60;
+	/** And two threads only under this. The fewer the threads, the more of
+	the work is the callback's own and the less of each block it spends
+	asleep waiting: the same phone read 1:93% 2:81% 3:76%, was started on two
+	as "within five points of three", ran at 78% for eight seconds and then at
+	106% with the 96 ms holes, 450 underruns a second, until it was moved to
+	three -- where it ran clean at 81%. Seventy-five, not seventy: a Lenovo
+	TB-X306X is right on two threads at 70%. */
+	static constexpr int32_t PAIR_COMFORT_PERCENT = 75;
+
+	static int32_t comfortOf(int c) {
+		return c == 1 ? SOLO_COMFORT_PERCENT : c == 2 ? PAIR_COMFORT_PERCENT : COMFORT_PERCENT;
+	}
 
 	static bool fits(const int32_t* loads, int c) {
-		return loads[c] > 0 && loads[c] < (c == 1 ? SOLO_COMFORT_PERCENT : COMFORT_PERCENT);
+		return loads[c] > 0 && loads[c] < comfortOf(c);
 	}
 
 	/** The fewest comfortable count, or 0 where none is. */
@@ -82,10 +94,13 @@ struct ThreadChoice {
 		for (int c = floor; c <= top && comfy == 0; c++)
 			if (fits(loads, c))
 				comfy = c;
-		// A lower count within a few points wins -- but never one thread that
-		// is not comfortable by its own, stricter measure.
+		// A lower count within a few points wins, and may be those few points
+		// over the line for three threads and up (4:82% against 5:79% is four)
+		// -- but one thread or two only where comfortable by their own,
+		// stricter measure.
 		for (int c = floor; c < comfy; c++)
-			if (loads[c] > 0 && loads[c] <= loads[comfy] + NEAR_POINTS && (c > 1 || fits(loads, c)))
+			if (loads[c] > 0 && loads[c] <= loads[comfy] + NEAR_POINTS
+					&& loads[c] < comfortOf(c) + (c > 2 ? NEAR_POINTS : 0))
 				return c;
 		return comfy;
 	}
