@@ -154,6 +154,7 @@
 	<string name="modules_loaded">追加のモジュールパックを%1$d個読み込みました</string>
 	<string name="engine_maxed_out">このパッチはデバイスが全力を出しても足りないCPU性能を必要としています。パッチを簡略化するか、サンプルレートを下げてみてください。</string>
 	<string name="engine_near_limit">このパッチは端末の限界に近く、音が途切れ始めるかもしれません。パッチを軽くするか、サンプルレートを下げてください。</string>
+	<string name="engine_measuring">端末の性能を測定しています。まもなく音が出ます…</string>
 	<string name="engine_load_meter">エンジン負荷 %1$d%%</string>
 	<string name="engine_heavy_title">このパッチはこの端末には重すぎます</string>
 	<string name="engine_lower_rate">%1$s kHz に下げる</string>

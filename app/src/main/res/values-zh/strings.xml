@@ -154,6 +154,7 @@
 	<string name="modules_loaded">已加载 %1$d 个额外模块包</string>
 	<string name="engine_maxed_out">此补丁所需的 CPU 性能超过了设备满载时能提供的上限。请尝试简化补丁或降低采样率。</string>
 	<string name="engine_near_limit">此工程已接近设备的极限，可能开始出现爆音。请简化工程或降低采样率。</string>
+	<string name="engine_measuring">正在测量设备性能，声音即将开始…</string>
 	<string name="engine_load_meter">引擎负载 %1$d%%</string>
 	<string name="engine_heavy_title">此补丁对这台设备来说过重</string>
 	<string name="engine_lower_rate">降低到 %1$s kHz</string>

@@ -154,6 +154,7 @@
 	<string name="modules_loaded">%1$d paquet(s) de modules supplémentaires chargé(s)</string>
 	<string name="engine_maxed_out">Ce patch demande plus de CPU que votre appareil ne peut en fournir, même à pleine puissance. Essayez de le simplifier ou de baisser la fréquence d\'échantillonnage.</string>
 	<string name="engine_near_limit">Ce patch est proche de la limite de votre appareil : il peut se mettre à grésiller. Allégez-le ou baissez la fréquence d\'échantillonnage.</string>
+	<string name="engine_measuring">Mesure des performances de l\'appareil. Le son démarre dans un instant…</string>
 	<string name="engine_load_meter">Charge du moteur %1$d%%</string>
 	<string name="engine_heavy_title">Ce patch est lourd pour cet appareil</string>
 	<string name="engine_lower_rate">Baisser à %1$s kHz</string>

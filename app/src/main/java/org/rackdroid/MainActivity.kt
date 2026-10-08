@@ -1945,6 +1945,8 @@ class MainActivity : NativeActivity() {
 		}
 		buttonPopup?.dismiss()
 		buttonPopup = null
+		measuringPopup?.dismiss()
+		measuringPopup = null
 		audioFocusRequest?.let {
 			(getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.abandonAudioFocusRequest(it)
 		}
@@ -2081,6 +2083,12 @@ class MainActivity : NativeActivity() {
 		// 0 = the patch really is heavier than this device can manage. Telling
 		// the last two apart matters: "simplify your patch" is bad advice when
 		// the patch is fine and something else is the load.
+		// 4 and 5 are not advice: the engine is measuring the patch in silence
+		// (4), and has finished (5).
+		if (kind == 4 || kind == 5) {
+			uiHandler.post { runCatching { showMeasuring(kind == 4) } }
+			return
+		}
 		val res = when (kind) {
 			1 -> R.string.engine_thermal_throttled
 			2 -> R.string.engine_cpu_contended
@@ -2106,6 +2114,44 @@ class MainActivity : NativeActivity() {
 			return
 		}
 		showToastFromNative(getString(res))
+	}
+
+	private var measuringPopup: PopupWindow? = null
+
+	/** A card in the middle of the rack while the engine measures a patch in
+	silence, so that an app which opens without a sound for some seconds --
+	five on a Nothing A024 with a heavy patch, more on older devices -- is
+	seen to be doing something. It takes no touches, and takes itself down
+	after fifteen seconds whatever the engine says. */
+	private fun showMeasuring(on: Boolean) {
+		measuringPopup?.dismiss()
+		measuringPopup = null
+		if (!on || isFinishing || isDestroyed)
+			return
+		val row = LinearLayout(this).apply {
+			orientation = LinearLayout.HORIZONTAL
+			gravity = Gravity.CENTER_VERTICAL
+			setPadding(dp(18), dp(14), dp(20), dp(14))
+			background = GradientDrawable().apply {
+				cornerRadius = dp(20).toFloat()
+				setColor(AppTheme.withAlpha(AppTheme.current.surface, 92))
+				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+			}
+			addView(android.widget.ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(28), dp(28)))
+			addView(TextView(this@MainActivity).apply {
+				text = getString(R.string.engine_measuring)
+				setTextColor(AppTheme.current.textPrimary)
+				textSize = 15f
+				setPadding(dp(14), 0, 0, 0)
+				maxWidth = dp(260)
+			})
+		}
+		val popup = PopupWindow(row, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+		popup.isTouchable = false
+		popup.isFocusable = false
+		popup.showAtLocation(window.decorView, Gravity.CENTER, 0, 0)
+		measuringPopup = popup
+		uiHandler.postDelayed({ if (measuringPopup === popup) runCatching { showMeasuring(false) } }, 15000L)
 	}
 
 	/** "Ignore" on the heavy-patch notice: quiet until the next launch. */

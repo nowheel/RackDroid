@@ -544,6 +544,7 @@
 	<string name="modules_loaded">Caricati %1$d pack di moduli extra</string>
 	<string name="engine_maxed_out">Questa patch richiede più CPU di quanta il tuo device possa dare, anche al massimo. Prova a semplificarla o ad abbassare la frequenza di campionamento.</string>
 	<string name="engine_near_limit">Questa patch è vicina al limite del dispositivo: potrebbe iniziare a gracchiare. Alleggeriscila o abbassa la frequenza di campionamento.</string>
+	<string name="engine_measuring">Misuro le prestazioni del dispositivo. L\'audio parte tra un attimo…</string>
 	<string name="engine_load_meter">Carico del motore %1$d%%</string>
 	<string name="engine_heavy_title">Questa patch è pesante per questo dispositivo</string>
 	<string name="engine_lower_rate">Abbassa a %1$s kHz</string>

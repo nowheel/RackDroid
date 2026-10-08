@@ -549,6 +549,7 @@
 	<string name="modules_loaded">Loaded %1$d extra module pack(s)</string>
 	<string name="engine_maxed_out">This patch needs more CPU than your device can give, even at full power. Try simplifying it or lowering the sample rate.</string>
 	<string name="engine_near_limit">This patch is close to what your device can do: it may start to crackle. Lighten it or lower the sample rate.</string>
+	<string name="engine_measuring">Measuring what this device can do. Sound starts in a moment…</string>
 	<string name="engine_load_meter">Engine load %1$d%%</string>
 	<string name="engine_heavy_title">This patch is heavy for this device</string>
 	<string name="engine_lower_rate">Lower to %1$s kHz</string>

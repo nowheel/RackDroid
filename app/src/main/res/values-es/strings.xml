@@ -154,6 +154,7 @@
 	<string name="modules_loaded">Se han cargado %1$d paquete(s) de módulos adicionales</string>
 	<string name="engine_maxed_out">Este patch necesita más CPU de la que tu dispositivo puede dar, incluso a máxima potencia. Prueba a simplificarlo o a bajar la frecuencia de muestreo.</string>
 	<string name="engine_near_limit">Este parche está cerca del límite de tu dispositivo: puede empezar a crepitar. Simplifícalo o baja la frecuencia de muestreo.</string>
+	<string name="engine_measuring">Midiendo el rendimiento del dispositivo. El sonido empieza enseguida…</string>
 	<string name="engine_load_meter">Carga del motor %1$d%%</string>
 	<string name="engine_heavy_title">Este patch es pesado para este dispositivo</string>
 	<string name="engine_lower_rate">Bajar a %1$s kHz</string>

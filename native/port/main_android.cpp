@@ -1597,6 +1597,7 @@ static void checkThreadCount() {
 	static int sweepVerifyOf = 0;
 	static int sweepVerifies = 0;
 	static bool sweepRecovering = false;
+	static bool sweepSaid = false; // the "measuring" card is up
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	// And so is a different engine sample rate: at half the rate the same patch
@@ -1792,6 +1793,13 @@ static void checkThreadCount() {
 		sweepSliceAt = now;
 		if (next > 0) {
 			sweepCount++;
+			// More than one count to look at: seconds of silence, on a slow
+			// device several, and an app that opens silent looks broken.
+			// Say what is going on; Java takes the card down on notice 5.
+			if (!sweepSaid) {
+				sweepSaid = true;
+				rackdroid::showEngineNotice(4);
+			}
 			settings::threadCount = next;
 			return;
 		}
@@ -1835,6 +1843,10 @@ static void checkThreadCount() {
 			}
 		}
 		sweepWanted = false;
+		if (sweepSaid) {
+			sweepSaid = false;
+			rackdroid::showEngineNotice(5);
+		}
 		sweepConfirming = false;
 		sweepVerifyOf = 0;
 		sweepVerifies = 0;
@@ -2207,6 +2219,10 @@ static void checkThreadCount() {
 		sweepSlices = 0;
 		sweepSliceAt = now;
 		settledAt = -1;
+		if (!sweepSaid) {
+			sweepSaid = true;
+			rackdroid::showEngineNotice(4);
+		}
 		rackdroid::audioWarmupBegin();
 	};
 	int measuredCounts = 0;
