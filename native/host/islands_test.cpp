@@ -193,9 +193,41 @@ int main() {
 	for (int threads : {1, 2, 4}) {
 		double off = 0.0, on = 0.0;
 		run(12, 44, false, false, threads, 500, &off);
+		uint32_t before = rackdroid::engineIslandsByWorkers;
 		run(12, 44, false, true, threads, 500, &on);
+		uint32_t byWorkers = rackdroid::engineIslandsByWorkers - before;
+		// Same output proves nothing about who did the work: with the Workers
+		// lost the caller does it all and the samples are still right.
+		if (threads > 1 && byWorkers < 500) {
+			std::printf("FAIL: %d threads, and the Workers stepped %u islands of some 5000\n", threads, byWorkers);
+			return 1;
+		}
 		std::printf("12 islands of 44, %d thread%s: Rack's loop %.0f ms, islands %.0f ms for 1000 ms of audio (%.2fx)\n",
 			threads, threads > 1 ? "s" : "", off, on, off / on);
+	}
+	{
+		// And after the thread count has changed under it, which is where
+		// they were lost.
+		rackdroid::engineIslandsOn = true;
+		settings::threadCount = 2;
+		Patch p = build(12, 20, 40, false);
+		for (int b = 0; b < 60; b++)
+			p.engine->stepBlock(96);
+		settings::threadCount = 4;
+		for (int b = 0; b < 60; b++)
+			p.engine->stepBlock(96);
+		uint32_t before = rackdroid::engineIslandsByWorkers;
+		bool used = rackdroid::engineIslandsUsed > 0;
+		for (int b = 0; b < 200; b++)
+			p.engine->stepBlock(96);
+		uint32_t byWorkers = rackdroid::engineIslandsByWorkers - before;
+		delete p.engine;
+		APP->engine = NULL;
+		if (used && byWorkers < 200) {
+			std::printf("FAIL: after going from 2 threads to 4 the Workers stepped %u islands of 2400\n", byWorkers);
+			return 1;
+		}
+		std::printf("after a change of thread count the Workers stepped %u islands of 2400%s\n", byWorkers, used ? "" : " (Rack's loop was chosen)");
 	}
 	std::printf("OK\n");
 	return 0;

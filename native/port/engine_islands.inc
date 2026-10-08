@@ -71,6 +71,8 @@ struct EngineIslands {
 	std::atomic<uint32_t> generation{0};
 	std::atomic<uint32_t> sleepers{0};
 	std::atomic<bool> leave{false};
+	/** Workers that have arrived in EngineIslands_work since they were sent. */
+	std::atomic<int> entered{0};
 	/** The Workers are in EngineIslands_work, not at Rack's barriers. */
 	bool parked = false;
 	/** When this block opened, and how long its audio lasts (seconds). */
@@ -312,6 +314,8 @@ static void EngineIslands_run(Engine* that, int threadId) {
 		}
 		double took = system::getTime() - startTime;
 		island.cost = island.cost > 0.0 ? island.cost + 0.1 * (took - island.cost) : took;
+		if (threadId != 0)
+			rackdroid::engineIslandsByWorkers.fetch_add(1, std::memory_order_relaxed);
 		if (s.pending.fetch_sub(1, std::memory_order_acq_rel) == 1
 				&& s.callerSleeps.load(std::memory_order_acquire))
 			EngineIslands_futex(s.pending, FUTEX_WAKE_PRIVATE, 1);
@@ -335,6 +339,7 @@ measured reason (engine_barrier.hpp): a core left idle slows down. */
 static void EngineIslands_work(Engine* that, int threadId) {
 	EngineIslands& s = engineIslands;
 	uint32_t seen = s.generation.load(std::memory_order_acquire) - 1;
+	s.entered.fetch_add(1, std::memory_order_acq_rel);
 	while (true) {
 		int64_t start = 0;
 		for (unsigned i = 1; s.generation.load(std::memory_order_acquire) == seen; i++) {
@@ -453,8 +458,22 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	if (!s.parked) {
 		// Out of Rack's loop, once: the Workers are waiting at its barrier,
 		// and Engine_stepWorker sends them to EngineIslands_work to stay.
+		//
+		// `active` stays up until every one of them has read it. Taken down
+		// as soon as the barrier opened, a Worker that looked a moment later
+		// went into Rack's own step instead and then sat at Rack's second
+		// barrier for good: the engine ran on, on one thread, at 200% of the
+		// deadline whatever the thread count (TB-X306X, OnePlus 8T).
+		s.entered.store(0, std::memory_order_release);
 		s.active.store(true, std::memory_order_release);
 		internal->engineBarrier.wait();
+		while (s.entered.load(std::memory_order_acquire) < internal->threadCount - 1) {
+#if defined(__aarch64__)
+			__asm__ __volatile__("yield");
+#elif defined(__x86_64__) || defined(__i386__)
+			__builtin_ia32_pause();
+#endif
+		}
 		s.active.store(false, std::memory_order_release);
 		s.parked = true;
 	}

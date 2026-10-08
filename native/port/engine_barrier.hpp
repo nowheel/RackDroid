@@ -156,6 +156,9 @@ extern std::atomic<int> engineIslandCount;
 /** 1: the islands were timed against Rack's loop and are in use; -1: timed
 and not faster here; 0: one island, or still being timed. */
 extern std::atomic<int> engineIslandsUsed;
+/** Islands stepped by a Worker rather than by the thread driving the engine,
+ever. For the test: Workers that take none are Workers lost. */
+extern std::atomic<uint32_t> engineIslandsByWorkers;
 
 
 } // namespace rackdroid

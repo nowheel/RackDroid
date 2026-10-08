@@ -14,6 +14,7 @@ at a time, and how many the patch in the engine has (1: Rack's own path). */
 std::atomic<bool> engineIslandsOn{true};
 std::atomic<int> engineIslandCount{0};
 std::atomic<int> engineIslandsUsed{0};
+std::atomic<uint32_t> engineIslandsByWorkers{0};
 
 
 /** Cores the Workers may run on, one bit each; 0 until someone has decided. */
