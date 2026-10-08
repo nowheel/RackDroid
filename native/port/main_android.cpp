@@ -963,6 +963,13 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				if (i == -1)
 					err = errno;
 				g_audioCpusGivenUp |= (uint64_t) 1 << cpu;
+				// A core that refuses is a core lost, as of now: without the
+				// time, "fifteen seconds after it was lost" was at once, the
+				// try failed, and the next was a minute away -- past the
+				// unlock it was wanted for, on a Nothing A024.
+				g_audioCpuLostAt = system::getTime();
+				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
+					g_audioCpuRetryAfter = 15.0;
 			}
 		}
 		// Every core given up is not the end of it. "Not asked again" is for a
