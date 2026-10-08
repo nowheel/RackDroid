@@ -716,14 +716,6 @@ static void applyWorkerPriority(const std::vector<int>& workers) {
 got -- -1 when no core would take it. */
 static int g_pinnedAudioTid = 0;
 static int g_pinnedAudioCpu = -1;
-/** A second core the callback may use, or -1: the next fastest. One core was
-all it was given, and a thread with one core has nowhere to go when that core
-is taken from under it -- stopped for cooling, or halted as the screen comes
-back. On a Nothing A024 that read as a 95 ms hole every 1.35 s whenever the
-callback filled cpu7, and as the kernel throwing the mask away altogether at
-an unlock, 500 underruns a second for some seconds after. With a second core
-allowed both are a migration. No Worker may use either. */
-static int g_audioCompanionCpu = -1;
 /** There is a core to give it at all (more than two cores). */
 static bool g_audioPinWanted = false;
 /** Cores that refused the callback or let go of it, one bit each: not asked
@@ -772,9 +764,7 @@ static bool audioStillPinned() {
 	CPU_ZERO(&mask);
 	if (sched_getaffinity(tid, sizeof(mask), &mask) != 0)
 		return false;
-	bool companion = g_audioCompanionCpu >= 0 && g_audioCompanionCpu != g_pinnedAudioCpu;
-	return CPU_COUNT(&mask) == (companion ? 2 : 1) && CPU_ISSET(g_pinnedAudioCpu, &mask)
-		&& (!companion || CPU_ISSET(g_audioCompanionCpu, &mask));
+	return CPU_COUNT(&mask) == 1 && CPU_ISSET(g_pinnedAudioCpu, &mask);
 }
 
 
@@ -793,8 +783,7 @@ static bool workersLoose(const std::vector<int>& workers) {
 	for (int tid : workers) {
 		cpu_set_t mask;
 		CPU_ZERO(&mask);
-		if (sched_getaffinity(tid, sizeof(mask), &mask) == 0 && (CPU_ISSET(g_pinnedAudioCpu, &mask)
-				|| (g_audioCompanionCpu >= 0 && CPU_ISSET(g_audioCompanionCpu, &mask))))
+		if (sched_getaffinity(tid, sizeof(mask), &mask) == 0 && CPU_ISSET(g_pinnedAudioCpu, &mask))
 			return true;
 	}
 	return false;
@@ -911,18 +900,13 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	int reservedCpu = pickReservedCpu(cores);
 	int audioCpu = pickAudioCpu(cores, reservedCpu);
 	g_audioPinWanted = audioCpu >= 0;
-	// The next fastest after it, where there are cores to spare: with fewer
-	// than six a second core for the callback is one the Workers need more.
-	if (audioCpu >= 0 && cores >= 6 && g_audioCompanionCpu < 0) {
-		long best = -1;
-		for (int cpu = 0; cpu < cores; cpu++) {
-			long freq = (cpu == reservedCpu || cpu == audioCpu) ? -1 : cpuMaxFreq(cpu);
-			if (freq >= best && freq > 0) {
-				best = freq;
-				g_audioCompanionCpu = cpu;
-			}
-		}
-	}
+	// One core, not two. A second, the next fastest, was tried on the advice
+	// that a thread with one core has nowhere to go when that core is stopped:
+	// on a Nothing A024 the callback then sat on the second (the scheduler has
+	// no reason to prefer the prime), the Workers lost their best core to it,
+	// three threads went from 65-75% of the deadline to 78-94%, and a mask of
+	// two reads back as one while either core is halted, which the check
+	// below took for a lost pin four times a second.
 
 	// The callback first: it is the thread the Workers must never meet. Redone
 	// whenever it is not where it was put -- a reopened stream brings a new
@@ -971,8 +955,6 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 			cpu_set_t audioMask;
 			CPU_ZERO(&audioMask);
 			CPU_SET(cpu, &audioMask);
-			if (g_audioCompanionCpu >= 0)
-				CPU_SET(g_audioCompanionCpu, &audioMask);
 			if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
 				g_pinnedAudioCpu = cpu;
 				pinnedAt = system::getTime();
@@ -1015,7 +997,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	for (int cpu = 0; cpu < cores; cpu++) {
-		if (cpu != reservedCpu && cpu != audioCpu && (audioCpu < 0 || cpu != g_audioCompanionCpu))
+		if (cpu != reservedCpu && cpu != audioCpu)
 			CPU_SET(cpu, &mask);
 	}
 	// Workers launched from now on take this mask as they start, instead of
@@ -2572,8 +2554,10 @@ static void checkThreadCount() {
 		for (int i = floorCount; overWindows >= 2 && fits < 0 && i <= ceiling
 				&& i <= MAX_TRACKED_THREADS; i++)
 			if (i != current && loads[i] > 0
-					&& loads[i] < OVERLOAD_PERCENT && loads[i] + 10 < loadMean)
+					&& loads[i] < rackdroid::ThreadChoice::FEWER_FITS_PERCENT && loads[i] + 10 < loadMean)
 				fits = i;
+		// With room, that is: the fewest under 100 sent a Nothing A024 from
+		// five threads at 140% to two that had measured 99%, past three at 80.
 		// The measurement stops at the first count that fits, so it may have
 		// seen two of them; before calling the patch too heavy, see the rest.
 		int countsThere = ceiling - floorCount + 1;
