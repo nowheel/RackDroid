@@ -23,6 +23,13 @@
  * A patch that is one island (everything cabled to one mixer) gains nothing
  * and takes Rack's own path, untouched.
  *
+ * Nor is it always a gain with several: a 45-module island beside a 1-module
+ * one leaves one thread with all the work, where Rack's loop would have shared
+ * it (a TB-X306X went from 42% of its deadline to 59%). Since both ways give
+ * the same samples, the engine can change between them from one block to the
+ * next with nothing to hear, so it times a few dozen blocks of each whenever
+ * the patch or the thread count changes and keeps the quicker.
+ *
  * What does differ, by at most one block: Engine::getFrame() read from inside
  * process() stays at the block's first frame (ProcessArgs::frame is right),
  * and anything modules of different islands share behind the engine's back --
@@ -32,6 +39,7 @@
 
 template <class TCables>
 static void Engine_stepCablesOf(TCables& cablesOf);
+static void Engine_stepFrame(Engine* that);
 
 
 struct EngineIsland {
@@ -54,6 +62,11 @@ struct EngineIslands {
 	std::map<Module*, int> islandOf;
 	int frames = 0;
 	int smoothIsland = -1;
+	/** Which way is faster for this patch on this many threads is measured,
+	not guessed: TRIAL_BLOCKS of each, then the quicker one. */
+	int trialBlock = 0;
+	double trialTime[2] = {};
+	bool useIslands = true;
 	std::atomic<bool> active{false};
 };
 static EngineIslands engineIslands;
@@ -260,8 +273,10 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		EngineIslands_build(internal);
 		s.threads = 0;
 	}
-	if (s.islands.size() < 2)
+	if (s.islands.size() < 2) {
+		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
 		return false;
+	}
 
 	int threads = std::max(internal->threadCount, 1);
 	double worst = 0.0;
@@ -269,6 +284,8 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		s.groups = EngineIslands_share(threads, &worst);
 		s.threads = threads;
 		s.blocksSinceBalance = 0;
+		s.trialBlock = 0;
+		s.trialTime[0] = s.trialTime[1] = 0.0;
 	}
 	else if (++s.blocksSinceBalance >= 256) {
 		// Islands do not cost what their size says, and what they cost moves.
@@ -280,6 +297,18 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 			s.groups = groups;
 	}
 
+	// The trial: islands, then Rack's loop, the first blocks of each left out
+	// while caches and Workers settle.
+	static const int TRIAL_BLOCKS = 24;
+	static const int TRIAL_SKIP = 4;
+	bool trial = s.trialBlock < 2 * TRIAL_BLOCKS;
+	bool islandsNow = trial ? s.trialBlock < TRIAL_BLOCKS : s.useIslands;
+	double trialStart = trial ? system::getTime() : 0.0;
+	if (!islandsNow) {
+		for (int f = 0; f < frames; f++)
+			Engine_stepFrame(that);
+	}
+	else {
 	s.frames = frames;
 	s.smoothIsland = -1;
 	if (internal->smoothModule) {
@@ -295,5 +324,16 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	s.active.store(false, std::memory_order_release);
 
 	internal->frame += frames;
+	}
+	if (trial) {
+		int which = s.trialBlock / TRIAL_BLOCKS;
+		if (s.trialBlock % TRIAL_BLOCKS >= TRIAL_SKIP)
+			s.trialTime[which] += system::getTime() - trialStart;
+		if (++s.trialBlock == 2 * TRIAL_BLOCKS) {
+			// Rack's own loop on a tie: it is the one everybody else runs.
+			s.useIslands = s.trialTime[0] < 0.95 * s.trialTime[1];
+			rackdroid::engineIslandsUsed.store(s.useIslands ? 1 : -1, std::memory_order_relaxed);
+		}
+	}
 	return true;
 }

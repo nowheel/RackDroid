@@ -1741,14 +1741,20 @@ static int32_t callbackCoreSpeed() {
 
 static void checkThreadCount() {
 	{
-		static int saidIslands = -1;
+		static int saidIslands = -1, saidUsed = 0;
 		int islands = rackdroid::engineIslandCount.load(std::memory_order_relaxed);
-		if (islands != saidIslands && islands > 0) {
+		int used = rackdroid::engineIslandsUsed.load(std::memory_order_relaxed);
+		if ((islands != saidIslands || used != saidUsed) && islands > 0 && (islands == 1 || used != 0)) {
 			saidIslands = islands;
-			if (islands > 1)
-				LOGI("Engine: this patch is %d independent parts; each is stepped a block at a time by one thread", islands);
-			else
+			saidUsed = used;
+			if (islands == 1)
 				LOGI("Engine: this patch is one connected part; stepped a sample at a time by all threads");
+			else if (used > 0)
+				LOGI("Engine: this patch is %d independent parts; timed both ways at %d threads, and "
+					"stepping each part a block at a time is the quicker", islands, settings::threadCount);
+			else
+				LOGI("Engine: this patch is %d independent parts; timed both ways at %d threads, and "
+					"Rack's sample-at-a-time loop is the quicker", islands, settings::threadCount);
 		}
 	}
 	static const double WINDOW_SEC = 5.0;

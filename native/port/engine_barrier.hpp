@@ -153,6 +153,9 @@ void engineSetWorkerCpus(uint64_t mask);
 Rack's own per-sample path is in use. */
 extern std::atomic<bool> engineIslandsOn;
 extern std::atomic<int> engineIslandCount;
+/** 1: the islands were timed against Rack's loop and are in use; -1: timed
+and not faster here; 0: one island, or still being timed. */
+extern std::atomic<int> engineIslandsUsed;
 
 
 } // namespace rackdroid
