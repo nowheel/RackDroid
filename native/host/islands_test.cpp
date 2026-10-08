@@ -131,9 +131,9 @@ static std::vector<float> run(int islands, int size, bool bridge, bool on, int t
 			p.engine->setParamSmoothValue(p.voices[p.voices.size() / 2], 0, 7.f);
 		// The thread count changed under it, as the tuner does, and back:
 		// the Workers have to be handed to Rack's barriers and taken again.
-		if (!ms && b == 20)
+		if (!ms && b == 80)
 			settings::threadCount = threads % 4 + 1;
-		if (!ms && b == 35)
+		if (!ms && b == 100)
 			settings::threadCount = threads;
 		p.engine->stepBlock(96);
 	}
@@ -174,10 +174,10 @@ int main() {
 	int checked = 0;
 	struct Shape { int islands, size; bool bridge; };
 	for (Shape s : {Shape{1, 6, false}, {2, 5, false}, {4, 7, false}, {4, 7, true}, {12, 3, false}, {5, 1, false}}) {
-		std::vector<float> want = run(s.islands, s.size, s.bridge, false, 1, 50, NULL);
+		std::vector<float> want = run(s.islands, s.size, s.bridge, false, 1, 150, NULL);
 		for (int threads = 1; threads <= 4; threads++) {
 			for (bool on : {false, true}) {
-				std::vector<float> got = run(s.islands, s.size, s.bridge, on, threads, 50, NULL);
+				std::vector<float> got = run(s.islands, s.size, s.bridge, on, threads, 150, NULL);
 				if (got.size() != want.size() || std::memcmp(got.data(), want.data(), got.size() * sizeof(float)) != 0) {
 					std::printf("FAIL: %d chains of %d%s, %d threads, islands %s: not what one thread of Rack's own loop gives\n",
 						s.islands, s.size, s.bridge ? " bridged" : "", threads, on ? "on" : "off");

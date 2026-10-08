@@ -51,6 +51,14 @@ struct EngineIsland {
 };
 
 
+/** Blocks stepped as islands before the two ways are timed. Workers just
+launched have neither their priority nor their cores yet (main_android.cpp
+gives them within a twentieth of a second), and timed in that state the islands
+lost to Rack's loop on a TB-X306X at thread counts where they are twice as
+fast; the silent measurement then read Rack's loop and chose the wrong count. */
+static const int TRIAL_WARM_BLOCKS = 64;
+
+
 struct EngineIslands {
 	Engine* owner = NULL;
 	uint64_t signature = 0;
@@ -88,7 +96,7 @@ struct EngineIslands {
 	int smoothIsland = -1;
 	/** Which way is faster for this patch on this many threads is measured,
 	not guessed: TRIAL_BLOCKS of each, then the quicker one. */
-	int trialBlock = 0;
+	int trialBlock = -TRIAL_WARM_BLOCKS;
 	double trialTime[2] = {};
 	bool useIslands = true;
 	std::atomic<bool> active{false};
@@ -417,7 +425,7 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	if (threads != s.threads) {
 		s.threads = threads;
 		s.blocksSinceBalance = 0;
-		s.trialBlock = 0;
+		s.trialBlock = -TRIAL_WARM_BLOCKS;
 		s.trialTime[0] = s.trialTime[1] = 0.0;
 		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
 		EngineIslands_sort();
@@ -435,6 +443,11 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	bool trial = s.trialBlock < 2 * TRIAL_BLOCKS;
 	bool islandsNow = trial ? s.trialBlock < TRIAL_BLOCKS : s.useIslands;
 	double trialStart = trial ? system::getTime() : 0.0;
+	if (s.trialBlock < 0) {
+		// Not timed yet; see TRIAL_WARM_BLOCKS.
+		s.trialBlock++;
+		trial = false;
+	}
 	if (!islandsNow) {
 		EngineIslands_leave(that);
 		for (int f = 0; f < frames; f++)
