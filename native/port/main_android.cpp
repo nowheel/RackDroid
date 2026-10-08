@@ -736,7 +736,7 @@ there by the kernel for 95 ms every 1.35 s, and underrunning 500 times a
 second for as long as the session lasted. Asked again after fifteen seconds,
 then a minute, then four, so a core that really is gone costs three tries. */
 static double g_audioCpuLostAt = 0.0;
-static double g_audioCpuRetryAfter = 5.0;
+static double g_audioCpuRetryAfter = 2.0;
 /** When the best core was last asked for again. The growing wait is for a
 core that lets go again at once; one that kept the callback for half a minute
 and then lost it -- the next time the screen went off -- starts over at
@@ -969,7 +969,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				g_audioCpusGivenUp |= (uint64_t) 1 << before;
 				g_audioCpuLostAt = system::getTime();
 				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
-					g_audioCpuRetryAfter = 5.0;
+					g_audioCpuRetryAfter = 2.0;
 			}
 			else
 				again = true;
@@ -1005,7 +1005,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				// unlock it was wanted for, on a Nothing A024.
 				g_audioCpuLostAt = system::getTime();
 				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
-					g_audioCpuRetryAfter = 5.0;
+					g_audioCpuRetryAfter = 2.0;
 			}
 		}
 		// Every core given up is not the end of it. "Not asked again" is for a
@@ -1163,8 +1163,8 @@ static void checkWorkerPriority() {
 			// Asked for, not gone looking: if the best core still will not have
 			// the callback it stays exactly where it is. (Wiping the list and
 			// starting over moved it to yet another core when the best one
-			// refused, a burst of underruns for nothing.) After five seconds,
-			// then fifteen, a minute, four.
+			// refused, a burst of underruns for nothing.) After two seconds,
+			// then five, fifteen, a minute, four.
 			double lostFor = system::getTime() - g_audioCpuLostAt;
 			int cores = system::getLogicalCoreCount();
 			int best = pickAudioCpu(cores, pickReservedCpu(cores));
@@ -1174,7 +1174,12 @@ static void checkWorkerPriority() {
 				CPU_SET(best, &bestMask);
 			g_audioCpuLostAt = system::getTime();
 			g_audioCpuAskedAt = g_audioCpuLostAt;
-			g_audioCpuRetryAfter = g_audioCpuRetryAfter < 15.0 ? 15.0 : g_audioCpuRetryAfter * 4.0;
+			// Two seconds first: asking costs nothing when the answer is no, and
+			// every second on the other core is some 500 underruns on a patch
+			// at its limit (a Nothing A024, five seconds on cpu6 after an
+			// unlock: 2550 of them).
+			g_audioCpuRetryAfter = g_audioCpuRetryAfter < 5.0 ? 5.0
+				: g_audioCpuRetryAfter < 15.0 ? 15.0 : g_audioCpuRetryAfter * 4.0;
 			if (best >= 0 && sched_setaffinity(audioTid, sizeof(bestMask), &bestMask) == 0) {
 				LOGI("Engine: the audio callback is back on cpu%d, %.0fs after losing it", best, lostFor);
 				g_pinnedAudioCpu = best;
