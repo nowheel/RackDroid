@@ -2053,15 +2053,17 @@ class MainActivity : NativeActivity() {
 
 	/** Android's own throttling verdict (PowerManager.THERMAL_STATUS_*):
 	NONE=0, LIGHT=1, MODERATE=2, SEVERE=3, CRITICAL=4, EMERGENCY=5,
-	SHUTDOWN=6. Read synchronously like clipboardGet() above -- PowerManager
-	wants no particular thread, but posting through uiHandler keeps every
-	Android API call in this file on the one thread, which is one fewer thing
-	to get wrong. */
-	fun currentThermalStatus(): Int =
-		onUiBlocking("currentThermalStatus", 1000L, PowerManager.THERMAL_STATUS_NONE) {
-			val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-			pm?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
-		}
+	SHUTDOWN=6. Asked on the calling thread: PowerManager wants no particular
+	one. It used to go through the UI thread like clipboardGet() above, to keep
+	every Android call in one place -- and with the screen locked the UI thread
+	did not answer, so the engine's maintenance loop, which asks this when the
+	audio callback loses its core, stood still for a second at a time exactly
+	then. On a Nothing A024 that was two seconds with nobody putting the
+	threads back on their cores and 832 underruns behind a locked screen. */
+	fun currentThermalStatus(): Int = runCatching {
+		val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+		pm?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
+	}.getOrDefault(PowerManager.THERMAL_STATUS_NONE)
 
 	/** A one-off, non-blocking notice from native -- the same Toast the
 	module installer already uses for "Loaded N extra module pack(s)", so a
