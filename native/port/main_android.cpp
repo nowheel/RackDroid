@@ -735,7 +735,7 @@ there by the kernel for 95 ms every 1.35 s, and underrunning 500 times a
 second for as long as the session lasted. Asked again after fifteen seconds,
 then a minute, then four, so a core that really is gone costs three tries. */
 static double g_audioCpuLostAt = 0.0;
-static double g_audioCpuRetryAfter = 15.0;
+static double g_audioCpuRetryAfter = 5.0;
 /** When the best core was last asked for again. The growing wait is for a
 core that lets go again at once; one that kept the callback for half a minute
 and then lost it -- the next time the screen went off -- starts over at
@@ -933,7 +933,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				g_audioCpusGivenUp |= (uint64_t) 1 << before;
 				g_audioCpuLostAt = system::getTime();
 				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
-					g_audioCpuRetryAfter = 15.0;
+					g_audioCpuRetryAfter = 5.0;
 			}
 			else
 				again = true;
@@ -969,7 +969,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				// unlock it was wanted for, on a Nothing A024.
 				g_audioCpuLostAt = system::getTime();
 				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
-					g_audioCpuRetryAfter = 15.0;
+					g_audioCpuRetryAfter = 5.0;
 			}
 		}
 		// Every core given up is not the end of it. "Not asked again" is for a
@@ -1119,13 +1119,31 @@ static void checkWorkerPriority() {
 		// A core given up is asked for again once it has had time to come back.
 		if (g_audioCpusGivenUp != 0 && g_audioCpuRetryAfter <= 240.0
 				&& system::getTime() - g_audioCpuLostAt >= g_audioCpuRetryAfter) {
-			LOGI("Engine: asking again for the core the audio callback lost %.0fs ago",
-				system::getTime() - g_audioCpuLostAt);
-			g_audioCpusGivenUp = 0;
+			// Asked for, not gone looking: if the best core still will not have
+			// the callback it stays exactly where it is. (Wiping the list and
+			// starting over moved it to yet another core when the best one
+			// refused, a burst of underruns for nothing.) After five seconds,
+			// then fifteen, a minute, four.
+			double lostFor = system::getTime() - g_audioCpuLostAt;
+			int cores = system::getLogicalCoreCount();
+			int best = pickAudioCpu(cores, pickReservedCpu(cores));
+			cpu_set_t bestMask;
+			CPU_ZERO(&bestMask);
+			if (best >= 0)
+				CPU_SET(best, &bestMask);
 			g_audioCpuLostAt = system::getTime();
 			g_audioCpuAskedAt = g_audioCpuLostAt;
-			g_audioCpuRetryAfter *= 4.0;
-			g_audioRepinWanted = true;
+			g_audioCpuRetryAfter = g_audioCpuRetryAfter < 15.0 ? 15.0 : g_audioCpuRetryAfter * 4.0;
+			if (best >= 0 && sched_setaffinity(audioTid, sizeof(bestMask), &bestMask) == 0) {
+				LOGI("Engine: the audio callback is back on cpu%d, %.0fs after losing it", best, lostFor);
+				g_pinnedAudioCpu = best;
+				g_audioCpusGivenUp = 0;
+				g_audioRepinWanted = false;
+				applyWorkerAffinity(workers); // the Workers' masks follow it
+			}
+			else
+				LOGI("Engine: cpu%d still will not take the audio callback, %.0fs after losing it; "
+					"staying on cpu%d", best, lostFor, g_pinnedAudioCpu);
 		}
 		if (g_audioPinWanted && (g_audioRepinWanted || !audioStillPinned() || workersLoose(workers)))
 			applyWorkerAffinity(workers);
@@ -1467,7 +1485,7 @@ static uint32_t patchMemoKey() {
 static void patchMemoLoad() {
 	g_patchMemo = PatchMemo();
 	g_patchMemo.key = patchMemoKey();
-	FILE* f = std::fopen(asset::user("engine-patch-threads").c_str(), "r");
+	FILE* f = std::fopen(asset::user("engine-patch-threads-2").c_str(), "r");
 	if (!f)
 		return;
 	unsigned key = 0, bad = 0;
@@ -1485,7 +1503,7 @@ static void patchMemoLoad() {
 static void patchMemoSave() {
 	if (!g_patchMemo.key)
 		return;
-	std::string path = asset::user("engine-patch-threads");
+	std::string path = asset::user("engine-patch-threads-2");
 	std::string rest;
 	if (FILE* f = std::fopen(path.c_str(), "r")) {
 		unsigned key = 0, bad = 0;
@@ -1918,6 +1936,14 @@ static void checkThreadCount() {
 	// 111% for ten seconds longer when this covered the launch as well).
 	bool resuming = rackdroid::windowSecondsSinceSurfaceChange() < RESUME_GRACE_SEC
 		&& now > 2.0 * RESUME_GRACE_SEC;
+	// And for twenty seconds after the callback loses its core. What follows
+	// that is hundreds of underruns a second on whatever count is playing, and
+	// it is the core, not the count: a Nothing A024 started a patch on the
+	// three threads written down for it, lost cpu7 three seconds in, and had
+	// three threads written down as "did not hold", a measurement taken on the
+	// wrong core, and six threads -- until cpu7 came back by itself.
+	if (g_audioCpuLostAt > 0.0 && now - g_audioCpuLostAt < 20.0)
+		resuming = true;
 	if ((rackdroid::audioFocusDisturbed() || resuming) && !sweepWanted) {
 		windowStartedAt = now;
 		windowStartCount = total;
@@ -2284,7 +2310,9 @@ static void checkThreadCount() {
 	// the phone is not throttling: a count that held and was then pushed over,
 	// or one tried on a hot phone, says nothing about the patch.
 	auto leftEarly = [&]() {
-		if (now - heldSince < 60.0 && rackdroid::thermalStatus() < 2)
+		if (now - heldSince < 60.0 && rackdroid::thermalStatus() < 2
+				&& g_audioCpusGivenUp == 0
+				&& (g_audioCpuLostAt <= 0.0 || now - g_audioCpuLostAt > 30.0))
 			patchMemoBad(current);
 	};
 	static uint32_t stallsSeen = 0;
