@@ -469,6 +469,8 @@ static void handleCmdInner(RackDroidApp* rd, int32_t cmd) {
 		: cmd == APP_CMD_PAUSE ? "pause" : cmd == APP_CMD_STOP ? "stop" : NULL;
 	if (what && rd->rackStarted)
 		LOGI("App: %s", what);
+	if (cmd == APP_CMD_INIT_WINDOW || cmd == APP_CMD_RESUME)
+		rackdroid::adpfKick();
 	switch (cmd) {
 		case APP_CMD_INIT_WINDOW:
 			rd->startRack();
@@ -714,6 +716,14 @@ static void applyWorkerPriority(const std::vector<int>& workers) {
 got -- -1 when no core would take it. */
 static int g_pinnedAudioTid = 0;
 static int g_pinnedAudioCpu = -1;
+/** A second core the callback may use, or -1: the next fastest. One core was
+all it was given, and a thread with one core has nowhere to go when that core
+is taken from under it -- stopped for cooling, or halted as the screen comes
+back. On a Nothing A024 that read as a 95 ms hole every 1.35 s whenever the
+callback filled cpu7, and as the kernel throwing the mask away altogether at
+an unlock, 500 underruns a second for some seconds after. With a second core
+allowed both are a migration. No Worker may use either. */
+static int g_audioCompanionCpu = -1;
 /** There is a core to give it at all (more than two cores). */
 static bool g_audioPinWanted = false;
 /** Cores that refused the callback or let go of it, one bit each: not asked
@@ -734,6 +744,12 @@ second for as long as the session lasted. Asked again after fifteen seconds,
 then a minute, then four, so a core that really is gone costs three tries. */
 static double g_audioCpuLostAt = 0.0;
 static double g_audioCpuRetryAfter = 15.0;
+/** When the best core was last asked for again. The growing wait is for a
+core that lets go again at once; one that kept the callback for half a minute
+and then lost it -- the next time the screen went off -- starts over at
+fifteen seconds, or the third unlock of a session would have been the last
+time it was asked. */
+static double g_audioCpuAskedAt = -1e9;
 static bool g_audioRepinWanted = false;
 
 /** True while the callback thread is still on the one core it was given.
@@ -756,7 +772,9 @@ static bool audioStillPinned() {
 	CPU_ZERO(&mask);
 	if (sched_getaffinity(tid, sizeof(mask), &mask) != 0)
 		return false;
-	return CPU_COUNT(&mask) == 1 && CPU_ISSET(g_pinnedAudioCpu, &mask);
+	bool companion = g_audioCompanionCpu >= 0 && g_audioCompanionCpu != g_pinnedAudioCpu;
+	return CPU_COUNT(&mask) == (companion ? 2 : 1) && CPU_ISSET(g_pinnedAudioCpu, &mask)
+		&& (!companion || CPU_ISSET(g_audioCompanionCpu, &mask));
 }
 
 
@@ -775,7 +793,8 @@ static bool workersLoose(const std::vector<int>& workers) {
 	for (int tid : workers) {
 		cpu_set_t mask;
 		CPU_ZERO(&mask);
-		if (sched_getaffinity(tid, sizeof(mask), &mask) == 0 && CPU_ISSET(g_pinnedAudioCpu, &mask))
+		if (sched_getaffinity(tid, sizeof(mask), &mask) == 0 && (CPU_ISSET(g_pinnedAudioCpu, &mask)
+				|| (g_audioCompanionCpu >= 0 && CPU_ISSET(g_audioCompanionCpu, &mask))))
 			return true;
 	}
 	return false;
@@ -892,6 +911,18 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	int reservedCpu = pickReservedCpu(cores);
 	int audioCpu = pickAudioCpu(cores, reservedCpu);
 	g_audioPinWanted = audioCpu >= 0;
+	// The next fastest after it, where there are cores to spare: with fewer
+	// than six a second core for the callback is one the Workers need more.
+	if (audioCpu >= 0 && cores >= 6 && g_audioCompanionCpu < 0) {
+		long best = -1;
+		for (int cpu = 0; cpu < cores; cpu++) {
+			long freq = (cpu == reservedCpu || cpu == audioCpu) ? -1 : cpuMaxFreq(cpu);
+			if (freq >= best && freq > 0) {
+				best = freq;
+				g_audioCompanionCpu = cpu;
+			}
+		}
+	}
 
 	// The callback first: it is the thread the Workers must never meet. Redone
 	// whenever it is not where it was put -- a reopened stream brings a new
@@ -906,6 +937,8 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 		if (before >= 0 && !repin) {
 			g_audioCpusGivenUp |= (uint64_t) 1 << before;
 			g_audioCpuLostAt = system::getTime();
+			if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
+				g_audioCpuRetryAfter = 15.0;
 		}
 		g_pinnedAudioTid = audioTid;
 		g_pinnedAudioCpu = -1;
@@ -921,6 +954,8 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 			cpu_set_t audioMask;
 			CPU_ZERO(&audioMask);
 			CPU_SET(cpu, &audioMask);
+			if (g_audioCompanionCpu >= 0)
+				CPU_SET(g_audioCompanionCpu, &audioMask);
 			if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
 				g_pinnedAudioCpu = cpu;
 			}
@@ -962,7 +997,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
 	for (int cpu = 0; cpu < cores; cpu++) {
-		if (cpu != reservedCpu && cpu != audioCpu)
+		if (cpu != reservedCpu && cpu != audioCpu && (audioCpu < 0 || cpu != g_audioCompanionCpu))
 			CPU_SET(cpu, &mask);
 	}
 	// Workers launched from now on take this mask as they start, instead of
@@ -1047,6 +1082,15 @@ static void checkWorkerPriority() {
 	int audioTid = rackdroid::audioCallbackThreadTid();
 	if (audioTid > 0 && audioTid != lastAudioTid) {
 		lastAudioTid = audioTid;
+		// A core at half speed under a SCHED_FIFO thread is not what the
+		// kernel does by default; so say what the thread actually is.
+		int policy = sched_getscheduler(audioTid);
+		sched_param sp = {};
+		sched_getparam(audioTid, &sp);
+		LOGI("Engine: the audio callback thread is %s, priority %d",
+			policy == SCHED_FIFO ? "SCHED_FIFO" : policy == SCHED_RR ? "SCHED_RR"
+			: policy == SCHED_OTHER ? "SCHED_OTHER (not real-time)" : "of another class",
+			sp.sched_priority);
 		if (applyAt <= 0.0)
 			applyAt = system::getTime();
 	}
@@ -1066,6 +1110,7 @@ static void checkWorkerPriority() {
 				system::getTime() - g_audioCpuLostAt);
 			g_audioCpusGivenUp = 0;
 			g_audioCpuLostAt = system::getTime();
+			g_audioCpuAskedAt = g_audioCpuLostAt;
 			g_audioCpuRetryAfter *= 4.0;
 			g_audioRepinWanted = true;
 		}
@@ -1406,7 +1451,13 @@ static void checkAdpfTarget() {
 	// 1:111% 2:93% 3:79% and 1:114% 2:100% 3:81% without. What holds the load
 	// where it is turned out to be the frequency governor (see
 	// callbackCoreSpeed below), not this.
-	int64_t nanos = (int64_t) (block / (double) rate * 1e9);
+	// Seventy percent, tried again: the session boosts only work that runs
+	// past its target, so told "the whole deadline" it has nothing to do for a
+	// patch at 65-75% -- and when 60% was tried the session was hearing a
+	// report only when the load moved by a tenth, which is to say hardly ever
+	// (see adpfReportNanos). With a report every tenth of a second the same
+	// experiment is a different one.
+	int64_t nanos = (int64_t) (block / (double) rate * 1e9 * 0.7);
 	if (nanos == lastNanos)
 		return;
 	lastNanos = nanos;
@@ -1818,6 +1869,8 @@ static void checkThreadCount() {
 			// the callback then waited for its Workers all the time.
 			static int32_t carriedFrom = 0;
 			static double carriedStepAt = -1.0;
+			static uint32_t sliceStalls = 0;
+			static int32_t sliceUnderruns = 0;
 			if (sweepSlices == 0 && carriedStepAt != sweepStepAt) {
 				carriedStepAt = sweepStepAt;
 				if (total > carriedFrom) {
@@ -1825,6 +1878,8 @@ static void checkThreadCount() {
 						"underruns in it is not counted", settings::threadCount, slice,
 						(int) (total - carriedFrom));
 					carriedFrom = total;
+					sliceUnderruns = total;
+					sliceStalls = rackdroid::audioWaitedStalls();
 					sweepSum = 0;
 					sweepCallbacks = 0;
 					sweepSliceAt = now;
@@ -1838,8 +1893,6 @@ static void checkThreadCount() {
 			// Which slice a stall fell in is otherwise lost: the reading is
 			// the worst of them, and three threads on one patch have read
 			// anything from 62% to 85% on a Nothing A024.
-			static uint32_t sliceStalls = 0;
-			static int32_t sliceUnderruns = 0;
 			uint32_t stallsNow = rackdroid::audioWaitedStalls();
 			LOGI("Engine: measuring %d threads, slice %d: %d%% over %d callbacks, "
 				"%u of them held up waiting for a Worker, %d underruns since the last slice",
@@ -2448,8 +2501,12 @@ static void checkThreadCount() {
 		// Nothing A024 sat in that for twenty-eight seconds, 530 underruns a
 		// second, with nothing here taking any notice.
 		floodWindows = (!touched && underruns >= 500) ? floodWindows + 1 : 0;
-		if (floodWindows >= 3 && mayMeasure) {
+		// Once, and not again for five minutes: if measuring did not end it,
+		// measuring again will not, and each time is seconds of silence.
+		static double floodMeasuredAt = -1e9;
+		if (floodWindows >= 3 && mayMeasure && now - floodMeasuredAt >= 300.0) {
 			floodWindows = 0;
+			floodMeasuredAt = now;
 			measureAgain("three windows running");
 			return;
 		}

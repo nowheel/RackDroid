@@ -23,6 +23,7 @@
 #include <thread>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <cmath>
 
 #include <jni.h>
@@ -411,7 +412,33 @@ struct SlowCallback {
 	int8_t cpuStart, cpuEnd;
 	int8_t phaseStart, phaseEnd;
 	int32_t threads;    // settings::threadCount at the time
+	int32_t noCoreUs;   // runnable and not run: see threadRunDelayNs()
 };
+
+/** How long this thread has been runnable without a core to run on, in ns,
+from /proc/thread-self/schedstat; -1 where it cannot be read. What tells a
+callback that slept (waiting for a Worker, or blocked in the kernel) from one
+that was ready to run and was not let: a core stopped under it, or the
+kernel's limit on real-time threads. Both read the same from outside -- wall
+time and no CPU time. The file is opened once per thread and read with one
+pread; neither blocks. */
+static int64_t threadRunDelayNs() {
+	static thread_local int fd = -1;
+	if (fd == -1) {
+		fd = open("/proc/thread-self/schedstat", O_RDONLY | O_CLOEXEC);
+		if (fd < 0)
+			fd = -2;
+	}
+	if (fd < 0)
+		return -1;
+	char buf[96];
+	ssize_t n = pread(fd, buf, sizeof(buf) - 1, 0);
+	if (n <= 0)
+		return -1;
+	buf[n] = 0;
+	const char* p = std::strchr(buf, ' ');
+	return p ? (int64_t) std::strtoll(p + 1, NULL, 10) : -1;
+}
 static const int SLOW_RING = 32;
 static SlowCallback g_slowRing[SLOW_RING];
 static std::atomic<uint32_t> g_slowWrite{0};
@@ -460,9 +487,9 @@ int audioReportSlowCallbacks() {
 		budget--;
 		written++;
 		AUDIO_WARN("Oboe: slow callback at %.3f: %.1f ms wall (%d%% of the deadline), "
-			"%.1f ms cpu, switches %d voluntary / %d involuntary, cpu%d->cpu%d, "
-			"render %s->%s, %d threads",
-			c.at, c.wallUs / 1000.0, c.percent, c.cpuUs / 1000.0,
+			"%.1f ms cpu, %.1f ms ready with no core, switches %d voluntary / %d involuntary, "
+			"cpu%d->cpu%d, render %s->%s, %d threads",
+			c.at, c.wallUs / 1000.0, c.percent, c.cpuUs / 1000.0, c.noCoreUs / 1000.0,
 			c.volSwitches, c.involSwitches, c.cpuStart, c.cpuEnd,
 			windowPhaseName(c.phaseStart), windowPhaseName(c.phaseEnd), c.threads);
 	}
@@ -1177,7 +1204,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	// oboe::AudioStreamDataCallback
 
 	static void recordSlowCallback(int64_t elapsed, int32_t percent, const timespec& cpu0,
-			const rusage& ru0, int cpuStart, int phaseStart) {
+			const rusage& ru0, int cpuStart, int phaseStart, int64_t delay0) {
 		timespec cpu1;
 		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu1);
 		rusage ru1;
@@ -1196,6 +1223,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		c.phaseStart = (int8_t) phaseStart;
 		c.phaseEnd = (int8_t) windowPhase();
 		c.threads = rack::settings::threadCount;
+		int64_t delay1 = threadRunDelayNs();
+		c.noCoreUs = (delay0 >= 0 && delay1 >= delay0) ? (int32_t) ((delay1 - delay0) / 1000) : -1;
 		g_slowWrite.store(w + 1, std::memory_order_release);
 		if (percent >= WAITED_STALL_PERCENT && c.cpuUs * 2 < c.wallUs && c.threads > 1)
 			g_waitedStalls.fetch_add(1, std::memory_order_relaxed);
@@ -1320,6 +1349,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		getrusage(RUSAGE_THREAD, &ru0);
 		int cpuStart = sched_getcpu();
 		g_callbackCpu.store(cpuStart, std::memory_order_relaxed);
+		int64_t delay0 = threadRunDelayNs();
 		int phaseStart = windowPhase();
 
 		const float* input = NULL;
@@ -1400,7 +1430,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 				std::memory_order_relaxed);
 			g_loadCount.fetch_add(1, std::memory_order_relaxed);
 			if (percent >= SLOW_CALLBACK_PERCENT)
-				recordSlowCallback(elapsed, percent, cpu0, ru0, cpuStart, phaseStart);
+				recordSlowCallback(elapsed, percent, cpu0, ru0, cpuStart, phaseStart, delay0);
 		}
 
 		return oboe::DataCallbackResult::Continue;

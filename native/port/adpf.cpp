@@ -10,6 +10,7 @@ code, that they are optional. */
 #include "adpf.hpp"
 
 #include <atomic>
+#include <ctime>
 #include <mutex>
 #include <vector>
 
@@ -50,6 +51,8 @@ struct Api {
 };
 
 Api g_api;
+/** Set by adpfKick(): the next callback reports whatever the load. */
+std::atomic<bool> g_kick{false};
 
 /** Looks the entry points up once. Everything below is a no-op if they are not
 all there, which is the case on Android 12 and earlier. */
@@ -198,9 +201,20 @@ void adpfReportNanos(int64_t nanos) {
 	// granularity that matters: below that there is nothing for the governor
 	// to act on, and at 48 kHz with a 256-frame block a report per callback
 	// would be 187 of them a second.
+	// But not never. A session that hears nothing is taken for idle and its
+	// boost withdrawn, and a patch whose load does not move sent nothing at
+	// all: a Nothing A024 held the callback's core at half its top frequency
+	// through a patch running at 65-75% of its deadline, and came back from a
+	// locked screen at 127% for ten seconds. So one report every tenth of a
+	// second whatever the load is doing, and at once after adpfKick().
 	static int64_t lastReported = 0;
+	static int64_t lastAt = 0;
+	timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	int64_t at = (int64_t) ts.tv_sec * 1000000000LL + ts.tv_nsec;
 	int64_t delta = nanos > lastReported ? nanos - lastReported : lastReported - nanos;
-	if (lastReported > 0 && delta * 10 < g_targetNanos)
+	bool kicked = g_kick.exchange(false, std::memory_order_relaxed);
+	if (!kicked && lastReported > 0 && delta * 10 < g_targetNanos && at - lastAt < 100000000LL)
 		return;
 
 	// try_lock, never lock: the render thread may be rebuilding the session,
@@ -211,6 +225,12 @@ void adpfReportNanos(int64_t nanos) {
 		return;
 	api().reportActual(g_session, nanos);
 	lastReported = nanos;
+	lastAt = at;
+}
+
+
+void adpfKick() {
+	g_kick.store(true, std::memory_order_relaxed);
 }
 
 

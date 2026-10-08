@@ -46,6 +46,8 @@ callback, and written to be safe there: it never blocks (it gives up rather
 than wait for the render thread) and it drops reports that say nothing new,
 since each one is a round trip to the system. */
 void adpfReportNanos(int64_t nanos);
+/** Makes the next callback report at once: the screen has just come back. */
+void adpfKick();
 
 /** Releases the session. Render thread. */
 void adpfClose();
