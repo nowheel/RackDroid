@@ -1426,6 +1426,106 @@ static void rememberThreadCount(int n) {
 	lastWritten = n;
 }
 
+/** What each patch has been found to run on, kept across launches.
+
+The silent measurement is half a second a count and reads the same count ten
+or fifteen points apart from one launch to the next: on a Nothing A024 with
+one heavy patch it chose four threads, one, two and five on different
+mornings, each a crackle until the engine had found out, and the answer every
+time was three. Thresholds moved a point at a time do not end that. What does
+is not asking again: a count that has held a patch clean for a minute is
+written down against that patch and is where it starts next time, with no
+measurement and no silence; a count the patch was moved off within its first
+minute is written down as one not to choose. A measurement is then for
+patches not seen before, and for when what was written down stops holding.
+
+Keyed by the patch file, how many modules it has, the block size and the
+sample rate: any of those changing makes it another question. */
+struct PatchMemo {
+	uint32_t key = 0;
+	int good = 0;
+	uint32_t bad = 0; // bit c: c threads, tried and left
+};
+static PatchMemo g_patchMemo;
+
+static uint32_t patchMemoKey() {
+	uint32_t h = 2166136261u;
+	auto mix = [&](uint32_t v) {
+		for (int i = 0; i < 4; i++) {
+			h ^= (v >> (i * 8)) & 0xff;
+			h *= 16777619u;
+		}
+	};
+	for (char ch : APP->patch->path)
+		mix((uint8_t) ch);
+	mix((uint32_t) APP->engine->getNumModules());
+	mix((uint32_t) rackdroid::audioBlockSize());
+	mix((uint32_t) APP->engine->getSampleRate());
+	return h ? h : 1;
+}
+
+static void patchMemoLoad() {
+	g_patchMemo = PatchMemo();
+	g_patchMemo.key = patchMemoKey();
+	FILE* f = std::fopen(asset::user("engine-patch-threads").c_str(), "r");
+	if (!f)
+		return;
+	unsigned key = 0, bad = 0;
+	int good = 0;
+	while (std::fscanf(f, "%x %d %x", &key, &good, &bad) == 3) {
+		if (key == g_patchMemo.key) {
+			g_patchMemo.good = good;
+			g_patchMemo.bad = bad;
+		}
+	}
+	std::fclose(f);
+}
+
+/** Rewrites the file with this patch first and the thirty-one before it. */
+static void patchMemoSave() {
+	if (!g_patchMemo.key)
+		return;
+	std::string path = asset::user("engine-patch-threads");
+	std::string rest;
+	if (FILE* f = std::fopen(path.c_str(), "r")) {
+		unsigned key = 0, bad = 0;
+		int good = 0, kept = 0;
+		while (kept < 31 && std::fscanf(f, "%x %d %x", &key, &good, &bad) == 3) {
+			if (key == g_patchMemo.key)
+				continue;
+			rest += string::f("%x %d %x\n", key, good, bad);
+			kept++;
+		}
+		std::fclose(f);
+	}
+	if (FILE* f = std::fopen(path.c_str(), "w")) {
+		std::fprintf(f, "%x %d %x\n", g_patchMemo.key, g_patchMemo.good, g_patchMemo.bad);
+		std::fputs(rest.c_str(), f);
+		std::fclose(f);
+	}
+}
+
+/** `count` held the patch clean for a minute. */
+static void patchMemoGood(int count) {
+	if (g_patchMemo.good == count && !((g_patchMemo.bad >> count) & 1))
+		return;
+	g_patchMemo.good = count;
+	g_patchMemo.bad &= ~((uint32_t) 1 << count);
+	patchMemoSave();
+	LOGI("Engine: %d threads have held this patch for a minute; it starts there from now on", count);
+}
+
+/** The engine moved off `count` before it had held for a minute. */
+static void patchMemoBad(int count) {
+	if (count < 1 || count > 31 || ((g_patchMemo.bad >> count) & 1))
+		return;
+	g_patchMemo.bad |= (uint32_t) 1 << count;
+	if (g_patchMemo.good == count)
+		g_patchMemo.good = 0;
+	patchMemoSave();
+	LOGI("Engine: %d threads did not hold this patch; not chosen for it again", count);
+}
+
 /** Keeps ADPF's deadline in step with the stream. One callback has to deliver
 `block` frames, so the time it may take is block / sampleRate -- the same
 number the audio device is already clocked by. Recomputed rather than set once
@@ -1755,7 +1855,16 @@ static void checkThreadCount() {
 		// order across block sizes closely enough, and measuring them all
 		// again cost up to ten seconds of silence after every step of the
 		// block ladder on an SM-S901E.
-		if (portChanged) {
+		if (portChanged)
+			patchMemoLoad();
+		if (portChanged && g_patchMemo.good >= floorCount && g_patchMemo.good <= ceiling) {
+			LOGI("Engine: this patch is known to run on %d threads; starting there "
+				"without measuring", g_patchMemo.good);
+			sweepWanted = false;
+			settings::threadCount = g_patchMemo.good;
+			rackdroid::audioWarmupHold(false);
+		}
+		else if (portChanged) {
 			sweepWanted = true;
 			sweepCount = 0;
 			sweepConfirming = false;
@@ -1926,6 +2035,9 @@ static void checkThreadCount() {
 		int measured = settings::threadCount;
 		int32_t load = sweepWorst;
 		if (!stuck && measured >= 1 && measured <= MAX_TRACKED_THREADS) {
+			// Tried on this patch before and left: whatever it reads now.
+			if (((g_patchMemo.bad >> measured) & 1) && load < 100)
+				load = 100;
 			// A second look at a count keeps the worse of the two.
 			if (!(sweepVerifyOf == measured && loads[measured] > load))
 				loads[measured] = load;
@@ -1954,6 +2066,12 @@ static void checkThreadCount() {
 		int best = rackdroid::ThreadChoice::best(loads, floorCount, top);
 		if (best == 0)
 			best = measured;
+		if (g_patchMemo.bad && loads[best] >= 100) {
+			LOGI("Engine: no count is left that this patch has not been moved off; "
+				"forgetting which those were");
+			g_patchMemo.bad = 0;
+			patchMemoSave();
+		}
 		// Believe the winner only once it has been measured twice: the first
 		// reading may have caught the patch in a quiet moment. If the second
 		// is worse it is kept, and the choice is made again.
@@ -2151,10 +2269,24 @@ static void checkThreadCount() {
 	// 8 min, a few thousand underruns each time.
 	static int heldCount = -1;
 	static double heldSince = 0.0;
+	// And since when it has gone without an underrun, for the patch memory.
+	static double cleanFrom = -1.0;
 	if (current != heldCount) {
 		heldCount = current;
 		heldSince = now;
+		cleanFrom = -1.0;
 	}
+	if (rawUnderruns > 0)
+		cleanFrom = -1.0;
+	else if (cleanFrom < 0.0)
+		cleanFrom = now;
+	// Written down as not holding only when it failed in its first minute and
+	// the phone is not throttling: a count that held and was then pushed over,
+	// or one tried on a hot phone, says nothing about the patch.
+	auto leftEarly = [&]() {
+		if (now - heldSince < 60.0 && rackdroid::thermalStatus() < 2)
+			patchMemoBad(current);
+	};
 	static uint32_t stallsSeen = 0;
 	static int stallWindows = 0;
 	uint32_t stallsNow = rackdroid::audioWaitedStalls();
@@ -2179,6 +2311,7 @@ static void checkThreadCount() {
 			current, stalls, windowLen, loadMean, fewer, loads[fewer]);
 		if (loads[current] < 100)
 			loads[current] = 100;
+		leftEarly();
 		stallWindows = 0;
 		settings::threadCount = fewer;
 		windowTouched = true;
@@ -2401,6 +2534,8 @@ static void checkThreadCount() {
 		if (current >= 1 && current <= MAX_TRACKED_THREADS)
 			provenClean[current] = true;
 		g_threadTunerSettled = true;
+		if (cleanFrom >= 0.0 && now - cleanFrom >= 60.0 && !touched)
+			patchMemoGood(current);
 		if (settledAt != current) {
 			LOGI("Engine: %d threads is running clean (%d%% of the audio deadline "
 				"on average, peak %d%%)", current, loadMean, loadPeak);
@@ -2520,6 +2655,7 @@ static void checkThreadCount() {
 		if (floodWindows >= 3 && mayMeasure && now - floodMeasuredAt >= 300.0) {
 			floodWindows = 0;
 			floodMeasuredAt = now;
+			leftEarly();
 			measureAgain("three windows running");
 			return;
 		}
@@ -2527,6 +2663,7 @@ static void checkThreadCount() {
 	else if (measuredCounts < 2 && mayMeasure) {
 		// Over its deadline at a count chosen without measuring the others
 		// (a patch that started comfortably never had them measured).
+		leftEarly();
 		measureAgain("and the other counts unmeasured");
 		return;
 	}
@@ -2593,6 +2730,7 @@ static void checkThreadCount() {
 				priorWait = 30.0;
 				priorTryAt = now + 40.0; // the measurement itself takes a few seconds
 			}
+			leftEarly();
 			measureAgain("and over its deadline");
 			return;
 		}
@@ -2617,6 +2755,7 @@ static void checkThreadCount() {
 		"peak %d%%); trying %d", rawUnderruns, windowLen, current, loadMean,
 		loadPeak, candidate);
 	g_threadTunerExhausted = false;
+	leftEarly();
 	settings::threadCount = candidate;
 	windowTouched = true; // see below
 	// Setting it is all that is needed: Engine::stepBlock relaunches its
