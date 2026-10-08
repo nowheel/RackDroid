@@ -356,6 +356,55 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   centroide salta su quella rimasta e produce una velocità che nessuna mano ha
   fatto. Il pan mantiene la sua inerzia, lo zoom no.
 
+- **Memoria per patch (2026-10-08).** La misura in silenzio dura mezzo secondo
+  per numero di thread e legge lo stesso numero con 10–15 punti di differenza
+  da un avvio all'altro: su un Nothing A024 con una patch da 354 moduli ha
+  scelto 4, 1, 2 e 5 thread in avvii diversi, e ogni volta il motore è finito a
+  3 dopo aver crepitato. Spostare le soglie non lo risolve. Ora un numero che
+  regge un minuto senza underrun viene scritto per quella patch
+  (`user/engine-patch-threads-2`: percorso, numero di moduli, blocco,
+  frequenza) e al lancio successivo si parte da lì senza misurare (silenzio
+  iniziale da 5 s a 0,4–1,0 s); un numero abbandonato nel primo minuto viene
+  scritto come da non scegliere. Non si scrive niente contro un numero con il
+  telefono in protezione termica, con la callback fuori dal suo core o entro
+  mezzo minuto dalla perdita del core.
+- **Soglie per numero di thread.** 60% per un thread, 75% per due, 80% da tre
+  in su (`thread_choice.hpp`). Meno thread ci sono, più lavoro fa la callback
+  da sola: letti 1 thread al 71% e 2 all'81%, entrambi hanno suonato oltre il
+  100% con buchi da 100 ms. Il tablet TB-X306X sta bene a 2 thread al 70%.
+- **Un Worker di troppo si vede dalle attese, non dal carico.** A 4 thread il
+  Nothing leggeva 61–70% della scadenza ma da 3 a 8 callback ogni 5 s duravano
+  9–40 ms con 2 ms di CPU. Tre attese per finestra, due finestre di fila, e si
+  scende di un thread se quello sotto era misurato sotto il 90%. Verificato:
+  da 4 a 3 in 12 s, senza underrun.
+- **Pause delle decisioni.** 15 s dopo il ritorno dello schermo, 20 s dopo la
+  perdita del core. Dopo uno sblocco il Nothing va a metà velocità per una
+  decina di secondi (3 thread dal 67% al 127%, 20–65 underrun/s): reagendo, il
+  motore passava a 2 thread (500/s), alzava il blocco e rimisurava, per tornare
+  a 3 thread dopo 26 s.
+- **Il core della callback.** Uno solo. La maschera a due core (consigliata da
+  due revisioni esterne) è stata provata ed è dannosa: lo scheduler lascia il
+  thread real-time dove si è svegliato (cpu4 e non cpu7), i Worker perdono il
+  loro core migliore, 3 thread passano dal 65–75% al 78–94%. Una maschera
+  azzerata dal sistema (a ogni cambio di cpuset) si rimette sullo STESSO core;
+  il core si abbandona solo se era stato tenuto meno di 3 s o rifiuta
+  (EINVAL). Richiesto di nuovo dopo 5 s, 15 s, 1 min, 4 min, senza spostare la
+  callback se la risposta è no. Sul Nothing dopo lo sblocco i core 4–7 sono in
+  pausa per qualche secondo (lista dei core permessi 0–3 con l'app in top-app,
+  tutti i core online, stato termico 0): circa 1.000 underrun in 2 s, non
+  evitabili dall'app.
+- **I buchi da 100 ms.** Callback da 70–160 ms con 7–10 ms di CPU, nessuno
+  switch, 0 ms "pronta senza core" (`schedstat`), stato R, e un thread di
+  controllo che ha continuato a battere ogni 2 ms: resta il limite del kernel
+  sui thread real-time (i suoi sysctl non sono leggibili da un'app). Compaiono
+  solo quando la callback riempie il suo core. Un campione solo: forte indizio,
+  non prova.
+- **ADPF.** Rapporti ogni 100 ms e bersaglio al 70% della scadenza: nessun
+  effetto misurabile sul Nothing (core della callback ancora al 52% della
+  frequenza massima). Il OnePlus 8T rifiuta la sessione.
+- **L'audio non si toglie mai per nascondere gli underrun.** Provato un
+  silenzio durante il recupero dal core perso: rifiutato dal proprietario.
+
 ## Debiti tecnici correnti
 
 - `minSdk 29` (Android 10): risolto lo shim `<execinfo.h>` che teneva il
