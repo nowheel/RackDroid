@@ -1728,6 +1728,15 @@ static void checkThreadCount() {
 			if (slice > sweepWorst)
 				sweepWorst = slice;
 			sweepSlices++;
+			// Which slice a stall fell in is otherwise lost: the reading is
+			// the worst of them, and three threads on one patch have read
+			// anything from 62% to 85% on a Nothing A024.
+			static uint32_t sliceStalls = 0;
+			uint32_t stallsNow = rackdroid::audioWaitedStalls();
+			LOGI("Engine: measuring %d threads, slice %d: %d%% over %d callbacks, "
+				"%u of them held up waiting for a Worker", settings::threadCount,
+				sweepSlices, slice, (int) sweepCallbacks, stallsNow - sliceStalls);
+			sliceStalls = stallsNow;
 			sweepSum = 0;
 			sweepCallbacks = 0;
 			sweepSliceAt = now;
@@ -1951,6 +1960,33 @@ static void checkThreadCount() {
 	windowStartedAt = now;
 	windowStartCount = total;
 	windowTouched = false;
+	// One Worker too many shows as the callback waiting, not as load, and a
+	// minute before it shows as underruns: see fewerForStalls(). Only on a
+	// settled count in a full window nobody disturbed -- a zoom, a screen
+	// going off and a sweep all make the callback wait at any count. The
+	// count left behind is marked as not fitting, so nothing sends the engine
+	// back up to it; a new patch forgets that with the rest.
+	static uint32_t stallsSeen = 0;
+	static int stallWindows = 0;
+	uint32_t stallsNow = rackdroid::audioWaitedStalls();
+	int32_t stalls = (int32_t) (stallsNow - stallsSeen);
+	stallsSeen = stallsNow;
+	bool judged = !touched && !hopeless && settledAt == current && windowLen >= WINDOW_SEC - 0.5;
+	stallWindows = (judged && stalls >= rackdroid::ThreadChoice::STALLS_PER_WINDOW)
+		? stallWindows + 1 : 0;
+	int fewer = rackdroid::ThreadChoice::fewerForStalls(loads, floorCount, current, stallWindows);
+	if (fewer > 0) {
+		LOGW("Engine: at %d threads the callback waited for a Worker %d times in %.1fs "
+			"(%d%% of the deadline), a second window running; %d measured %d%% -- going there",
+			current, stalls, windowLen, loadMean, fewer, loads[fewer]);
+		if (loads[current] < 100)
+			loads[current] = 100;
+		stallWindows = 0;
+		settings::threadCount = fewer;
+		windowTouched = true;
+		settledAt = fewer; // settled, not searching: judged on a full window
+		return;
+	}
 	// A disturbance excuses a handful of underruns, not a flood. Touching the
 	// screen, rotating, reopening the stream -- each of those costs a few, and
 	// that is what this guard was built for. It was written as an absolute,

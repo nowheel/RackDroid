@@ -44,6 +44,24 @@ struct ThreadChoice {
 	half second it took to find that out. */
 	static constexpr int32_t FAR_SIDE_POINTS = 25;
 
+	/** A window with this many callbacks held up waiting for a Worker (see
+	audioWaitedStalls()), this many windows running, and the count is one
+	Worker too many -- if one fewer was measured to fit with room. The load
+	does not show it: the callback is asleep, not working. Under 90, not under
+	100: a count measured at 97% is no place to send anyone on a hint. */
+	static constexpr int32_t STALLS_PER_WINDOW = 3;
+	static constexpr int32_t STALL_WINDOWS = 2;
+	static constexpr int32_t FEWER_FITS_PERCENT = 90;
+
+	/** The count to step down to when the callback keeps waiting for its
+	Workers, or 0 to stay. */
+	static int fewerForStalls(const int32_t* loads, int floor, int current, int stallWindows) {
+		int lower = current - 1;
+		if (stallWindows < STALL_WINDOWS || lower < floor || lower < 1)
+			return 0;
+		return (loads[lower] > 0 && loads[lower] < FEWER_FITS_PERCENT) ? lower : 0;
+	}
+
 	/** The fewest comfortable count, or 0 where none is. */
 	static int comfortable(const int32_t* loads, int floor, int top) {
 		int comfy = 0;

@@ -64,6 +64,9 @@ float audioDeviceSampleRate();
 void audioNoteEngineRate(int rate);
 void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks = nullptr,
 	int32_t* clippedMean = nullptr);
+/** Callbacks so far that slept through most of four deadlines waiting for a
+Worker. Only ever grows; the reader keeps the count it last saw. */
+uint32_t audioWaitedStalls();
 
 /** Frames the last audio callback was actually asked to produce, or 0 before
 the first one. NOT the engine's block size: alignToBurst() rounds the request to

@@ -73,6 +73,21 @@ int main() {
 			failures++;
 		std::printf("%s  the walk stops at the far side: %d readings of 7\n", ok ? "ok  " : "FAIL", readings);
 	}
+	// Nothing A024, 0.1.2.82: 1:125% 2:97% 3:85% 4:78% took four threads, and
+	// the callback then waited for a Worker three to eight times every five
+	// seconds, at 61-68% of its deadline, for a minute before it underran.
+	// Three ran clean. Down to three after two such windows; not on one, and
+	// not from three to two, which measured 97%.
+	{
+		const int32_t loads[] = {0, 125, 97, 85, 78};
+		bool ok = ThreadChoice::fewerForStalls(loads, 1, 4, 2) == 3
+			&& ThreadChoice::fewerForStalls(loads, 1, 4, 1) == 0
+			&& ThreadChoice::fewerForStalls(loads, 1, 3, 2) == 0
+			&& ThreadChoice::fewerForStalls(loads, 1, 1, 5) == 0;
+		if (!ok)
+			failures++;
+		std::printf("%s  A024 waiting for a fourth thread steps down to three\n", ok ? "ok  " : "FAIL");
+	}
 	std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
 	return failures ? 1 : 0;
 }

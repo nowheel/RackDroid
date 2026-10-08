@@ -412,6 +412,19 @@ static std::atomic<uint32_t> g_slowWrite{0};
 /** Twice the deadline: one late block is absorbed by the buffer, and below
 this the log would fill with scheduling noise at small block sizes. */
 static const int32_t SLOW_CALLBACK_PERCENT = 200;
+/** Callbacks that ran four times their deadline with less than half of it on
+the CPU, with Workers: the callback asleep on the barrier while a Worker it
+waits for is kept off its core. Counted for checkThreadCount(), where a count
+that keeps doing this is one Worker too many whatever its load reads: a
+Nothing A024 on four threads at 61-68% of its deadline had three to eight of
+these every five seconds for a minute before the first underrun, and none on
+three. The slow callbacks it had on three were all under 310%. */
+static const int32_t WAITED_STALL_PERCENT = 400;
+static std::atomic<uint32_t> g_waitedStalls{0};
+
+uint32_t audioWaitedStalls() {
+	return g_waitedStalls.load(std::memory_order_relaxed);
+}
 
 int audioReportSlowCallbacks() {
 	static uint32_t read = 0;
@@ -1178,6 +1191,8 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		c.phaseEnd = (int8_t) windowPhase();
 		c.threads = rack::settings::threadCount;
 		g_slowWrite.store(w + 1, std::memory_order_release);
+		if (percent >= WAITED_STALL_PERCENT && c.cpuUs * 2 < c.wallUs && c.threads > 1)
+			g_waitedStalls.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void applyWarmup(float* output, int channels, int32_t numFrames, int32_t rate, int64_t elapsedNanos) {
