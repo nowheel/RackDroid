@@ -402,6 +402,30 @@ Obiettivo: vedere il rack renderizzato e interagirci.
 - **ADPF.** Rapporti ogni 100 ms e bersaglio al 70% della scadenza: nessun
   effetto misurabile sul Nothing (core della callback ancora al 52% della
   frequenza massima). Il OnePlus 8T rifiuta la sessione.
+- **Il declassamento allo sblocco e sotto il pannello delle notifiche è di
+  Android.** Mentre la schermata di blocco sparisce (da Android 13) e mentre
+  il pannello copre l'app (Android 16,
+  `DEMOTE_TOP_REASON_EXPANDED_NOTIFICATION_SHADE`) l'app in primo piano riceve
+  il gruppo di scheduling ordinario: cpuset `/foreground`, niente core veloci.
+  Misurato: TB-X306X (10) e 8T (15) restano `top-app` sotto il pannello, un
+  Galaxy A52s (16) e il Nothing (17) no. Dichiararsi gioco non cambia nulla.
+  Non si evita: non si decide nulla in quei secondi, si rientra in fretta, non
+  si impara nulla da ciò che vi accade.
+- **Stream Exclusive fuori passo.** Dopo uno stallo lo stream conta un
+  underrun per ogni blocco scritto dietro l'hardware e richiama subito: il
+  motore girava a vuoto e sul Nothing è rimasto fuori passo 47 s con la
+  callback al 62% della scadenza (un underrun per callback). Ora, dopo due
+  blocchi in ritardo di fila, i successivi tornano vuoti finché lo stream
+  smette di contare; dopo 5.000 si rinuncia. Su un A52s uno stallo di 35 ms è
+  stato recuperato in 59 blocchi. Sul Nothing non è ancora scattata.
+- **Il core perso si richiede dopo 2 s**, contando le perdite nell'ultimo
+  mezzo minuto (tre a 2 s, poi 15 s). Il core di ripiego è più lento (carico
+  87–121% sul Nothing): quei due secondi sono quasi tutto ciò che uno sblocco
+  costa ancora.
+- **Core rallentato senza stato termico.** Il Nothing ha tenuto cpu7 a metà
+  velocità con stato 0 per una sera: la patch misurava 111% a un thread e
+  sceglieva 4 thread invece di 3. Un numero di thread fallito con il core
+  sotto il 90% della velocità non viene scritto come "non regge".
 - **L'audio non si toglie mai per nascondere gli underrun.** Provato un
   silenzio durante il recupero dal core perso: rifiutato dal proprietario.
 
