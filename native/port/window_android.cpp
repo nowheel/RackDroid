@@ -246,6 +246,8 @@ struct Window::Internal {
 	int frame = 0;
 	double monitorRefreshRate = 60.0;
 	double frameTime = NAN;
+	/** When this frame's drawing began; see getFrameDurationRemaining(). */
+	double drawTime = NAN;
 	double lastFrameDuration = NAN;
 
 	int mods = 0;
@@ -476,6 +478,7 @@ void Window::step() {
 
 		// Render scene
 		enterStage(rackdroid::RENDER_DRAW);
+		internal->drawTime = system::getTime();
 		nvgBeginFrame(vg, fbWidth, fbHeight, pixelRatio);
 		nvgScale(vg, pixelRatio, pixelRatio);
 
@@ -529,7 +532,11 @@ void Window::step() {
 	double work = 0.0;
 	for (int i = rackdroid::RENDER_STEP; i <= rackdroid::RENDER_SWAP; i++)
 		work += spent[i];
-	if (frameTime - internal->lastInteraction > 5.0 && work > 0.016)
+	// Not while the rack is still being painted for the first time (more
+	// framebuffers waiting than one frame gets through): that is work with an
+	// end, and resting between its frames is what made it take minutes.
+	static const int PAINTING_BACKLOG = 8;
+	if (frameTime - internal->lastInteraction > 5.0 && work > 0.016 && internal->fbCount <= PAINTING_BACKLOG)
 		std::this_thread::sleep_for(std::chrono::duration<double>(work < 0.075 ? 2.0 * work : 0.15));
 }
 
@@ -587,7 +594,12 @@ double Window::getLastFrameDuration() {
 
 
 double Window::getFrameDurationRemaining() {
-	double elapsed = system::getTime() - internal->frameTime;
+	// Counted from where the drawing began, not the frame: with 529 modules
+	// their step() alone takes 40 ms on a Nothing A024, the time allowed was
+	// gone before the first panel, and FramebufferWidget rebuilt exactly one a
+	// frame -- 1464 of them at six frames a second, four minutes of a rack
+	// filling in panel by panel while it played.
+	double elapsed = system::getTime() - (std::isfinite(internal->drawTime) ? internal->drawTime : internal->frameTime);
 	// The only reader is FramebufferWidget::draw(), which re-renders a dirty
 	// framebuffer while this is above -1/60 and otherwise draws the one it
 	// has, scaled. See pinchFreezesFramebuffers() for why none is re-rendered
