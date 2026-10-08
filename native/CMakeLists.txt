@@ -232,6 +232,33 @@ string(REPLACE "${_eng_block}" "internal->mutex.letWritersIn(); ${_eng_block}" _
 string(REPLACE "SpinBarrier engineBarrier;" "rackdroid::EngineBarrier engineBarrier{true};" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_worker}" "${_eng_worker} rackdroid::engineWorkerStarted();" _eng_cpp "${_eng_cpp}")
 string(REPLACE "HybridBarrier workerBarrier;" "rackdroid::EngineBarrier workerBarrier;" _eng_cpp "${_eng_cpp}")
+# Independent parts of a patch are stepped a block at a time, one thread each
+# (port/engine_islands.inc has the story). Three hooks: the cable step is made
+# to work on any list of cables, the Workers are sent to their islands, and
+# the block loop asks first whether the patch has any.
+set(_eng_cables_def "static void Engine_stepFrameCables(Engine* that) {")
+set(_eng_cables_call "Engine_stepFrameCables(that);")
+set(_eng_step_worker "static void Engine_stepWorker(Engine* that, int threadId) {")
+set(_eng_step_frame "Engine_stepFrame(this);")
+foreach(_needle "${_eng_cables_def}" "${_eng_cables_call}" "${_eng_step_worker}" "${_eng_step_frame}")
+	string(FIND "${_eng_cpp}" "${_needle}" _pos)
+	if(_pos EQUAL -1)
+		message(FATAL_ERROR "Engine.cpp no longer contains '${_needle}': update the islands patch")
+	endif()
+endforeach()
+# The cable step names the engine's list three times and nothing else does.
+string(REGEX MATCHALL "that->internal->cables" _eng_cable_uses "${_eng_cpp}")
+list(LENGTH _eng_cable_uses _eng_cable_count)
+if(NOT _eng_cable_count EQUAL 3)
+	message(FATAL_ERROR "Engine.cpp names that->internal->cables ${_eng_cable_count} times, not 3: read Engine_stepFrameCables against port/engine_islands.inc, then update this number")
+endif()
+string(REPLACE "that->internal->cables" "cablesOf" _eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_cables_def}" "template <class TCables>\nstatic void Engine_stepCablesOf(TCables& cablesOf) {" _eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_cables_call}" "Engine_stepCablesOf(that->internal->cables);" _eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_step_worker}"
+	"#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_islands.inc\"\n${_eng_step_worker}\n\tif (engineIslands.active.load(std::memory_order_acquire)) { EngineIslands_run(that, threadId); return; }"
+	_eng_cpp "${_eng_cpp}")
+string(REPLACE "${_eng_step_frame}" "if (i == 0 && EngineIslands_stepBlock(this, frames)) break; ${_eng_step_frame}" _eng_cpp "${_eng_cpp}")
 file(WRITE ${RACK_ENGINE_PATCH_DIR}/Engine.cpp "${_eng_cpp}")
 
 set(RACK_SOURCES
@@ -998,5 +1025,9 @@ else()
 		add_executable(rack_smoke host/main_host.cpp)
 		target_compile_definitions(rack_smoke PRIVATE RACKDROID_RACK_DIR="${RACK_DIR}")
 		target_link_libraries(rack_smoke rack_engine)
+		# port/engine_islands.inc against Rack's own loop; first line says how to run.
+		add_executable(rack_islands_test host/islands_test.cpp)
+		target_compile_definitions(rack_islands_test PRIVATE RACKDROID_RACK_DIR="${RACK_DIR}")
+		target_link_libraries(rack_islands_test rack_engine)
 	endif()
 endif()

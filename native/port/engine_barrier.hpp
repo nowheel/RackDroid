@@ -148,5 +148,11 @@ void engineWorkerStarted();
 they start; the ones already running are moved by whoever calls this. */
 void engineSetWorkerCpus(uint64_t mask);
 
+/** engine_islands.inc: step independent parts of a patch a block at a time
+(on by default), and how many parts the patch in the engine has -- 1 means
+Rack's own per-sample path is in use. */
+extern std::atomic<bool> engineIslandsOn;
+extern std::atomic<int> engineIslandCount;
+
 
 } // namespace rackdroid

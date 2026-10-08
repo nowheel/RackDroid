@@ -278,6 +278,10 @@ struct RackDroidApp {
 				manufacturer, model, soc[0] ? soc : "?",
 				android_get_device_api_level(), system::getLogicalCoreCount());
 		}
+		// For telling the two engine paths apart on one device: see engine_islands.inc.
+		rackdroid::engineIslandsOn = !system::exists(asset::user("engine-islands-off"));
+		if (!rackdroid::engineIslandsOn)
+			LOGI("Engine: islands switched off by user/engine-islands-off");
 		if (settings::sampleRate <= 0.f)
 			LOGI("Engine: sample rate auto, threads=%d", settings::threadCount);
 		else
@@ -1736,6 +1740,17 @@ static int32_t callbackCoreSpeed() {
 }
 
 static void checkThreadCount() {
+	{
+		static int saidIslands = -1;
+		int islands = rackdroid::engineIslandCount.load(std::memory_order_relaxed);
+		if (islands != saidIslands && islands > 0) {
+			saidIslands = islands;
+			if (islands > 1)
+				LOGI("Engine: this patch is %d independent parts; each is stepped a block at a time by one thread", islands);
+			else
+				LOGI("Engine: this patch is one connected part; stepped a sample at a time by all threads");
+		}
+	}
 	static const double WINDOW_SEC = 5.0;
 	/** The window used while the search has not yet found a rung that runs
 	clean. Long enough that the count has been asked to do real work through
