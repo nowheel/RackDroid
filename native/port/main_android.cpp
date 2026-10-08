@@ -738,10 +738,11 @@ then a minute, then four, so a core that really is gone costs three tries. */
 static double g_audioCpuLostAt = 0.0;
 static double g_audioCpuRetryAfter = 2.0;
 /** When the best core was last asked for again. The growing wait is for a
-core that lets go again at once; one that kept the callback for half a minute
-and then lost it -- the next time the screen went off -- starts over at
-fifteen seconds, or the third unlock of a session would have been the last
-time it was asked. */
+core that lets go again at once; one that kept the callback for five seconds
+and then lost it -- the next time the screen came on -- starts over at two,
+or the third unlock of a session would have been the last time it was asked.
+(Half a minute was the line at first: unlocking every eight seconds, a Nothing
+A024 was asked after two seconds the first time and five the second.) */
 static double g_audioCpuAskedAt = -1e9;
 static bool g_audioRepinWanted = false;
 
@@ -968,7 +969,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 			if (system::getTime() - pinnedAt < 3.0) {
 				g_audioCpusGivenUp |= (uint64_t) 1 << before;
 				g_audioCpuLostAt = system::getTime();
-				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
+				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 5.0)
 					g_audioCpuRetryAfter = 2.0;
 			}
 			else
@@ -1004,7 +1005,7 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				// try failed, and the next was a minute away -- past the
 				// unlock it was wanted for, on a Nothing A024.
 				g_audioCpuLostAt = system::getTime();
-				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
+				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 5.0)
 					g_audioCpuRetryAfter = 2.0;
 			}
 		}
