@@ -61,6 +61,18 @@ struct EngineIslands {
 	block. Taken, not handed out: see EngineIslands_run. */
 	std::vector<int> order;
 	std::atomic<int> next{0};
+	/** How many of `order` may be taken: 0 between blocks, so that a Worker
+	waking late finds the door shut rather than half a block being prepared. */
+	std::atomic<int> open{0};
+	/** Islands of this block not yet finished; the block ends at 0. */
+	std::atomic<uint32_t> pending{0};
+	std::atomic<bool> callerSleeps{false};
+	/** Goes up once a block, and to send the Workers back to Rack's loop. */
+	std::atomic<uint32_t> generation{0};
+	std::atomic<uint32_t> sleepers{0};
+	std::atomic<bool> leave{false};
+	/** The Workers are in EngineIslands_work, not at Rack's barriers. */
+	bool parked = false;
 	std::map<Module*, int> islandOf;
 	int frames = 0;
 	int smoothIsland = -1;
@@ -177,6 +189,11 @@ static void EngineIslands_sort() {
 }
 
 
+static void EngineIslands_futex(std::atomic<uint32_t>& word, int op, uint32_t value) {
+	syscall(SYS_futex, (uint32_t*) &word, op, value, NULL, NULL, 0);
+}
+
+
 /** What one thread does of the block: the next island nobody has taken, until
 there is none.
 
@@ -193,10 +210,14 @@ static void EngineIslands_run(Engine* that, int threadId) {
 	processArgs.sampleRate = internal->sampleRate;
 	processArgs.sampleTime = internal->sampleTime;
 
-	int count = s.order.size();
 	while (true) {
-		int taken = s.next.fetch_add(1, std::memory_order_relaxed);
-		if (taken >= count)
+		// Never past `open`, and never while it is 0: a thread that slept
+		// through the end of its block must not move `next` in the one being
+		// prepared.
+		int taken = s.next.load(std::memory_order_acquire);
+		while (taken < s.open.load(std::memory_order_acquire)
+				&& !s.next.compare_exchange_weak(taken, taken + 1, std::memory_order_acq_rel)) {}
+		if (taken >= s.open.load(std::memory_order_acquire))
 			break;
 		int index = s.order[taken];
 		EngineIsland& island = s.islands[index];
@@ -243,7 +264,73 @@ static void EngineIslands_run(Engine* that, int threadId) {
 		}
 		double took = system::getTime() - startTime;
 		island.cost = island.cost > 0.0 ? island.cost + 0.1 * (took - island.cost) : took;
+		if (s.pending.fetch_sub(1, std::memory_order_acq_rel) == 1
+				&& s.callerSleeps.load(std::memory_order_acquire))
+			EngineIslands_futex(s.pending, FUTEX_WAKE_PRIVATE, 1);
 	}
+}
+
+
+/** Where a Worker lives while the islands are in use: it takes islands when a
+block opens and waits for the next, and the thread stepping the engine waits
+for islands, never for Workers.
+
+With Rack's two barriers every Worker had to report at the start and the end
+of every block whether or not it had done anything, and one that was not
+being run -- two of them given one core, or the system's own interface taking
+theirs while the app switcher was open -- held the callback for a scheduler's
+turn: callbacks of 16 ms with 1.3 ms of work in them, on a Nothing A024, block
+after block. Here a Worker that is not running is simply not there.
+
+It spins between blocks as Rack's Workers do at their barrier, for the same
+measured reason (engine_barrier.hpp): a core left idle slows down. */
+static void EngineIslands_work(Engine* that, int threadId) {
+	EngineIslands& s = engineIslands;
+	uint32_t seen = s.generation.load(std::memory_order_acquire) - 1;
+	while (true) {
+		int64_t start = 0;
+		for (unsigned i = 1; s.generation.load(std::memory_order_acquire) == seen; i++) {
+#if defined(__aarch64__)
+			__asm__ __volatile__("yield");
+#elif defined(__x86_64__) || defined(__i386__)
+			__builtin_ia32_pause();
+#endif
+			if (i % rackdroid::EngineBarrier::CLOCK_EVERY)
+				continue;
+			timespec ts;
+			clock_gettime(CLOCK_MONOTONIC, &ts);
+			int64_t now = (int64_t) ts.tv_sec * 1000000000LL + ts.tv_nsec;
+			if (start == 0)
+				start = now;
+			else if (now - start > rackdroid::EngineBarrier::IDLE_SPIN_NS) {
+				s.sleepers.fetch_add(1);
+				while (s.generation.load(std::memory_order_acquire) == seen)
+					EngineIslands_futex(s.generation, FUTEX_WAIT_PRIVATE, seen);
+				s.sleepers.fetch_sub(1);
+			}
+		}
+		seen = s.generation.load(std::memory_order_acquire);
+		if (s.leave.load(std::memory_order_acquire))
+			return;
+		EngineIslands_run(that, threadId);
+	}
+}
+
+
+/** Sends the Workers back to Rack's barriers, where its own loop and
+Engine_relaunchWorkers expect to find them. Between blocks only. */
+static void EngineIslands_leave(Engine* that) {
+	EngineIslands& s = engineIslands;
+	if (!s.parked || s.owner != that)
+		return;
+	s.leave.store(true, std::memory_order_release);
+	s.generation.fetch_add(1, std::memory_order_acq_rel);
+	EngineIslands_futex(s.generation, FUTEX_WAKE_PRIVATE, INT_MAX);
+	// Each returns from Engine_stepWorker into EngineWorker::run, which meets
+	// the caller here as it does at the end of any frame.
+	that->internal->workerBarrier.wait();
+	s.leave.store(false, std::memory_order_release);
+	s.parked = false;
 }
 
 
@@ -254,17 +341,21 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	Engine::Internal* internal = that->internal;
 	EngineIslands& s = engineIslands;
 	if (!rackdroid::engineIslandsOn.load(std::memory_order_relaxed)) {
+		EngineIslands_leave(that);
 		s.owner = NULL;
 		return false;
 	}
 	uint64_t signature = EngineIslands_signature(internal);
 	if (s.owner != that || signature != s.signature) {
+		// Parked Workers touch no island between blocks, so the islands may
+		// be rebuilt under them.
 		s.owner = that;
 		s.signature = signature;
 		EngineIslands_build(internal);
 		s.threads = 0;
 	}
 	if (s.islands.size() < 2) {
+		EngineIslands_leave(that);
 		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
 		return false;
 	}
@@ -291,6 +382,7 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	bool islandsNow = trial ? s.trialBlock < TRIAL_BLOCKS : s.useIslands;
 	double trialStart = trial ? system::getTime() : 0.0;
 	if (!islandsNow) {
+		EngineIslands_leave(that);
 		for (int f = 0; f < frames; f++)
 			Engine_stepFrame(that);
 	}
@@ -303,12 +395,36 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 			s.smoothIsland = it->second;
 	}
 
-	s.next.store(0, std::memory_order_relaxed);
-	s.active.store(true, std::memory_order_release);
-	internal->engineBarrier.wait();
+	int count = s.order.size();
+	s.pending.store(count, std::memory_order_release);
+	s.next.store(0, std::memory_order_release);
+	s.open.store(count, std::memory_order_release);
+	s.generation.fetch_add(1, std::memory_order_acq_rel);
+	if (!s.parked) {
+		// Out of Rack's loop, once: the Workers are waiting at its barrier,
+		// and Engine_stepWorker sends them to EngineIslands_work to stay.
+		s.active.store(true, std::memory_order_release);
+		internal->engineBarrier.wait();
+		s.active.store(false, std::memory_order_release);
+		s.parked = true;
+	}
+	else if (s.sleepers.load(std::memory_order_acquire) > 0) {
+		EngineIslands_futex(s.generation, FUTEX_WAKE_PRIVATE, INT_MAX);
+	}
 	EngineIslands_run(that, 0);
-	internal->workerBarrier.wait();
-	s.active.store(false, std::memory_order_release);
+
+	// For the islands a Worker is still in the middle of. Briefly spinning:
+	// they are a block's worth of work at most.
+	for (unsigned i = 1; s.pending.load(std::memory_order_acquire) != 0; i++) {
+		if (i < 20000)
+			continue;
+		s.callerSleeps.store(true, std::memory_order_release);
+		uint32_t left;
+		while ((left = s.pending.load(std::memory_order_acquire)) != 0)
+			EngineIslands_futex(s.pending, FUTEX_WAIT_PRIVATE, left);
+		s.callerSleeps.store(false, std::memory_order_release);
+	}
+	s.open.store(0, std::memory_order_release);
 
 	internal->frame += frames;
 	}

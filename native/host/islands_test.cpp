@@ -3,7 +3,8 @@
  * Builds patches out of a small deterministic module, steps each of them with
  * Rack's own per-sample loop and with the islands, on one to four threads, and
  * compares every output voltage of every module at the end: they must be the
- * same bit for bit. Then times both on a patch of twelve islands. */
+ * same bit for bit, with the thread count changed twice on the way. Then times
+ * both on a patch of twelve islands. */
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -128,6 +129,12 @@ static std::vector<float> run(int islands, int size, bool bridge, bool on, int t
 		// A knob turned while it plays, through the engine's smoothing.
 		if (b == 3)
 			p.engine->setParamSmoothValue(p.voices[p.voices.size() / 2], 0, 7.f);
+		// The thread count changed under it, as the tuner does, and back:
+		// the Workers have to be handed to Rack's barriers and taken again.
+		if (!ms && b == 20)
+			settings::threadCount = threads % 4 + 1;
+		if (!ms && b == 35)
+			settings::threadCount = threads;
 		p.engine->stepBlock(96);
 	}
 	if (ms)

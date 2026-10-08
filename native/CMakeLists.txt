@@ -240,7 +240,8 @@ set(_eng_cables_def "static void Engine_stepFrameCables(Engine* that) {")
 set(_eng_cables_call "Engine_stepFrameCables(that);")
 set(_eng_step_worker "static void Engine_stepWorker(Engine* that, int threadId) {")
 set(_eng_step_frame "Engine_stepFrame(this);")
-foreach(_needle "${_eng_cables_def}" "${_eng_cables_call}" "${_eng_step_worker}" "${_eng_step_frame}")
+set(_eng_relaunch "static void Engine_relaunchWorkers(Engine* that, int threadCount) {")
+foreach(_needle "${_eng_cables_def}" "${_eng_cables_call}" "${_eng_step_worker}" "${_eng_step_frame}" "${_eng_relaunch}")
 	string(FIND "${_eng_cpp}" "${_needle}" _pos)
 	if(_pos EQUAL -1)
 		message(FATAL_ERROR "Engine.cpp no longer contains '${_needle}': update the islands patch")
@@ -256,9 +257,14 @@ string(REPLACE "that->internal->cables" "cablesOf" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_cables_def}" "template <class TCables>\nstatic void Engine_stepCablesOf(TCables& cablesOf) {" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_cables_call}" "Engine_stepCablesOf(that->internal->cables);" _eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_step_worker}"
-	"#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_islands.inc\"\n${_eng_step_worker}\n\tif (engineIslands.active.load(std::memory_order_acquire)) { EngineIslands_run(that, threadId); return; }"
+	"#include \"${CMAKE_CURRENT_SOURCE_DIR}/port/engine_islands.inc\"\n${_eng_step_worker}\n\tif (engineIslands.active.load(std::memory_order_acquire)) { EngineIslands_work(that, threadId); return; }"
 	_eng_cpp "${_eng_cpp}")
 string(REPLACE "${_eng_step_frame}" "if (i == 0 && EngineIslands_stepBlock(this, frames)) break; ${_eng_step_frame}" _eng_cpp "${_eng_cpp}")
+# Rack stops and starts its Workers at its own barrier; the islands keep them
+# elsewhere between blocks and have to hand them back first.
+string(REPLACE "${_eng_relaunch}"
+	"static void EngineIslands_leave(Engine* that);\n${_eng_relaunch}\n\tif (threadCount != that->internal->threadCount) EngineIslands_leave(that);"
+	_eng_cpp "${_eng_cpp}")
 file(WRITE ${RACK_ENGINE_PATCH_DIR}/Engine.cpp "${_eng_cpp}")
 
 set(RACK_SOURCES
