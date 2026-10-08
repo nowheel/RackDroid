@@ -2034,8 +2034,12 @@ static void checkThreadCount() {
 	// Not the window the app starts with: a patch opened on a count it cannot
 	// keep up on has to be seen to at once (a OnePlus 8T sat on one thread at
 	// 111% for ten seconds longer when this covered the launch as well).
+	// "Launch" ends when the count has once run clean, not at thirty seconds:
+	// a Nothing A024 on four threads at 71% had the app switcher opened 26 s
+	// in, was measured again with its fastest core at 37% of its speed, and
+	// spent the rest of the session on two threads at 95%.
 	bool resuming = rackdroid::windowSecondsSinceSurfaceChange() < RESUME_GRACE_SEC
-		&& now > 2.0 * RESUME_GRACE_SEC;
+		&& (now > 2.0 * RESUME_GRACE_SEC || g_threadTunerSettled);
 	// And for twenty seconds after the callback loses its core. What follows
 	// that is hundreds of underruns a second on whatever count is playing, and
 	// it is the core, not the count: a Nothing A024 started a patch on the
@@ -2121,6 +2125,22 @@ static void checkThreadCount() {
 			sweepSum = 0;
 			sweepCallbacks = 0;
 			return;
+		}
+		// And while the engine is still timing its two ways of stepping this
+		// patch (engine_islands.inc): half of that trial is the slower way,
+		// and read as this count's load it made four threads on a TB-X306X
+		// look like 115% of the deadline when they play at 62%. Bounded: a
+		// trial that does not end is not waited for.
+		static double timingFrom = 0.0;
+		if (rackdroid::engineIslandCount.load(std::memory_order_relaxed) > 1
+				&& rackdroid::engineIslandsUsed.load(std::memory_order_relaxed) == 0) {
+			if (timingFrom == 0.0)
+				timingFrom = now;
+			if (now - timingFrom < 1.5)
+				sweepStepAt = now;
+		}
+		else {
+			timingFrom = 0.0;
 		}
 		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
 			sweepSliceAt = now;

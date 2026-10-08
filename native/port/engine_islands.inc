@@ -419,6 +419,7 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		s.blocksSinceBalance = 0;
 		s.trialBlock = 0;
 		s.trialTime[0] = s.trialTime[1] = 0.0;
+		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
 		EngineIslands_sort();
 	}
 	else if (++s.blocksSinceBalance >= 256) {
