@@ -933,20 +933,37 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	g_audioRepinWanted = false;
 	if (audioCpu >= 0 && audioTid > 0 && (repin || !audioStillPinned())) {
 		int before = g_pinnedAudioTid == audioTid ? g_pinnedAudioCpu : -2;
-		// Same thread, and it had a core: that core let go of it.
+		// Same thread, and it had a core -- and the mask is gone. That is the
+		// core letting go only if it happens again at once. Mostly it is the
+		// system handing every thread of the process a fresh mask, which it
+		// does whenever the app changes cpuset (Home, screen off, screen on):
+		// a Lenovo TB-X306X and a OnePlus 8T both lost "their core" at every
+		// one of those, were moved to another each time, and the tablet went
+		// cpu3, 5, 2, 1, 0, 7 in one session, a burst of underruns a move. So
+		// the same core is asked for again first, and given up only when it
+		// had been held for less than three seconds.
+		static double pinnedAt = 0.0;
+		bool again = false;
 		if (before >= 0 && !repin) {
-			g_audioCpusGivenUp |= (uint64_t) 1 << before;
-			g_audioCpuLostAt = system::getTime();
-			if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
-				g_audioCpuRetryAfter = 15.0;
+			if (system::getTime() - pinnedAt < 3.0) {
+				g_audioCpusGivenUp |= (uint64_t) 1 << before;
+				g_audioCpuLostAt = system::getTime();
+				if (g_audioCpuLostAt - g_audioCpuAskedAt >= 30.0)
+					g_audioCpuRetryAfter = 15.0;
+			}
+			else
+				again = true;
 		}
 		g_pinnedAudioTid = audioTid;
 		g_pinnedAudioCpu = -1;
 		int err = 0;
-		// The fastest core first, then the others from the top down: when the
-		// first choice is halted, any core of its own beats none.
-		for (int i = -1; i < cores && g_pinnedAudioCpu < 0; i++) {
-			int cpu = i < 0 ? audioCpu : cores - 1 - i;
+		// The core it was on if that is worth asking again, then the fastest,
+		// then the others from the top down: when the first choice is halted,
+		// any core of its own beats none.
+		for (int i = -2; i < cores && g_pinnedAudioCpu < 0; i++) {
+			if (i == -2 && !again)
+				continue;
+			int cpu = i == -2 ? before : i < 0 ? audioCpu : cores - 1 - i;
 			if (cpu == reservedCpu || (i >= 0 && cpu == audioCpu))
 				continue;
 			if ((g_audioCpusGivenUp >> cpu) & 1)
@@ -958,9 +975,10 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 				CPU_SET(g_audioCompanionCpu, &audioMask);
 			if (sched_setaffinity(audioTid, sizeof(audioMask), &audioMask) == 0) {
 				g_pinnedAudioCpu = cpu;
+				pinnedAt = system::getTime();
 			}
 			else {
-				if (i < 0)
+				if (i == -1)
 					err = errno;
 				g_audioCpusGivenUp |= (uint64_t) 1 << cpu;
 			}
@@ -1084,13 +1102,19 @@ static void checkWorkerPriority() {
 		lastAudioTid = audioTid;
 		// A core at half speed under a SCHED_FIFO thread is not what the
 		// kernel does by default; so say what the thread actually is.
-		int policy = sched_getscheduler(audioTid);
+		int policy = sched_getscheduler(audioTid) & ~0x40000000; // SCHED_RESET_ON_FORK
 		sched_param sp = {};
 		sched_getparam(audioTid, &sp);
 		LOGI("Engine: the audio callback thread is %s, priority %d",
 			policy == SCHED_FIFO ? "SCHED_FIFO" : policy == SCHED_RR ? "SCHED_RR"
 			: policy == SCHED_OTHER ? "SCHED_OTHER (not real-time)" : "of another class",
 			sp.sched_priority);
+		// Where the device gives no low-latency stream the callback is an
+		// ordinary thread at nice -16 -- below the Workers it waits for, which
+		// are at -19 (a Lenovo TB-X306X: Shared, 960-frame bursts). Put it
+		// level with them; a real-time callback needs nothing from this.
+		if (policy == SCHED_OTHER && rackdroid::jniSetThreadPriority(audioTid, -19))
+			LOGI("Engine: raised the audio callback thread to the Workers' priority");
 		if (applyAt <= 0.0)
 			applyAt = system::getTime();
 	}
