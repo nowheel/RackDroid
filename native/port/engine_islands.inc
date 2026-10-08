@@ -73,6 +73,14 @@ struct EngineIslands {
 	std::atomic<bool> leave{false};
 	/** The Workers are in EngineIslands_work, not at Rack's barriers. */
 	bool parked = false;
+	/** When this block opened, and how long its audio lasts (seconds). */
+	double blockStart = 0.0;
+	double blockTime = 0.0;
+	/** Each core's capacity as the kernel rates it, 0 where it does not say,
+	and the largest of them. Read once. */
+	int capacity[64] = {};
+	int capacityMax = 0;
+	bool capacityRead = false;
 	std::map<Module*, int> islandOf;
 	int frames = 0;
 	int smoothIsland = -1;
@@ -114,6 +122,20 @@ static uint64_t EngineIslands_signature(Engine::Internal* internal) {
 
 static void EngineIslands_build(Engine::Internal* internal) {
 	EngineIslands& s = engineIslands;
+	if (!s.capacityRead) {
+		s.capacityRead = true;
+		for (int cpu = 0; cpu < 64; cpu++) {
+			char path[64];
+			std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpu_capacity", cpu);
+			FILE* f = std::fopen(path, "r");
+			if (!f)
+				break;
+			if (std::fscanf(f, "%d", &s.capacity[cpu]) != 1)
+				s.capacity[cpu] = 0;
+			std::fclose(f);
+			s.capacityMax = std::max(s.capacityMax, s.capacity[cpu]);
+		}
+	}
 	s.islands.clear();
 	s.islandOf.clear();
 	int n = internal->modules.size();
@@ -211,6 +233,32 @@ static void EngineIslands_run(Engine* that, int threadId) {
 	processArgs.sampleTime = internal->sampleTime;
 
 	while (true) {
+		// A Worker on a small core stands by until half the block's time is
+		// gone. The block ends when its last island does, and an island a
+		// small core has taken takes three times as long: on a OnePlus 8T
+		// four islands on five threads read 76% of the deadline, and on a
+		// Galaxy A52s two threads read worse than one. If the big cores can
+		// do it all in time the small one is not wanted; if they cannot, it
+		// is better than nothing.
+		if (threadId != 0 && s.capacityMax > 0) {
+			int cpu = sched_getcpu();
+			if (cpu >= 0 && cpu < 64 && s.capacity[cpu] > 0 && 2 * s.capacity[cpu] < s.capacityMax) {
+				bool wanted = false;
+				while (s.next.load(std::memory_order_acquire) < s.open.load(std::memory_order_acquire)) {
+					if (system::getTime() - s.blockStart > 0.5 * s.blockTime) {
+						wanted = true;
+						break;
+					}
+#if defined(__aarch64__)
+					__asm__ __volatile__("yield");
+#elif defined(__x86_64__) || defined(__i386__)
+					__builtin_ia32_pause();
+#endif
+				}
+				if (!wanted)
+					break;
+			}
+		}
 		// Never past `open`, and never while it is 0: a thread that slept
 		// through the end of its block must not move `next` in the one being
 		// prepared.
@@ -395,6 +443,8 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 			s.smoothIsland = it->second;
 	}
 
+	s.blockStart = system::getTime();
+	s.blockTime = frames * (double) internal->sampleTime;
 	int count = s.order.size();
 	s.pending.store(count, std::memory_order_release);
 	s.next.store(0, std::memory_order_release);
