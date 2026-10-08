@@ -1596,6 +1596,7 @@ static void checkThreadCount() {
 	static double sweepSliceAt = 0.0;
 	static int sweepVerifyOf = 0;
 	static int sweepVerifies = 0;
+	static bool sweepRecovering = false;
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	// And so is a different engine sample rate: at half the rate the same patch
@@ -1717,6 +1718,23 @@ static void checkThreadCount() {
 		int32_t meanNow = 0, callbacksNow = 0;
 		// The mean with stalls clipped: see g_loadSumClipped.
 		rackdroid::audioEngineLoadTake(NULL, NULL, &callbacksNow, &meanNow);
+		// The second look at the chosen count comes straight after the counts
+		// that did not fit, and reads high: three threads on a Nothing A024
+		// read 60, 61, 61% and then, after one and two threads at 112% and 99%
+		// had left the stream behind, 77 and 78% -- on a patch that then played
+		// at 65%. Two points more and it would have gone on to four threads,
+		// which is what it did the day it read 85. So that look waits until
+		// the stream has stopped underrunning for a moment, a second at most.
+		if (sweepRecovering) {
+			if (rackdroid::audioSecondsSinceUnderrun() < 0.3 && now - sweepStepAt < 1.0)
+				return;
+			sweepRecovering = false;
+			sweepStepAt = now;
+			sweepSliceAt = now;
+			sweepSum = 0;
+			sweepCallbacks = 0;
+			return;
+		}
 		if (now - sweepStepAt < SWEEP_SETTLE_SEC)
 			sweepSliceAt = now;
 		else if (callbacksNow > 0) {
@@ -1732,11 +1750,14 @@ static void checkThreadCount() {
 			// the worst of them, and three threads on one patch have read
 			// anything from 62% to 85% on a Nothing A024.
 			static uint32_t sliceStalls = 0;
+			static int32_t sliceUnderruns = 0;
 			uint32_t stallsNow = rackdroid::audioWaitedStalls();
 			LOGI("Engine: measuring %d threads, slice %d: %d%% over %d callbacks, "
-				"%u of them held up waiting for a Worker", settings::threadCount,
-				sweepSlices, slice, (int) sweepCallbacks, stallsNow - sliceStalls);
+				"%u of them held up waiting for a Worker, %d underruns since the last slice",
+				settings::threadCount, sweepSlices, slice, (int) sweepCallbacks,
+				stallsNow - sliceStalls, (int) (total - sliceUnderruns));
 			sliceStalls = stallsNow;
+			sliceUnderruns = total;
 			sweepSum = 0;
 			sweepCallbacks = 0;
 			sweepSliceAt = now;
@@ -1787,6 +1808,7 @@ static void checkThreadCount() {
 				&& sweepVerifyOf != best && sweepVerifies < 3) {
 			sweepVerifyOf = best;
 			sweepVerifies++;
+			sweepRecovering = true;
 			settings::threadCount = best;
 			return;
 		}
