@@ -790,6 +790,38 @@ static bool workersLoose(const std::vector<int>& workers) {
 }
 
 
+/** What cores the callback thread may use right now and why, for the log: its
+allowed list, the cpuset it and the process are in, the cores online and the
+thermal status. A core that "will not keep" the callback has either gone
+(online says so) or is outside the cpuset the system has just put the app in
+(the allowed list says so) -- and those are not the same problem. */
+static std::string audioCpuContext(int tid) {
+	auto firstLine = [](const std::string& path, const char* prefix) {
+		std::string out = "?";
+		if (FILE* f = std::fopen(path.c_str(), "r")) {
+			char line[256];
+			while (std::fgets(line, sizeof(line), f)) {
+				if (prefix && std::strncmp(line, prefix, std::strlen(prefix)) != 0)
+					continue;
+				out = line + (prefix ? std::strlen(prefix) : 0);
+				break;
+			}
+			std::fclose(f);
+		}
+		while (!out.empty() && (out.back() == '\n' || out.back() == ' ' || out.back() == '\t'))
+			out.pop_back();
+		size_t b = out.find_first_not_of(" \t");
+		return b == std::string::npos ? out : out.substr(b);
+	};
+	return string::f("allowed %s, thread cpuset %s, process cpuset %s, online %s, thermal status %d",
+		firstLine(string::f("/proc/self/task/%d/status", tid), "Cpus_allowed_list:").c_str(),
+		firstLine(string::f("/proc/self/task/%d/cpuset", tid), NULL).c_str(),
+		firstLine("/proc/self/cpuset", NULL).c_str(),
+		firstLine("/sys/devices/system/cpu/online", NULL).c_str(),
+		rackdroid::thermalStatus());
+}
+
+
 /** A core's top clock, or -1 when sysfs will not say. */
 static long cpuMaxFreq(int cpu) {
 	char path[96];
@@ -928,6 +960,9 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 		// had been held for less than three seconds.
 		static double pinnedAt = 0.0;
 		bool again = false;
+		if (before >= 0)
+			LOGI("Engine: the audio callback's mask is gone from cpu%d (%s)", before,
+				audioCpuContext(audioTid).c_str());
 		if (before >= 0 && !repin) {
 			if (system::getTime() - pinnedAt < 3.0) {
 				g_audioCpusGivenUp |= (uint64_t) 1 << before;

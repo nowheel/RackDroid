@@ -413,7 +413,65 @@ struct SlowCallback {
 	int8_t phaseStart, phaseEnd;
 	int32_t threads;    // settings::threadCount at the time
 	int32_t noCoreUs;   // runnable and not run: see threadRunDelayNs()
+	int32_t watchdogGapUs; // the watchdog thread's longest gap during it
+	char state;         // what the kernel said this thread was, sampled mid-way
 };
+
+/* A second pair of eyes for the long holes. A callback that takes 100 ms of
+wall time with 7 ms of CPU, no context switch and no time spent runnable has
+three explanations left, and they are told apart from outside the thread:
+- the whole phone stopped (a core being taken down stops every CPU for a
+  moment): then an ordinary thread that only watches the clock stopped too;
+- the thread was asleep in the kernel: then its state reads S or D, not R;
+- the kernel's limit on real-time threads took it off the run queue: then it
+  reads R, and the watchdog kept ticking.
+So a thread ticks every 2 ms, keeps its own longest gap, and looks up the
+callback thread's state once a callback has been going for 20 ms. */
+static std::atomic<int64_t> g_callbackStartNs{0}; // 0 between callbacks
+static std::atomic<int32_t> g_watchdogGapUs{0};
+static std::atomic<int> g_stuckState{0};
+
+static int64_t monoNs() {
+	timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t) ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static void watchdogLoop() {
+	int fd = -1, fdTid = 0;
+	int64_t last = monoNs();
+	for (;;) {
+		usleep(2000);
+		int64_t now = monoNs();
+		int32_t gap = (int32_t) ((now - last) / 1000);
+		last = now;
+		if (gap > g_watchdogGapUs.load(std::memory_order_relaxed))
+			g_watchdogGapUs.store(gap, std::memory_order_relaxed);
+		int64_t started = g_callbackStartNs.load(std::memory_order_relaxed);
+		if (started == 0 || now - started < 20000000LL
+				|| g_stuckState.load(std::memory_order_relaxed) != 0)
+			continue;
+		int tid = audioCallbackThreadTid();
+		if (tid <= 0)
+			continue;
+		if (tid != fdTid) {
+			if (fd >= 0)
+				close(fd);
+			char path[64];
+			std::snprintf(path, sizeof(path), "/proc/self/task/%d/stat", tid);
+			fd = open(path, O_RDONLY | O_CLOEXEC);
+			fdTid = tid;
+		}
+		char buf[128];
+		ssize_t n = fd >= 0 ? pread(fd, buf, sizeof(buf) - 1, 0) : 0;
+		if (n <= 0)
+			continue;
+		buf[n] = 0;
+		const char* p = std::strrchr(buf, ')');
+		if (p && p[1] == ' ' && p[2])
+			g_stuckState.store(p[2], std::memory_order_relaxed);
+	}
+}
 
 /** How long this thread has been runnable without a core to run on, in ns,
 from /proc/thread-self/schedstat; -1 where it cannot be read. What tells a
@@ -460,6 +518,24 @@ uint32_t audioWaitedStalls() {
 }
 
 int audioReportSlowCallbacks() {
+	static bool watching = false;
+	if (!watching) {
+		watching = true;
+		std::thread(watchdogLoop).detach();
+		// What the kernel allows real-time threads, for the record: the usual
+		// 950000 of 1000000 cannot make a 95 ms hole every 1.35 s.
+		long period = -1, runtime = -1;
+		if (FILE* f = std::fopen("/proc/sys/kernel/sched_rt_period_us", "r")) {
+			if (std::fscanf(f, "%ld", &period) != 1) period = -1;
+			std::fclose(f);
+		}
+		if (FILE* f = std::fopen("/proc/sys/kernel/sched_rt_runtime_us", "r")) {
+			if (std::fscanf(f, "%ld", &runtime) != 1) runtime = -1;
+			std::fclose(f);
+		}
+		AUDIO_WARN("Oboe: real-time threads may run %ld us in every %ld us here "
+			"(-1: not readable)", runtime, period);
+	}
 	static uint32_t read = 0;
 	int written = 0;
 	uint32_t write = g_slowWrite.load(std::memory_order_acquire);
@@ -487,9 +563,11 @@ int audioReportSlowCallbacks() {
 		budget--;
 		written++;
 		AUDIO_WARN("Oboe: slow callback at %.3f: %.1f ms wall (%d%% of the deadline), "
-			"%.1f ms cpu, %.1f ms ready with no core, switches %d voluntary / %d involuntary, "
+			"%.1f ms cpu, %.1f ms ready with no core, state %c, watchdog gap %.1f ms, "
+			"switches %d voluntary / %d involuntary, "
 			"cpu%d->cpu%d, render %s->%s, %d threads",
 			c.at, c.wallUs / 1000.0, c.percent, c.cpuUs / 1000.0, c.noCoreUs / 1000.0,
+			c.state, c.watchdogGapUs / 1000.0,
 			c.volSwitches, c.involSwitches, c.cpuStart, c.cpuEnd,
 			windowPhaseName(c.phaseStart), windowPhaseName(c.phaseEnd), c.threads);
 	}
@@ -1225,6 +1303,9 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		c.threads = rack::settings::threadCount;
 		int64_t delay1 = threadRunDelayNs();
 		c.noCoreUs = (delay0 >= 0 && delay1 >= delay0) ? (int32_t) ((delay1 - delay0) / 1000) : -1;
+		c.watchdogGapUs = g_watchdogGapUs.load(std::memory_order_relaxed);
+		int st = g_stuckState.load(std::memory_order_relaxed);
+		c.state = st ? (char) st : '-';
 		g_slowWrite.store(w + 1, std::memory_order_release);
 		if (percent >= WAITED_STALL_PERCENT && c.cpuUs * 2 < c.wallUs && c.threads > 1)
 			g_waitedStalls.fetch_add(1, std::memory_order_relaxed);
@@ -1350,6 +1431,10 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		int cpuStart = sched_getcpu();
 		g_callbackCpu.store(cpuStart, std::memory_order_relaxed);
 		int64_t delay0 = threadRunDelayNs();
+		g_watchdogGapUs.store(0, std::memory_order_relaxed);
+		g_stuckState.store(0, std::memory_order_relaxed);
+		g_callbackStartNs.store((int64_t) t0.tv_sec * 1000000000LL + t0.tv_nsec,
+			std::memory_order_relaxed);
 		int phaseStart = windowPhase();
 
 		const float* input = NULL;
@@ -1431,6 +1516,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			g_loadCount.fetch_add(1, std::memory_order_relaxed);
 			if (percent >= SLOW_CALLBACK_PERCENT)
 				recordSlowCallback(elapsed, percent, cpu0, ru0, cpuStart, phaseStart, delay0);
+			g_callbackStartNs.store(0, std::memory_order_relaxed);
 		}
 
 		return oboe::DataCallbackResult::Continue;
