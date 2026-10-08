@@ -276,6 +276,9 @@ int audioPortEpoch() {
 	return g_portEpoch.load(std::memory_order_relaxed);
 }
 /** How long the last silence lasted, in ms, for the log; -1 once reported. */
+/** Blocks handed back empty because they would have been written behind the
+hardware; see onAudioReady. Said by audioReportUnderruns. */
+static std::atomic<int32_t> g_lostBlocks{0};
 static std::atomic<int32_t> g_warmupEndedMs{-1};
 static std::atomic<int32_t> g_warmupStartUnderruns{0};
 /** How long the patch has been held silent so far, 0 while it is heard. */
@@ -666,8 +669,10 @@ void audioReportUnderruns() {
 		return;
 	nextReportAt = t + 1.0;
 	uint32_t packed = g_underrunBuffer.load(std::memory_order_relaxed);
-	AUDIO_WARN("Oboe: %d underruns (%d total), buffer now %d frames of %d",
-		now - lastReported, now, (int) (packed & 0xffff), (int) (packed >> 16));
+	AUDIO_WARN("Oboe: %d underruns (%d total), buffer now %d frames of %d; %d blocks "
+		"that came too late to be played were not computed",
+		now - lastReported, now, (int) (packed & 0xffff), (int) (packed >> 16),
+		g_lostBlocks.exchange(0, std::memory_order_relaxed));
 	lastReported = now;
 }
 
@@ -1006,6 +1011,7 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 	every callback. A user saying "it crackles" and a log saying "xruns 0 -> 37"
 	are not the same bug report. */
 	int32_t lastXRuns = 0;
+	int lateRun = 0; // callbacks in a row that found a new underrun
 	// Callback-thread state of the start-up silence; see g_warmupWanted.
 	bool warming = true;
 	int32_t warmGoodFrames = 0;
@@ -1390,6 +1396,21 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		if (latencyTuner)
 			latencyTuner->tune();
 		int32_t xruns = stream->getXRunCount().value();
+		// An Exclusive stream is a ring the hardware reads at its own pace,
+		// and a block written after its place has been read is never played.
+		// The stream counts one underrun for each such block and calls back
+		// at once for the next, so after a stall the engine was run flat out
+		// to produce audio nobody would hear, gaining on the hardware only by
+		// what it had to spare: a Nothing A024 at 75% of its deadline took
+		// eight seconds and 4000 underruns to make up one 0.85 s stall under
+		// its notification shade. Two late blocks in a row and the next ones
+		// are handed back empty -- which takes no time -- until the stream
+		// stops counting. Nothing audible is dropped: these blocks were lost
+		// when they came late. Not on a Shared stream, where a late block is
+		// still played.
+		lateRun = (xruns > lastXRuns) ? lateRun + 1 : 0;
+		bool lost = lateRun >= 2
+			&& stream->getSharingMode() == oboe::SharingMode::Exclusive;
 		if (xruns != lastXRuns) {
 			// Count every one of them, however small the buffer still is: this
 			// is the number that corresponds to what a listener hears. The
@@ -1417,6 +1438,12 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			g_underrunBuffer.store(
 				((uint32_t) (capacity & 0xffff) << 16) | (uint32_t) (size & 0xffff),
 				std::memory_order_relaxed);
+		}
+
+		if (lost) {
+			std::memset(output, 0, sizeof(float) * numFrames * stream->getChannelCount());
+			g_lostBlocks.fetch_add(1, std::memory_order_relaxed);
+			return oboe::DataCallbackResult::Continue;
 		}
 
 		// The callback thread is one of the threads ADPF needs to know about,
