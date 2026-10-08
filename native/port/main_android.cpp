@@ -2024,6 +2024,27 @@ static void checkThreadCount() {
 	if (g_audioCpuLostAt > 0.0 && now - g_audioCpuLostAt < 20.0)
 		resuming = true;
 	if ((rackdroid::audioFocusDisturbed() || resuming) && !sweepWanted) {
+		// Nothing is decided here, but what the engine is going through is
+		// still written down once a second: a Nothing A024 underran 600 times
+		// a second for eight seconds after its notification shade closed,
+		// back on cpu7, and the log could not say whether the core was slow
+		// or a Worker was on a small one.
+		static double saidAt = 0.0;
+		static int32_t saidTotal = 0;
+		if (now - saidAt >= 1.0) {
+			int32_t peakNow = 0, meanNow = 0;
+			rackdroid::audioEngineLoadTake(&peakNow, &meanNow);
+			if (total > saidTotal && saidAt > 0.0 && now - saidAt < 2.0) {
+				LOGI("Engine: holding still, %d underruns in %.1fs at %d threads: load %d%% "
+					"(peak %d%%), callback on cpu%d at %d%% of its top frequency (%s)",
+					(int) (total - saidTotal), now - saidAt, settings::threadCount, meanNow, peakNow,
+					rackdroid::audioCallbackCpu(), callbackCoreSpeed() / 10,
+					audioCpuContext(rackdroid::audioCallbackThreadTid()).c_str());
+				reportEngineThreadCores();
+			}
+			saidAt = now;
+			saidTotal = total;
+		}
 		windowStartedAt = now;
 		windowStartCount = total;
 		windowTouched = false;
