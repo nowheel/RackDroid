@@ -227,15 +227,6 @@ void audioWarmupBegin() {
 	g_warmupWanted.store(true, std::memory_order_relaxed);
 }
 
-/** Silence for as long as the callbacks keep coming in late, eight seconds at
-the most: what is played instead of a flood of underruns that is known to be
-on its way. Ends by itself on the first fifth of a second in time. */
-void audioRideOut() {
-	g_warmupLimitSec.store(8, std::memory_order_relaxed);
-	g_warmupHold.store(false, std::memory_order_relaxed);
-	g_warmupWanted.store(true, std::memory_order_relaxed);
-}
-
 /** Audio focus, as Android reports it to MainActivity: whether it is ours at
 the moment, and when that last changed. Losing it for a moment is what a
 volume key does on a Nothing A024 -- the system plays its own tick -- and for

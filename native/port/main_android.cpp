@@ -906,13 +906,6 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 		if (before >= 0 && !repin) {
 			g_audioCpusGivenUp |= (uint64_t) 1 << before;
 			g_audioCpuLostAt = system::getTime();
-			// What follows a core letting go is known: on a Nothing A024, as
-			// the screen came back and once with it on, 350 to 600 underruns a
-			// second for four to seven seconds while the callback found its
-			// feet on another core, and then clean. Nothing here can stop the
-			// SoC doing that; it can be silence instead of that, for exactly
-			// as long as the callbacks keep coming in late.
-			rackdroid::audioRideOut();
 		}
 		g_pinnedAudioTid = audioTid;
 		g_pinnedAudioCpu = -1;

@@ -187,7 +187,6 @@ int audioPortEpoch();
 deciding how the patch should be run. */
 void audioWarmupHold(bool hold);
 void audioWarmupBegin();
-void audioRideOut();
 /** Milliseconds the patch has been held silent so far; 0 while it is heard. */
 int32_t audioSilentMs();
 
