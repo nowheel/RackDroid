@@ -1732,7 +1732,16 @@ static void checkThreadCount() {
 
 	// While another app has the audio focus, and just after: nothing is judged
 	// and nothing is counted. See audioFocusDisturbed().
-	if (rackdroid::audioFocusDisturbed() && !sweepWanted) {
+	// Nor for a quarter of a minute after the screen comes back. A Nothing
+	// A024 unlocked on three threads at 67% ran at 127% for the next ten
+	// seconds or so -- every callback slow alike, the phone not yet back up to
+	// speed -- at 20 to 65 underruns a second. The tuner took that for the
+	// patch: two threads (500 a second), a 256-frame block and a reopened
+	// stream, a silent measurement, and twenty-six seconds after the unlock it
+	// was back on three threads at 66%, where it had been all along.
+	static const double RESUME_GRACE_SEC = 15.0;
+	bool resuming = rackdroid::windowSecondsSinceSurfaceChange() < RESUME_GRACE_SEC;
+	if ((rackdroid::audioFocusDisturbed() || resuming) && !sweepWanted) {
 		windowStartedAt = now;
 		windowStartCount = total;
 		windowTouched = false;
@@ -2603,7 +2612,8 @@ static void checkBlockSizeOverload() {
 
 	// Not on what happens while another app has the audio focus, nor on what
 	// was left over from measuring a patch.
-	if (rackdroid::audioFocusDisturbed() || system::getTime() - g_sweptAt < 15.0)
+	if (rackdroid::audioFocusDisturbed() || system::getTime() - g_sweptAt < 15.0
+			|| rackdroid::windowSecondsSinceSurfaceChange() < 15.0)
 		return;
 	// The next size up is not tried again while it is remembered as no easier
 	// than this one.
