@@ -1051,12 +1051,13 @@ static void checkWorkerPriority() {
 pipeline -- so the engine's own thread pool never wants every core at once.
 See engineThreadCeiling() for why one core, unconditionally, rather than a
 fraction: a real device (OnePlus 8T, 8 cores) went sluggish system-wide, not
-just RackDroid, the moment the pool held all 8 at real audio priority
-(applyWorkerPriority() above). Android's own cpuset reservations (RenderThread
-and friends normally live in "top-app"/"foreground") don't help here, because
-moving Workers into the real-time scheduling class is specifically what lets
-them preempt across that boundary -- the same privilege that fixed the
-underruns in the first place. Lowering the priority back down for some
+just RackDroid, the moment the pool held all 8 at nice -19
+(applyWorkerPriority() above -- the most an app may give its own threads; they
+stay in the ordinary scheduling class, only the callback is SCHED_FIFO).
+Android's own cpuset reservations (RenderThread and friends normally live in
+"top-app"/"foreground") don't help here, because eight threads at that weight
+that never sleep take nearly all of every core from everything else -- the
+same weight that fixed the underruns in the first place. Lowering the priority back down for some
 Workers was considered and rejected: the engine's barrier syncs every worker
 twice per sample, so ANY one of them left preemptible stalls all the others
 just as effectively as before the priority fix existed -- there is no such
@@ -2115,43 +2116,16 @@ static void checkThreadCount() {
 		}
 	}
 
-	// A score is only evidence while the conditions that produced it still
-	// hold. Past this, treat the rung as never measured and let the search go
-	// and look again -- which is what breaks the deadlock described above.
-	// Parked on an overload, the ladder is only walked again every five
-	// minutes: each walk passes through the ceiling, and nothing but the phone
-	// cooling down can have changed the answer.
-	// Five minutes, not one. What a stale score does is send the search to
-	// "an unmeasured neighbour" at the next underrun, out loud; the counts are
-	// measured in silence when the patch loads now, and that knowledge should
-	// not be thrown away every minute to be relearned by ear.
-	static const double SCORE_TTL_SEC = 300.0;
-	static const double OVERLOAD_TTL_SEC = 300.0;
-	double scoreTtl = g_engineOverloaded ? OVERLOAD_TTL_SEC : SCORE_TTL_SEC;
-	auto known = [&](int i) {
-		return i >= 1 && i <= MAX_TRACKED_THREADS && scores[i] >= 0
-			&& now - scoreAt[i] < scoreTtl;
-	};
 
-	// Clean at a count that is more than it needs is not a happy ending. The
-	// ladder only ever moves when it underruns, so once something transient --
-	// a heavy moment, another app, a thermal dip -- has pushed the count up,
-	// nothing brings it back down again. Measured here: an S22 driven to seven
-	// threads by an artificial load stayed at seven when the load went away,
-	// burning 712% of 800% on a patch that had run clean at four. That is
-	// battery and heat spent on nothing, which is the very thing this whole
-	// mechanism exists to avoid.
-	//
-	// So when a count has held clean for a while, spend one window asking
-	// whether a smaller one would do. Only downward, only towards a rung that
-	// is unmeasured or was clean itself, and with the interval doubling after
-	// a probe that fails, so a device that genuinely needs its cores is not
-	// poked at forever.
-	static double probeAfter = 60.0;
-	static const double PROBE_AFTER_MIN = 60.0;
-	static const double PROBE_AFTER_MAX = 600.0;
-	static double cleanSince = 0.0;
-	static int probedFrom = -1;
+	// Nothing below moves the count while the patch is clean and has room.
+	// A minute clean used to earn a try at one thread fewer, out loud, to
+	// bring back a count something passing had pushed up. Counts only go up
+	// now to one the silent measurement found easier, so there is little to
+	// bring back, and the probe was itself what moved a settled engine: a
+	// OnePlus 8T went from three threads to two and back twice in five minutes
+	// on it. What is measured when the patch loads holds until the patch, the
+	// block size or the sample rate changes -- the readings do not go stale,
+	// and an overloaded patch is not measured again every five minutes.
 
 	auto measureAgain = [&](const char* why) {
 		LOGW("Engine: %d underruns in %.1fs at %d threads (%d%% of the deadline, "
@@ -2179,16 +2153,13 @@ static void checkThreadCount() {
 	};
 	int measuredCounts = 0;
 	for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
-		if (loads[i] > 0 && now - scoreAt[i] < 600.0)
+		if (loads[i] > 0)
 			measuredCounts++;
 	// Never into a recording: the silence would be on the tape.
 	bool mayMeasure = now - sweptAt >= 60.0 && !rackdroid::audioIsRecording();
 	if (resetLate) {
 		// The rest of what a new patch forgets; these live further down.
 		resetLate = false;
-		probedFrom = -1;
-		probeAfter = PROBE_AFTER_MIN;
-		cleanSince = 0.0;
 	}
 
 	if (underruns == 0) {
@@ -2202,7 +2173,6 @@ static void checkThreadCount() {
 			LOGI("Engine: the callback's core (cpu%d) reads %d%% of its top frequency",
 				rackdroid::audioCallbackCpu(), callbackCoreSpeed() / 10);
 			settledAt = current;
-			cleanSince = now;
 		}
 		rememberThreadCount(current);
 
@@ -2223,26 +2193,6 @@ static void checkThreadCount() {
 			g_lastCleanLoad = loadMean;
 			noteBlockLoad(loadMean);
 		}
-		if (probedFrom >= 0 && loadKnown && loadMean >= NEAR_LIMIT_PERCENT - 25) {
-			// Fewer threads did not underrun in this window, and would have in
-			// the next busy one. Not good enough to stay.
-			LOGI("Engine: %d threads ran clean but at %d%% of the audio deadline; "
-				"%d it is, then", current, loadMean, probedFrom);
-			settings::threadCount = probedFrom;
-			windowTouched = true;
-			// Settled there, not searching: a search rules a count out at 90%
-			// of the deadline without waiting for an underrun, which is right
-			// while looking for somewhere to stand and wrong for a count that
-			// has been standing at 91% for minutes. Going back "to search" sent
-			// an SM-S901E from a clean four threads down to two and 200
-			// underruns.
-			settledAt = probedFrom;
-			probedFrom = -1;
-			probeAfter = (probeAfter * 2.0 > PROBE_AFTER_MAX) ? PROBE_AFTER_MAX : probeAfter * 2.0;
-			cleanSince = now;
-			nearLimitWindows = 0;
-			return;
-		}
 		if (raisedFrom >= 0) {
 			// The first clean window after going up ahead of trouble: it has to
 			// have bought something, or the extra Worker is heat for nothing.
@@ -2256,7 +2206,6 @@ static void checkThreadCount() {
 				noRaiseUntil = now + 600.0;
 				settledAt = raisedFrom; // settled, not searching: see above
 				raisedFrom = -1;
-				cleanSince = now;
 				nearLimitWindows = 0;
 				return;
 			}
@@ -2270,14 +2219,13 @@ static void checkThreadCount() {
 			// them 2186 underruns in five seconds. Finding out is a crackle.
 			int upper = current + 1;
 			bool upperKnownEasier = upper <= MAX_TRACKED_THREADS && loads[upper] > 0
-				&& now - scoreAt[upper] < 600.0 && loads[upper] + 5 < loadMean;
+				&& loads[upper] + 5 < loadMean;
 			if (upper <= ceiling && upperKnownEasier && now >= noRaiseUntil) {
 				LOGW("Engine: clean at %d threads but at %d%% of the audio deadline; "
 					"trying %d before it is heard", current, loadMean, upper);
 				raisedFrom = current;
 				raisedFromLoad = loadMean;
 				settledAt = upper; // judged on a full window, like any settled count
-				cleanSince = 0.0;
 				settings::threadCount = upper;
 				windowTouched = true;
 				return;
@@ -2306,62 +2254,9 @@ static void checkThreadCount() {
 			}
 		}
 
-		if (probedFrom >= 0) {
-			// The probe held: the smaller count is doing the job.
-			LOGI("Engine: %d threads is enough after all; staying here instead "
-				"of %d", current, probedFrom);
-			probedFrom = -1;
-			probeAfter = PROBE_AFTER_MIN;
-		}
-		int lower = current - 1;
-		// Same staleness rule as the search: a rung is worth probing if it was
-		// never measured, measured clean, or measured so long ago that the
-		// conditions have moved on. Reading scores[] raw here instead cost a
-		// real bug -- a rung scored badly while another app was hogging the
-		// phone stayed "known bad" for the rest of the session, and the engine
-		// sat a rung higher than it needed to, for ever.
-		bool worthProbing = !known(lower) || scores[lower] == 0;
-		// And only where one thread fewer would plausibly still fit. The same
-		// work on one thread less costs about current/lower as much of the
-		// deadline; if that lands near the limit the probe is not a question,
-		// it is a crackle with a foregone answer -- four threads at 90% were
-		// probed down to three at 94% and two at 110% on an SM-S901E.
-		// Where the count below was measured in silence when the patch loaded,
-		// that measurement decides, and no estimate is needed.
-		bool lowerMeasured = lower >= 1 && lower <= MAX_TRACKED_THREADS
-			&& loads[lower] > 0 && now - scoreAt[lower] < 600.0;
-		bool roomToProbe = loadKnown && lower >= 1
-			&& (lowerMeasured ? loads[lower] < NEAR_LIMIT_PERCENT - 25
-				: loadMean * current / lower < NEAR_LIMIT_PERCENT - 30);
-		if (cleanSince > 0.0 && now - cleanSince >= probeAfter
-				&& lower >= floorCount && worthProbing && roomToProbe) {
-			LOGI("Engine: clean at %d threads for %.0fs; trying %d to see if "
-				"fewer will do", current, now - cleanSince, lower);
-			probedFrom = current;
-			cleanSince = 0.0;
-			settledAt = -1;
-			settings::threadCount = lower;
-			windowTouched = true;
-		}
 		return;
 	}
 	settledAt = -1;
-	cleanSince = 0.0;
-	if (probedFrom >= 0) {
-		// The probe cost us a window. Go straight back rather than letting the
-		// ladder wander, and wait longer before asking again.
-		LOGW("Engine: %d underruns in %.1fs at %d threads; %d it is, then",
-			rawUnderruns, windowLen, current, probedFrom);
-		if (current >= 1 && current <= MAX_TRACKED_THREADS) {
-			scores[current] = underruns;
-			scoreAt[current] = now;
-		}
-		settings::threadCount = probedFrom;
-		windowTouched = true;
-		probedFrom = -1;
-		probeAfter = (probeAfter * 2.0 > PROBE_AFTER_MAX) ? PROBE_AFTER_MAX : probeAfter * 2.0;
-		return;
-	}
 	toleratedRuns = 0;
 
 	// No count is tried out loud any more. This used to be where the search
@@ -2406,7 +2301,7 @@ static void checkThreadCount() {
 		static const int32_t NOTHING_LEFT_PERCENT = 200;
 		int32_t lightest = loadMean;
 		for (int i = floorCount; i <= ceiling && i <= MAX_TRACKED_THREADS; i++)
-			if (loads[i] > 0 && now - scoreAt[i] < 600.0 && loads[i] < lightest)
+			if (loads[i] > 0 && loads[i] < lightest)
 				lightest = loads[i];
 		bool nothingLeft = overWindows >= 2 && lightest > NOTHING_LEFT_PERCENT;
 		// A count the silent measurement found inside the deadline, where this
@@ -2415,7 +2310,7 @@ static void checkThreadCount() {
 		int fits = -1;
 		for (int i = floorCount; overWindows >= 2 && fits < 0 && i <= ceiling
 				&& i <= MAX_TRACKED_THREADS; i++)
-			if (i != current && loads[i] > 0 && now - scoreAt[i] < 600.0
+			if (i != current && loads[i] > 0
 					&& loads[i] < OVERLOAD_PERCENT && loads[i] + 10 < loadMean)
 				fits = i;
 		// The measurement stops at the first count that fits, so it may have
@@ -2438,8 +2333,7 @@ static void checkThreadCount() {
 			}
 		}
 		else if (overWindows >= 2 && mayMeasure
-				&& (measuredCounts < (countsThere < 3 ? countsThere : 3)
-					|| now - sweptAt > 300.0)) {
+				&& measuredCounts < (countsThere < 3 ? countsThere : 3)) {
 			overWindows = 0;
 			if (proven) {
 				priorCount = current;

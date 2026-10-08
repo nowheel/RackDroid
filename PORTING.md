@@ -225,12 +225,19 @@ Obiettivo: vedere il rack renderizzato e interagirci.
 - **Salire è facile, scendere no.** La scala si muove solo quando fa underrun,
   quindi qualunque cosa transitoria la spinga in alto ce la lascia per il resto
   della sessione: un S22 portato a 7 thread da un carico artificiale ci restava
-  a carico finito, 712% di 800% su una patch che girava pulita a 4 (422%). Ora
-  un conteggio che regge pulito per un minuto spende una finestra a provare
-  quello sotto, e l'intervallo raddoppia dopo ogni sonda fallita (max 10 min).
-- **Pavimento a 2 thread.** Su nessun dispositivo 1 è mai risultato il gradino
-  migliore: sull'8T 1 e 2 erano entrambi puliti, sull'S22 1 ha prodotto 78
-  underrun in una finestra dove 2 ne faceva 7. Provarlo non guadagna mai nulla.
+  a carico finito, 712% di 800% su una patch che girava pulita a 4 (422%). Per
+  questo esisteva una sonda verso il basso dopo un minuto pulito. **Tolta
+  (2026-10-08):** il numero ora sale solo verso uno che la misura in silenzio
+  ha trovato più leggero, quindi c'è poco da riportare giù, e la sonda era lei
+  stessa a muovere un motore fermo (OnePlus 8T: 3 → 2 → 3 due volte in cinque
+  minuti). Ciò che si misura al caricamento vale finché non cambiano patch,
+  blocco o frequenza: le letture non scadono e una patch in sovraccarico non
+  viene rimisurata ogni cinque minuti. Il costo accettato: una patch misurata a
+  telefono caldo resta sul numero scelto anche quando si raffredda.
+- **Pavimento a 1 thread** (era 2). La misura in silenzio parte da 1 e prende
+  il minor numero di thread sotto l'80% della scadenza (`thread_choice.hpp`):
+  una patch leggera sta su un thread solo. Il vecchio pavimento a 2 veniva da
+  prove fatte per underrun, ad alta voce, prima che esistesse la misura.
 - **Tolleranza proporzionata alla fiducia**: un gradino già dimostrato pulito
   regge fino a 4 underrun isolati per finestra (max 3 finestre), uno mai
   provato solo 1. Un underrun isolato è tanto probabilmente una notifica quanto
