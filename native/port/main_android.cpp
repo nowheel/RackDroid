@@ -459,6 +459,16 @@ static void handleCmd(android_app* app, int32_t cmd) {
 
 
 static void handleCmdInner(RackDroidApp* rd, int32_t cmd) {
+	// Into the log a user can send: without these a burst of underruns cannot
+	// be told from the screen going off, the app leaving, or neither.
+	const char* what = cmd == APP_CMD_INIT_WINDOW ? "window created"
+		: cmd == APP_CMD_TERM_WINDOW ? "window going away"
+		: cmd == APP_CMD_GAINED_FOCUS ? "focus gained"
+		: cmd == APP_CMD_LOST_FOCUS ? "focus lost"
+		: cmd == APP_CMD_START ? "start" : cmd == APP_CMD_RESUME ? "resume"
+		: cmd == APP_CMD_PAUSE ? "pause" : cmd == APP_CMD_STOP ? "stop" : NULL;
+	if (what && rd->rackStarted)
+		LOGI("App: %s", what);
 	switch (cmd) {
 		case APP_CMD_INIT_WINDOW:
 			rd->startRack();
@@ -1762,6 +1772,28 @@ static void checkThreadCount() {
 		}
 		if (now - sweepSliceAt >= SWEEP_SLICE_SEC && sweepCallbacks >= 4) {
 			int32_t slice = (int32_t) (sweepSum / sweepCallbacks);
+			// The first slice at a count is not that count's if it underran:
+			// those are left from the count before it, or from the patch
+			// starting. Three threads on a Nothing A024 read 82% in a first
+			// slice with 246 underruns in it and 75% in the next, the 82 was
+			// kept as the worse, and the patch was started on four -- where
+			// the callback then waited for its Workers all the time.
+			static int32_t carriedFrom = 0;
+			static double carriedStepAt = -1.0;
+			if (sweepSlices == 0 && carriedStepAt != sweepStepAt) {
+				carriedStepAt = sweepStepAt;
+				if (total > carriedFrom) {
+					LOGI("Engine: measuring %d threads, a first slice of %d%% with %d "
+						"underruns in it is not counted", settings::threadCount, slice,
+						(int) (total - carriedFrom));
+					carriedFrom = total;
+					sweepSum = 0;
+					sweepCallbacks = 0;
+					sweepSliceAt = now;
+					return;
+				}
+			}
+			carriedFrom = total;
 			if (slice > sweepWorst)
 				sweepWorst = slice;
 			sweepSlices++;
@@ -2016,6 +2048,15 @@ static void checkThreadCount() {
 	stallWindows = (judged && stalls >= rackdroid::ThreadChoice::STALLS_PER_WINDOW)
 		? stallWindows + 1 : 0;
 	int fewer = rackdroid::ThreadChoice::fewerForStalls(loads, floorCount, current, stallWindows);
+	// A Nothing A024 on four threads had 3, 5, 8 and 4 of these in four
+	// windows running, three threads measured at 82%, and stayed where it
+	// was. Which condition held it there is not in that log; it is in this.
+	if (stalls >= rackdroid::ThreadChoice::STALLS_PER_WINDOW && current > 1)
+		LOGI("Engine: the callback waited for a Worker %d times in %.1fs at %d threads "
+			"(window %s, %s, %d in a row; %d threads measured %d%%)%s",
+			stalls, windowLen, current, touched ? "disturbed" : "undisturbed",
+			settledAt == current ? "settled" : "not settled", stallWindows,
+			current - 1, loads[current - 1], fewer > 0 ? "" : "; staying");
 	if (fewer > 0) {
 		LOGW("Engine: at %d threads the callback waited for a Worker %d times in %.1fs "
 			"(%d%% of the deadline), a second window running; %d measured %d%% -- going there",
