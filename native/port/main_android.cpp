@@ -724,6 +724,17 @@ and dropped it at 4 s, and until the next look the callback wandered over the
 Workers' cores: four callbacks of 43-75 ms, 8 underruns. The second-fastest
 core, which stays up, is the better home. */
 static uint64_t g_audioCpusGivenUp = 0;
+/** When the callback last lost a core, and how long to wait before asking for
+the best one again. "Not asked again that session" was too long: a Nothing
+A024 takes cpu7 away as the screen comes back on and has it running again a
+few seconds later -- for the Workers, by then, with the callback left on a
+slower core at 88% of its deadline instead of 67%, saturating it, stalled
+there by the kernel for 95 ms every 1.35 s, and underrunning 500 times a
+second for as long as the session lasted. Asked again after fifteen seconds,
+then a minute, then four, so a core that really is gone costs three tries. */
+static double g_audioCpuLostAt = 0.0;
+static double g_audioCpuRetryAfter = 15.0;
+static bool g_audioRepinWanted = false;
 
 /** True while the callback thread is still on the one core it was given.
 
@@ -887,11 +898,15 @@ static void applyWorkerAffinity(const std::vector<int>& workers) {
 	// thread, and checkWorkerPriority() calls back here for that and for a
 	// pin that failed or was undone.
 	int audioTid = rackdroid::audioCallbackThreadTid();
-	if (audioCpu >= 0 && audioTid > 0 && !audioStillPinned()) {
+	bool repin = g_audioRepinWanted;
+	g_audioRepinWanted = false;
+	if (audioCpu >= 0 && audioTid > 0 && (repin || !audioStillPinned())) {
 		int before = g_pinnedAudioTid == audioTid ? g_pinnedAudioCpu : -2;
 		// Same thread, and it had a core: that core let go of it.
-		if (before >= 0)
+		if (before >= 0 && !repin) {
 			g_audioCpusGivenUp |= (uint64_t) 1 << before;
+			g_audioCpuLostAt = system::getTime();
+		}
 		g_pinnedAudioTid = audioTid;
 		g_pinnedAudioCpu = -1;
 		int err = 0;
@@ -1044,7 +1059,17 @@ static void checkWorkerPriority() {
 		// Only the affinity: priority and ADPF have not changed, and each
 		// would say so in the log every two seconds.
 		std::vector<int> workers = collectWorkerThreads();
-		if (g_audioPinWanted && (!audioStillPinned() || workersLoose(workers)))
+		// A core given up is asked for again once it has had time to come back.
+		if (g_audioCpusGivenUp != 0 && g_audioCpuRetryAfter <= 240.0
+				&& system::getTime() - g_audioCpuLostAt >= g_audioCpuRetryAfter) {
+			LOGI("Engine: asking again for the core the audio callback lost %.0fs ago",
+				system::getTime() - g_audioCpuLostAt);
+			g_audioCpusGivenUp = 0;
+			g_audioCpuLostAt = system::getTime();
+			g_audioCpuRetryAfter *= 4.0;
+			g_audioRepinWanted = true;
+		}
+		if (g_audioPinWanted && (g_audioRepinWanted || !audioStillPinned() || workersLoose(workers)))
 			applyWorkerAffinity(workers);
 	}
 	if (applyAt > 0.0 && system::getTime() >= applyAt) {
@@ -2039,6 +2064,18 @@ static void checkThreadCount() {
 	// going off and a sweep all make the callback wait at any count. The
 	// count left behind is marked as not fitting, so nothing sends the engine
 	// back up to it; a new patch forgets that with the rest.
+	// How long the engine has been on this count. A count is only "what the
+	// patch was running clean on" -- worth going back to after something
+	// pushed it over -- once it has held for a minute: a Nothing A024 chose
+	// one thread, ran one clean window, underran 1458 times in the next, was
+	// moved to three, and was then taken back to one after 40 s, 2 min and
+	// 8 min, a few thousand underruns each time.
+	static int heldCount = -1;
+	static double heldSince = 0.0;
+	if (current != heldCount) {
+		heldCount = current;
+		heldSince = now;
+	}
 	static uint32_t stallsSeen = 0;
 	static int stallWindows = 0;
 	uint32_t stallsNow = rackdroid::audioWaitedStalls();
@@ -2212,7 +2249,7 @@ static void checkThreadCount() {
 			priorCount = -1;
 		else if (loadSamples < LOAD_MIN_SAMPLES)
 			priorTryAt = now + 5.0; // no reading to judge by yet
-		else if (!overNow && priorLoad > 0 && loadMean <= priorLoad + 5) {
+		else if (!overNow && (priorLoad <= 0 || loadMean <= priorLoad + 5)) {
 			// Where it is now is no worse than where it was: nothing to go
 			// back for. Without this a OnePlus 8T was taken from two threads
 			// at 47% back to three, twice in five minutes, and each time the
@@ -2384,6 +2421,7 @@ static void checkThreadCount() {
 	// at again they are looked at the way a new patch is -- in silence, by
 	// load -- and not more than once a minute.
 	int candidate = -1;
+	static int floodWindows = 0;
 	if (!overNow) {
 		// Underrunning, but inside its deadline on average: jitter, which the
 		// buffer is for, or something outside this app. Nothing is done about
@@ -2391,6 +2429,17 @@ static void checkThreadCount() {
 		// re-measurement, and a drag across the rack on an SM-S901E was enough
 		// to earn six seconds of silence in the middle of a patch that was
 		// playing. A few clicks are a smaller thing than that.
+		// Hundreds a second for three windows running are not a few clicks,
+		// though, and not jitter: it is the callback filling its own core and
+		// being stalled there, which reads as 95-104% and never as "over". A
+		// Nothing A024 sat in that for twenty-eight seconds, 530 underruns a
+		// second, with nothing here taking any notice.
+		floodWindows = (!touched && underruns >= 500) ? floodWindows + 1 : 0;
+		if (floodWindows >= 3 && mayMeasure) {
+			floodWindows = 0;
+			measureAgain("three windows running");
+			return;
+		}
 	}
 	else if (measuredCounts < 2 && mayMeasure) {
 		// Over its deadline at a count chosen without measuring the others
@@ -2443,7 +2492,7 @@ static void checkThreadCount() {
 			// where the app going to the background and returning put five
 			// threads at 83% over for two windows, and three at 92% is where
 			// it then stayed.
-			if (proven) {
+			if (proven && now - heldSince >= 60.0) {
 				priorCount = current;
 				priorLoad = g_lastCleanLoad;
 				priorWait = 30.0;
@@ -2453,7 +2502,7 @@ static void checkThreadCount() {
 		else if (overWindows >= 2 && mayMeasure
 				&& measuredCounts < (countsThere < 3 ? countsThere : 3)) {
 			overWindows = 0;
-			if (proven) {
+			if (proven && now - heldSince >= 60.0) {
 				priorCount = current;
 				priorLoad = g_lastCleanLoad;
 				priorWait = 30.0;

@@ -45,8 +45,11 @@ static void expect(const char* what, std::vector<int32_t> truth, int start, int 
 int main() {
 	// Nothing A024, 177 modules, 0.1.2.67: five threads at 51% underran 400
 	// times in a window of pinching. One thread fits and waits for nobody.
-	expect("A024 heavy, the day five was chosen", {72, 94, 65, 61, 51, 80, 90}, 2, 1);
-	expect("same, coming from five threads", {72, 94, 65, 61, 51, 80, 90}, 5, 1);
+	// Three, not one: one thread at 72% is the reading that then played at
+	// 109% (see SOLO_COMFORT_PERCENT), four times on this phone.
+	expect("A024 heavy, the day five was chosen", {72, 94, 65, 61, 51, 80, 90}, 2, 3);
+	expect("same, coming from five threads", {72, 94, 65, 61, 51, 80, 90}, 5, 3);
+	expect("A024 0.1.2.87, 1:71% 3:65%", {71, 94, 65, 61, 51, 80, 90}, 3, 3);
 	// The same patch on other days.
 	expect("A024 heavy, 0.1.2.66", {110, 95, 125, 130, 140, 150, 160}, 1, 2);
 	expect("A024 heavy, 0.1.2.69", {114, 100, 81, 68, 70, 75, 90}, 2, 4);

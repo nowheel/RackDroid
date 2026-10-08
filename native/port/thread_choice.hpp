@@ -62,14 +62,30 @@ struct ThreadChoice {
 		return (loads[lower] > 0 && loads[lower] < FEWER_FITS_PERCENT) ? lower : 0;
 	}
 
+	/** One thread is comfortable only under this. With no Workers the callback
+	does all the work on its own core and never sleeps, the governor holds
+	that core at a speed where the reading looks fine, and the kernel stalls
+	a thread that fills a core: a Nothing A024 read 1:71% in four slices
+	running, was started on one thread, and played at 109% with a 100 ms hole
+	every 1.35 s -- 450 underruns a second -- as it had each of the three
+	times before that one thread read between 68 and 77. With Workers the
+	callback spends most of each block waiting, and 65% on three was clean. */
+	static constexpr int32_t SOLO_COMFORT_PERCENT = 60;
+
+	static bool fits(const int32_t* loads, int c) {
+		return loads[c] > 0 && loads[c] < (c == 1 ? SOLO_COMFORT_PERCENT : COMFORT_PERCENT);
+	}
+
 	/** The fewest comfortable count, or 0 where none is. */
 	static int comfortable(const int32_t* loads, int floor, int top) {
 		int comfy = 0;
 		for (int c = floor; c <= top && comfy == 0; c++)
-			if (loads[c] > 0 && loads[c] < COMFORT_PERCENT)
+			if (fits(loads, c))
 				comfy = c;
+		// A lower count within a few points wins -- but never one thread that
+		// is not comfortable by its own, stricter measure.
 		for (int c = floor; c < comfy; c++)
-			if (loads[c] > 0 && loads[c] <= loads[comfy] + NEAR_POINTS)
+			if (loads[c] > 0 && loads[c] <= loads[comfy] + NEAR_POINTS && (c > 1 || fits(loads, c)))
 				return c;
 		return comfy;
 	}
