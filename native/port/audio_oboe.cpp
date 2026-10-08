@@ -277,6 +277,12 @@ int audioPortEpoch() {
 /** How long the last silence lasted, in ms, for the log; -1 once reported. */
 static std::atomic<int32_t> g_warmupEndedMs{-1};
 static std::atomic<int32_t> g_warmupStartUnderruns{0};
+/** How long the patch has been held silent so far, 0 while it is heard. */
+static std::atomic<int32_t> g_silentMs{0};
+
+int32_t audioSilentMs() {
+	return g_silentMs.load(std::memory_order_relaxed);
+}
 
 int32_t audioCeilingUnderrunCount() {
 	return g_ceilingUnderruns.load(std::memory_order_relaxed);
@@ -1223,10 +1229,13 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 			if ((warmGoodFrames >= rate / 5 && !g_warmupHold.load(std::memory_order_relaxed))
 					|| warmFrames >= rate * g_warmupLimitSec.load(std::memory_order_relaxed)) {
 				warming = false;
+				g_silentMs.store(0, std::memory_order_relaxed);
 				g_warmupEndedMs.store((int32_t) ((int64_t) warmFrames * 1000 / rate),
 					std::memory_order_relaxed);
 			}
 			else {
+				g_silentMs.store((int32_t) ((int64_t) warmFrames * 1000 / rate),
+					std::memory_order_relaxed);
 				std::fill_n(output, (size_t) numFrames * channels, 0.f);
 				return;
 			}

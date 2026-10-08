@@ -187,6 +187,8 @@ int audioPortEpoch();
 deciding how the patch should be run. */
 void audioWarmupHold(bool hold);
 void audioWarmupBegin();
+/** Milliseconds the patch has been held silent so far; 0 while it is heard. */
+int32_t audioSilentMs();
 
 /** True while another app has the audio focus and for five seconds after it
 changes hands: underruns then are the system's, not the patch's. */

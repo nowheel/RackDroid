@@ -1047,6 +1047,25 @@ static void checkWorkerPriority() {
 	}
 }
 
+/** Tells Java when the audio has been held silent for a second, and when it
+is let out again: notices 4 and 5, a card with a spinner in between.
+
+An app that opens without a sound for some seconds looks broken. The silence
+is the patch being measured at each thread count (five seconds on a Nothing
+A024 with a heavy patch) or waiting for callbacks to come in on time (ten on a
+hot OnePlus 8T, with no measurement at all), so it is the silence itself that
+is watched, not either cause. Under a second nothing is said: a light patch is
+through before a card could be read. */
+static void reportSilence() {
+	static bool said = false;
+	bool silent = rackdroid::audioSilentMs() >= 1000;
+	if (silent == said)
+		return;
+	said = silent;
+	rackdroid::showEngineNotice(silent ? 4 : 5);
+}
+
+
 /** Held back for Android itself -- the compositor, system_server, the touch
 pipeline -- so the engine's own thread pool never wants every core at once.
 See engineThreadCeiling() for why one core, unconditionally, rather than a
@@ -1597,7 +1616,6 @@ static void checkThreadCount() {
 	static int sweepVerifyOf = 0;
 	static int sweepVerifies = 0;
 	static bool sweepRecovering = false;
-	static bool sweepSaid = false; // the "measuring" card is up
 	// A different block size is a different question too: the same patch that
 	// overran every count at 128 frames ran clean at 256.
 	// And so is a different engine sample rate: at half the rate the same patch
@@ -1793,13 +1811,6 @@ static void checkThreadCount() {
 		sweepSliceAt = now;
 		if (next > 0) {
 			sweepCount++;
-			// More than one count to look at: seconds of silence, on a slow
-			// device several, and an app that opens silent looks broken.
-			// Say what is going on; Java takes the card down on notice 5.
-			if (!sweepSaid) {
-				sweepSaid = true;
-				rackdroid::showEngineNotice(4);
-			}
 			settings::threadCount = next;
 			return;
 		}
@@ -1843,10 +1854,6 @@ static void checkThreadCount() {
 			}
 		}
 		sweepWanted = false;
-		if (sweepSaid) {
-			sweepSaid = false;
-			rackdroid::showEngineNotice(5);
-		}
 		sweepConfirming = false;
 		sweepVerifyOf = 0;
 		sweepVerifies = 0;
@@ -2219,10 +2226,6 @@ static void checkThreadCount() {
 		sweepSlices = 0;
 		sweepSliceAt = now;
 		settledAt = -1;
-		if (!sweepSaid) {
-			sweepSaid = true;
-			rackdroid::showEngineNotice(4);
-		}
 		rackdroid::audioWarmupBegin();
 	};
 	int measuredCounts = 0;
@@ -3075,6 +3078,7 @@ void android_main(android_app* app) {
 					reportEngineThreadCores();
 				rackdroid::audioReleaseIdleDevice();
 				rackdroid::audioReportUnderruns();
+				reportSilence();
 				rackdroid::audioReportLatency();
 				// Only once the engine has stopped thrashing about: the
 				// buffer means nothing while the patch is still loading.
