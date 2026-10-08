@@ -67,6 +67,8 @@ void audioEngineLoadTake(int32_t* peak, int32_t* mean, int32_t* callbacks = null
 /** Callbacks so far that slept through most of four deadlines waiting for a
 Worker. Only ever grows; the reader keeps the count it last saw. */
 uint32_t audioWaitedStalls();
+/** The diagnostic watchdog thread's id, 0 until it runs. */
+int audioWatchdogTid();
 
 /** Frames the last audio callback was actually asked to produce, or 0 before
 the first one. NOT the engine's block size: alignToBurst() rounds the request to

@@ -430,6 +430,16 @@ callback thread's state once a callback has been going for 20 ms. */
 static std::atomic<int64_t> g_callbackStartNs{0}; // 0 between callbacks
 static std::atomic<int32_t> g_watchdogGapUs{0};
 static std::atomic<int> g_stuckState{0};
+/** The last callback's duration, for the watchdog thread to report to ADPF. */
+static std::atomic<int64_t> g_adpfNanos{0};
+/** The watchdog's own thread id, so the render thread can raise its priority:
+at an ordinary one a gap in its ticks can be the watchdog starved under load,
+not the phone stopped, and the two have to read differently. */
+static std::atomic<int> g_watchdogTid{0};
+
+int audioWatchdogTid() {
+	return g_watchdogTid.load(std::memory_order_relaxed);
+}
 
 static int64_t monoNs() {
 	timespec ts;
@@ -440,16 +450,24 @@ static int64_t monoNs() {
 static void watchdogLoop() {
 	int fd = -1, fdTid = 0;
 	int64_t last = monoNs();
+	g_watchdogTid.store(gettid(), std::memory_order_relaxed);
 	for (;;) {
 		usleep(2000);
 		int64_t now = monoNs();
+		// adpfReportNanos() sends at most one in a tenth of a second itself.
+		int64_t work = g_adpfNanos.load(std::memory_order_relaxed);
+		if (work > 0)
+			adpfReportNanos(work);
 		int32_t gap = (int32_t) ((now - last) / 1000);
 		last = now;
 		if (gap > g_watchdogGapUs.load(std::memory_order_relaxed))
 			g_watchdogGapUs.store(gap, std::memory_order_relaxed);
 		int64_t started = g_callbackStartNs.load(std::memory_order_relaxed);
-		if (started == 0 || now - started < 20000000LL
-				|| g_stuckState.load(std::memory_order_relaxed) != 0)
+		// Sampled every tick from 20 ms in, and the first state that is not R
+		// is the one kept: a callback that starts out running and then blocks
+		// would otherwise be written down as R.
+		int seen = g_stuckState.load(std::memory_order_relaxed);
+		if (started == 0 || now - started < 20000000LL || (seen != 0 && seen != 'R'))
 			continue;
 		int tid = audioCallbackThreadTid();
 		if (tid <= 0)
@@ -1487,8 +1505,11 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 				;
 		}
 		gRecorder.push(output, (size_t) numFrames * stream->getChannelCount());
+		// Not sent from here: a report is a call into the system, and this is
+		// the one thread that must not make one. The watchdog thread sends
+		// the latest every tenth of a second (see watchdogLoop).
 		if (reportToAdpf)
-			adpfReportNanos(elapsed);
+			g_adpfNanos.store(elapsed, std::memory_order_relaxed);
 		// The deadline this callback had to meet. Taken from the frame count
 		// it was actually handed rather than from blockSize: the two differ
 		// wherever the callback is burst-aligned, and dividing by the wrong

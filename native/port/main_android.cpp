@@ -16,6 +16,7 @@
 #include <sys/system_properties.h>
 #include <dirent.h>
 #include <cstring>
+#include <ctime>
 #include <cerrno>
 #include <vector>
 #include <algorithm>
@@ -1120,6 +1121,11 @@ static void checkWorkerPriority() {
 	// A reopened stream (block size change, route change) calls back on a new
 	// thread, which is neither pinned nor known to ADPF. No delay needed: the
 	// id is only published from inside a running callback.
+	static int watchdogRaised = 0;
+	int watchdogTid = rackdroid::audioWatchdogTid();
+	if (watchdogTid > 0 && watchdogTid != watchdogRaised
+			&& rackdroid::jniSetThreadPriority(watchdogTid, -19))
+		watchdogRaised = watchdogTid;
 	static int lastAudioTid = 0;
 	int audioTid = rackdroid::audioCallbackThreadTid();
 	if (audioTid > 0 && audioTid != lastAudioTid) {
@@ -1498,6 +1504,7 @@ struct PatchMemo {
 	uint32_t key = 0;
 	int good = 0;
 	uint32_t bad = 0; // bit c: c threads, tried and left
+	long long badAt = 0; // when the last of those was written, time(NULL)
 };
 static PatchMemo g_patchMemo;
 
@@ -1525,13 +1532,28 @@ static void patchMemoLoad() {
 		return;
 	unsigned key = 0, bad = 0;
 	int good = 0;
-	while (std::fscanf(f, "%x %d %x", &key, &good, &bad) == 3) {
+	long long badAt = 0;
+	// Three fields from the build that had no date, four since: a line is
+	// read as it is, and marks with no date count as written now.
+	char line[96];
+	while (std::fgets(line, sizeof(line), f)) {
+		badAt = (long long) std::time(NULL);
+		if (std::sscanf(line, "%x %d %x %lld", &key, &good, &bad, &badAt) < 3)
+			continue;
 		if (key == g_patchMemo.key) {
 			g_patchMemo.good = good;
 			g_patchMemo.bad = bad;
+			g_patchMemo.badAt = badAt;
 		}
 	}
 	std::fclose(f);
+	// A count written down on one bad morning -- another app, a warm phone
+	// under the throttling line -- is not bad for ever: after thirty days the
+	// marks are dropped and the count may be measured on its merits again.
+	if (g_patchMemo.bad && (long long) std::time(NULL) - g_patchMemo.badAt > 30LL * 86400) {
+		g_patchMemo.bad = 0;
+		g_patchMemo.badAt = 0;
+	}
 }
 
 /** Rewrites the file with this patch first and the thirty-one before it. */
@@ -1543,16 +1565,21 @@ static void patchMemoSave() {
 	if (FILE* f = std::fopen(path.c_str(), "r")) {
 		unsigned key = 0, bad = 0;
 		int good = 0, kept = 0;
-		while (kept < 31 && std::fscanf(f, "%x %d %x", &key, &good, &bad) == 3) {
-			if (key == g_patchMemo.key)
+		long long badAt = 0;
+		char line[96];
+		while (kept < 31 && std::fgets(line, sizeof(line), f)) {
+			badAt = (long long) std::time(NULL);
+			if (std::sscanf(line, "%x %d %x %lld", &key, &good, &bad, &badAt) < 3
+					|| key == g_patchMemo.key)
 				continue;
-			rest += string::f("%x %d %x\n", key, good, bad);
+			rest += string::f("%x %d %x %lld\n", key, good, bad, badAt);
 			kept++;
 		}
 		std::fclose(f);
 	}
 	if (FILE* f = std::fopen(path.c_str(), "w")) {
-		std::fprintf(f, "%x %d %x\n", g_patchMemo.key, g_patchMemo.good, g_patchMemo.bad);
+		std::fprintf(f, "%x %d %x %lld\n", g_patchMemo.key, g_patchMemo.good, g_patchMemo.bad,
+			g_patchMemo.badAt);
 		std::fputs(rest.c_str(), f);
 		std::fclose(f);
 	}
@@ -1573,6 +1600,7 @@ static void patchMemoBad(int count) {
 	if (count < 1 || count > 31 || ((g_patchMemo.bad >> count) & 1))
 		return;
 	g_patchMemo.bad |= (uint32_t) 1 << count;
+	g_patchMemo.badAt = (long long) std::time(NULL);
 	if (g_patchMemo.good == count)
 		g_patchMemo.good = 0;
 	patchMemoSave();
