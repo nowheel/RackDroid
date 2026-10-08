@@ -15,7 +15,7 @@
  * run. Such a group -- an island -- is stepped here for the whole block by one
  * thread: its modules, then its cables, frame after frame, with nobody to wait
  * for. The threads meet once per block instead of twice per sample, and an
- * island's state stays on the core that ran it last.
+ * island's state stays on one core for the length of a block.
  *
  * What a sample sees is unchanged: islands_test.cpp steps the same patches
  * both ways and compares every output voltage.
@@ -57,8 +57,10 @@ struct EngineIslands {
 	int threads = 0;
 	int blocksSinceBalance = 0;
 	std::vector<EngineIsland> islands;
-	/** Island indices for each thread, [0] being the caller of stepBlock. */
-	std::vector<std::vector<int>> groups;
+	/** The islands, heaviest first, and the next one nobody has taken yet this
+	block. Taken, not handed out: see EngineIslands_run. */
+	std::vector<int> order;
+	std::atomic<int> next{0};
 	std::map<Module*, int> islandOf;
 	int frames = 0;
 	int smoothIsland = -1;
@@ -157,57 +159,46 @@ static void EngineIslands_build(Engine::Internal* internal) {
 }
 
 
-/** Heaviest island first, each to the thread with the least so far. By what
-the islands were measured to cost once they have run, by size before. */
-static std::vector<std::vector<int>> EngineIslands_share(int threads, double* worst) {
+/** Heaviest first, by what the islands were measured to cost once they have
+run and by size before: the light ones are then the last to be taken, and the
+block ends when the last one does. */
+static void EngineIslands_sort() {
 	EngineIslands& s = engineIslands;
 	auto costOf = [&](int i) {
 		const EngineIsland& is = s.islands[i];
 		return is.cost > 0.0 ? is.cost : 1e-6 * (double) is.modules.size();
 	};
-	std::vector<int> order(s.islands.size());
-	for (size_t i = 0; i < order.size(); i++)
-		order[i] = i;
-	std::sort(order.begin(), order.end(), [&](int a, int b) {
+	s.order.resize(s.islands.size());
+	for (size_t i = 0; i < s.order.size(); i++)
+		s.order[i] = i;
+	std::sort(s.order.begin(), s.order.end(), [&](int a, int b) {
 		return costOf(a) > costOf(b);
 	});
-	std::vector<std::vector<int>> groups(threads);
-	std::vector<double> load(threads, 0.0);
-	for (int i : order) {
-		int t = std::min_element(load.begin(), load.end()) - load.begin();
-		groups[t].push_back(i);
-		load[t] += costOf(i);
-	}
-	*worst = *std::max_element(load.begin(), load.end());
-	return groups;
 }
 
 
-static double EngineIslands_worstNow() {
-	EngineIslands& s = engineIslands;
-	double worst = 0.0;
-	for (const std::vector<int>& group : s.groups) {
-		double load = 0.0;
-		for (int i : group)
-			load += s.islands[i].cost;
-		worst = std::max(worst, load);
-	}
-	return worst;
-}
+/** What one thread does of the block: the next island nobody has taken, until
+there is none.
 
-
-/** One thread's islands for the block. */
+They were shared out beforehand at first, each thread its own. A Nothing A024
+then put two Workers on one core for a minute: each waited a scheduler's turn
+(16 ms) for the other, which was only spinning, and the callback waited 16 ms
+a block for islands that any idle thread could have run -- 800% of the
+deadline, 530 underruns a second. Taken as they come, a thread that is not
+running takes nothing and holds nobody up, and a slow core does less. */
 static void EngineIslands_run(Engine* that, int threadId) {
 	Engine::Internal* internal = that->internal;
 	EngineIslands& s = engineIslands;
-	if (threadId >= (int) s.groups.size())
-		return;
-
 	Module::ProcessArgs processArgs;
 	processArgs.sampleRate = internal->sampleRate;
 	processArgs.sampleTime = internal->sampleTime;
 
-	for (int index : s.groups[threadId]) {
+	int count = s.order.size();
+	while (true) {
+		int taken = s.next.fetch_add(1, std::memory_order_relaxed);
+		if (taken >= count)
+			break;
+		int index = s.order[taken];
 		EngineIsland& island = s.islands[index];
 		double startTime = system::getTime();
 		for (int f = 0; f < s.frames; f++) {
@@ -279,22 +270,17 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	}
 
 	int threads = std::max(internal->threadCount, 1);
-	double worst = 0.0;
 	if (threads != s.threads) {
-		s.groups = EngineIslands_share(threads, &worst);
 		s.threads = threads;
 		s.blocksSinceBalance = 0;
 		s.trialBlock = 0;
 		s.trialTime[0] = s.trialTime[1] = 0.0;
+		EngineIslands_sort();
 	}
 	else if (++s.blocksSinceBalance >= 256) {
 		// Islands do not cost what their size says, and what they cost moves.
-		// Moving one to another thread costs it its warm cache, so only for a
-		// tenth or more off the heaviest thread.
 		s.blocksSinceBalance = 0;
-		std::vector<std::vector<int>> groups = EngineIslands_share(threads, &worst);
-		if (worst < 0.9 * EngineIslands_worstNow())
-			s.groups = groups;
+		EngineIslands_sort();
 	}
 
 	// The trial: islands, then Rack's loop, the first blocks of each left out
@@ -317,6 +303,7 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 			s.smoothIsland = it->second;
 	}
 
+	s.next.store(0, std::memory_order_relaxed);
 	s.active.store(true, std::memory_order_release);
 	internal->engineBarrier.wait();
 	EngineIslands_run(that, 0);
