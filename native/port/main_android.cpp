@@ -1740,7 +1740,11 @@ static void checkThreadCount() {
 	// stream, a silent measurement, and twenty-six seconds after the unlock it
 	// was back on three threads at 66%, where it had been all along.
 	static const double RESUME_GRACE_SEC = 15.0;
-	bool resuming = rackdroid::windowSecondsSinceSurfaceChange() < RESUME_GRACE_SEC;
+	// Not the window the app starts with: a patch opened on a count it cannot
+	// keep up on has to be seen to at once (a OnePlus 8T sat on one thread at
+	// 111% for ten seconds longer when this covered the launch as well).
+	bool resuming = rackdroid::windowSecondsSinceSurfaceChange() < RESUME_GRACE_SEC
+		&& now > 2.0 * RESUME_GRACE_SEC;
 	if ((rackdroid::audioFocusDisturbed() || resuming) && !sweepWanted) {
 		windowStartedAt = now;
 		windowStartCount = total;
