@@ -2408,9 +2408,14 @@ static void checkThreadCount() {
 		cleanFrom = now;
 	// Written down as not holding only when it failed in its first minute and
 	// the phone is not throttling: a count that held and was then pushed over,
-	// or one tried on a hot phone, says nothing about the patch.
+	// or one tried on a hot phone, says nothing about the patch. Nor does one
+	// that failed with the callback's core held under nine tenths of its
+	// speed, whatever the thermal status says: a Nothing A024 ran cpu7 at half
+	// speed at status 0 for an evening and had 2, 3, 4 and 5 threads written
+	// down against a patch that runs on three.
 	auto leftEarly = [&]() {
 		if (now - heldSince < 60.0 && rackdroid::thermalStatus() < 2
+				&& callbackCoreSpeed() >= 900
 				&& g_audioCpusGivenUp == 0
 				&& (g_audioCpuLostAt <= 0.0 || now - g_audioCpuLostAt > 30.0))
 			patchMemoBad(current);
