@@ -279,6 +279,7 @@ int audioPortEpoch() {
 /** Blocks handed back empty because they would have been written behind the
 hardware; see onAudioReady. Said by audioReportUnderruns. */
 static std::atomic<int32_t> g_lostBlocks{0};
+static std::atomic<int32_t> g_lostGivenUp{0};
 static std::atomic<int32_t> g_warmupEndedMs{-1};
 static std::atomic<int32_t> g_warmupStartUnderruns{0};
 /** How long the patch has been held silent so far, 0 while it is heard. */
@@ -673,6 +674,9 @@ void audioReportUnderruns() {
 		"that came too late to be played were not computed",
 		now - lastReported, now, (int) (packed & 0xffff), (int) (packed >> 16),
 		g_lostBlocks.exchange(0, std::memory_order_relaxed));
+	if (g_lostGivenUp.exchange(0, std::memory_order_relaxed) > 0)
+		AUDIO_WARN("Oboe: %d empty blocks in a row did not bring the stream back in step; "
+			"computing them again", 5000);
 	lastReported = now;
 }
 
@@ -1409,8 +1413,14 @@ struct OboeDevice : rack::audio::Device, oboe::AudioStreamDataCallback, oboe::Au
 		// when they came late. Not on a Shared stream, where a late block is
 		// still played.
 		lateRun = (xruns > lastXRuns) ? lateRun + 1 : 0;
-		bool lost = lateRun >= 2
+		// Bounded: ten seconds' worth of empty blocks that did not bring the
+		// stream back in step means this is not what is wrong with it, and
+		// the engine plays on as it did before rather than stay silent.
+		static const int LOST_BLOCKS_MAX = 5000;
+		bool lost = lateRun >= 2 && lateRun < LOST_BLOCKS_MAX
 			&& stream->getSharingMode() == oboe::SharingMode::Exclusive;
+		if (lateRun == LOST_BLOCKS_MAX)
+			g_lostGivenUp.fetch_add(1, std::memory_order_relaxed);
 		if (xruns != lastXRuns) {
 			// Count every one of them, however small the buffer still is: this
 			// is the number that corresponds to what a listener hears. The
