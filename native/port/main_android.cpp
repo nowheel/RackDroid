@@ -1526,6 +1526,10 @@ patches not seen before, and for when what was written down stops holding.
 
 Keyed by the patch file, how many modules it has, the block size and the
 sample rate: any of those changing makes it another question. */
+// The file is -3 since 0.1.2.121: what was written before it was chosen as the
+// fewest threads that fit, which for a patch now stepped as islands is the
+// wrong question (ThreadChoice::bestIslands) -- a Galaxy A52s kept starting
+// six parts on the two threads remembered for them.
 struct PatchMemo {
 	uint32_t key = 0;
 	int good = 0;
@@ -1553,7 +1557,7 @@ static uint32_t patchMemoKey() {
 static void patchMemoLoad() {
 	g_patchMemo = PatchMemo();
 	g_patchMemo.key = patchMemoKey();
-	FILE* f = std::fopen(asset::user("engine-patch-threads-2").c_str(), "r");
+	FILE* f = std::fopen(asset::user("engine-patch-threads-3").c_str(), "r");
 	if (!f)
 		return;
 	unsigned key = 0, bad = 0;
@@ -1586,7 +1590,7 @@ static void patchMemoLoad() {
 static void patchMemoSave() {
 	if (!g_patchMemo.key)
 		return;
-	std::string path = asset::user("engine-patch-threads-2");
+	std::string path = asset::user("engine-patch-threads-3");
 	std::string rest;
 	if (FILE* f = std::fopen(path.c_str(), "r")) {
 		unsigned key = 0, bad = 0;
