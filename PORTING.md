@@ -426,6 +426,37 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   velocità con stato 0 per una sera: la patch misurava 111% a un thread e
   sceglieva 4 thread invece di 3. Un numero di thread fallito con il core
   sotto il 90% della velocità non viene scritto come "non regge".
+- **Le parti indipendenti di una patch si calcolano a blocchi interi**
+  (`port/engine_islands.inc`). Gruppi di moduli senza cavi fra loro e non
+  affiancati (i vicini possono essere expander) non possono accorgersi
+  dell'ordine in cui girano: ognuno, un'isola, è calcolato da un thread per
+  tutto il blocco. L'audio è lo stesso bit per bit
+  (`native/host/islands_test.cpp`). Regole, ognuna costata un difetto su
+  hardware:
+  - si cronometrano i due modi (24 blocchi ciascuno, dopo 64 di assestamento
+    per i Worker appena creati) a ogni cambio di patch o di thread, e si tiene
+    il più veloce; la misura in silenzio aspetta;
+  - le isole si prendono, non si assegnano: un Worker che non gira non prende
+    nulla;
+  - con le isole attive i Worker aspettano in un ciclo loro e la callback
+    aspetta le isole in lavorazione, mai i Worker: con le barriere di Rack un
+    Worker fermo teneva la callback 16 ms a blocco (Nothing, due Worker su un
+    core; multitasking aperto);
+  - un Worker su un core sotto metà della capacità massima resta in attesa
+    finché non è passata metà del tempo del blocco.
+  Misure sulla 0.1.2.118: Nothing x12 al 56% su 4 thread (la x4 era al 67–75%
+  su 3), Samsung x6 64% su 2 e x12 68% su 4, TB-X306X x4 62% su 4 (la x3 era
+  al 284%). Vale per le patch a parti scollegate, come le `limite-xN`; una
+  patch tutta collegata resta sul ciclo di Rack. Con le isole attive
+  `Engine::getFrame()` letto dentro `process()` resta al primo campione del
+  blocco.
+- **La pausa del tuner dopo un cambio di finestra** (sblocco, pannello,
+  multitasking) vale appena un numero di thread ha girato pulito una volta,
+  non dopo trenta secondi dall'avvio.
+- **Disegno di un rack grande.** Il tempo per ricostruire i framebuffer si
+  conta dall'inizio del disegno, e la pausa tra fotogrammi pesanti non si
+  applica finché ne restano più di otto: con 529 moduli il solo `step()`
+  consumava tutto il tempo e il rack si riempiva di un pannello a fotogramma.
 - **L'audio non si toglie mai per nascondere gli underrun.** Provato un
   silenzio durante il recupero dal core perso: rifiutato dal proprietario.
 
