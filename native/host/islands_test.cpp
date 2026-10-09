@@ -211,10 +211,10 @@ int main() {
 		rackdroid::engineIslandsOn = true;
 		settings::threadCount = 2;
 		Patch p = build(12, 20, 40, false);
-		for (int b = 0; b < 150; b++)
+		for (int b = 0; b < 300; b++)
 			p.engine->stepBlock(96);
 		settings::threadCount = 4;
-		for (int b = 0; b < 150; b++)
+		for (int b = 0; b < 300; b++)
 			p.engine->stepBlock(96);
 		uint32_t before = rackdroid::engineIslandsByWorkers;
 		bool used = rackdroid::engineIslandsUsed > 0;

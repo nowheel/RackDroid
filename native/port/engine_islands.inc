@@ -51,15 +51,19 @@ struct EngineIsland {
 };
 
 
-/** Blocks stepped as islands before the two ways are timed. Workers just
-launched have neither their priority nor their cores yet (main_android.cpp
-gives them within a twentieth of a second), and timed in that state the islands
-lost to Rack's loop on a TB-X306X at thread counts where they are twice as
-fast; the silent measurement then read Rack's loop and chose the wrong count. */
-static const int TRIAL_WARM_BLOCKS = 64;
-/** Blocks timed each way, and how many of them at the start are left out. */
-static const int TRIAL_BLOCKS = 24;
-static const int TRIAL_SKIP = 4;
+/** The trial is counted in audio, not in blocks: a block is 96 frames on one
+phone and 960 on another (a TB-X306X, where a trial of 112 blocks took over
+two seconds and was still running, half of it the slow way, while the silent
+measurement read the count).
+
+TRIAL_WARM_SEC as islands before anything is timed: Workers just launched have
+neither their priority nor their cores yet (main_android.cpp gives them within
+a twentieth of a second), and timed in that state the islands lost to Rack's
+loop at thread counts where they are twice as fast. Then TRIAL_SEC each way,
+four blocks at least, the first TRIAL_SKIP_SEC of each left out. */
+static constexpr double TRIAL_WARM_SEC = 0.15;
+static constexpr double TRIAL_SEC = 0.1;
+static constexpr double TRIAL_SKIP_SEC = 0.02;
 
 
 struct EngineIslands {
@@ -98,9 +102,12 @@ struct EngineIslands {
 	int frames = 0;
 	int smoothIsland = -1;
 	/** Which way is faster for this patch on this many threads is measured,
-	not guessed: TRIAL_BLOCKS of each, then the quicker one. */
-	int trialBlock = -TRIAL_WARM_BLOCKS;
+	not guessed: see TRIAL_SEC. In frames of audio: negative while warming,
+	[0, trialPhase) islands, [trialPhase, 2 trialPhase) Rack's loop, done. */
+	int64_t trialAt = -1;
+	int64_t trialPhase = 1 << 30;
 	double trialTime[2] = {};
+	int64_t trialFrames[2] = {};
 	bool useIslands = true;
 	std::atomic<bool> active{false};
 };
@@ -432,12 +439,14 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		// last time: islands that were the quicker on some count are the
 		// quicker on more threads, and each trial is a quarter of a second of
 		// the silent measurement, half of it spent the slow way.
-		bool keep = s.threads > 0 && !rebuilt && s.trialBlock >= 2 * TRIAL_BLOCKS && s.useIslands;
+		bool keep = s.threads > 0 && !rebuilt && s.trialAt >= 2 * s.trialPhase && s.useIslands;
 		s.threads = threads;
 		s.blocksSinceBalance = 0;
 		if (!keep) {
-			s.trialBlock = -TRIAL_WARM_BLOCKS;
+			s.trialAt = -(int64_t) (TRIAL_WARM_SEC * internal->sampleRate);
+			s.trialPhase = std::max((int64_t) (TRIAL_SEC * internal->sampleRate), (int64_t) 4 * frames);
 			s.trialTime[0] = s.trialTime[1] = 0.0;
+			s.trialFrames[0] = s.trialFrames[1] = 0;
 			rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
 		}
 		EngineIslands_sort();
@@ -448,16 +457,9 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		EngineIslands_sort();
 	}
 
-	// The trial: islands, then Rack's loop, the first blocks of each left out
-	// while caches and Workers settle.
-	bool trial = s.trialBlock < 2 * TRIAL_BLOCKS;
-	bool islandsNow = trial ? s.trialBlock < TRIAL_BLOCKS : s.useIslands;
-	double trialStart = trial ? system::getTime() : 0.0;
-	if (s.trialBlock < 0) {
-		// Not timed yet; see TRIAL_WARM_BLOCKS.
-		s.trialBlock++;
-		trial = false;
-	}
+	bool decided = s.trialAt >= 2 * s.trialPhase;
+	bool islandsNow = decided ? s.useIslands : s.trialAt < s.trialPhase;
+	double trialStart = decided ? 0.0 : system::getTime();
 	if (!islandsNow) {
 		EngineIslands_leave(that);
 		for (int f = 0; f < frames; f++)
@@ -521,13 +523,22 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 
 	internal->frame += frames;
 	}
-	if (trial) {
-		int which = s.trialBlock / TRIAL_BLOCKS;
-		if (s.trialBlock % TRIAL_BLOCKS >= TRIAL_SKIP)
-			s.trialTime[which] += system::getTime() - trialStart;
-		if (++s.trialBlock == 2 * TRIAL_BLOCKS) {
-			// Rack's own loop on a tie: it is the one everybody else runs.
-			s.useIslands = s.trialTime[0] < 0.95 * s.trialTime[1];
+	if (!decided) {
+		if (s.trialAt >= 0) {
+			int which = s.trialAt >= s.trialPhase;
+			if (s.trialAt - which * s.trialPhase >= (int64_t) (TRIAL_SKIP_SEC * internal->sampleRate)) {
+				s.trialTime[which] += system::getTime() - trialStart;
+				s.trialFrames[which] += frames;
+			}
+		}
+		s.trialAt += frames;
+		if (s.trialAt >= 2 * s.trialPhase) {
+			// Per frame, since the two halves need not hold the same number
+			// of blocks. Rack's own loop on a tie: it is the one everybody
+			// else runs.
+			double islandsCost = s.trialFrames[0] > 0 ? s.trialTime[0] / s.trialFrames[0] : 0.0;
+			double rackCost = s.trialFrames[1] > 0 ? s.trialTime[1] / s.trialFrames[1] : 0.0;
+			s.useIslands = islandsCost > 0.0 && rackCost > 0.0 && islandsCost < 0.95 * rackCost;
 			rackdroid::engineIslandsUsed.store(s.useIslands ? 1 : -1, std::memory_order_relaxed);
 		}
 	}

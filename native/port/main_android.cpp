@@ -2138,6 +2138,12 @@ static void checkThreadCount() {
 		// look like 115% of the deadline when they play at 62%. Bounded: a
 		// trial that does not end is not waited for.
 		static double timingFrom = 0.0;
+		static int timingCount = 0;
+		if (timingCount != settings::threadCount) {
+			// The bound is for each count, not for the measurement.
+			timingCount = settings::threadCount;
+			timingFrom = 0.0;
+		}
 		if (rackdroid::engineIslandCount.load(std::memory_order_relaxed) > 1
 				&& rackdroid::engineIslandsUsed.load(std::memory_order_relaxed) == 0) {
 			if (timingFrom == 0.0)
