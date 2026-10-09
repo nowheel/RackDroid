@@ -418,10 +418,11 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   blocchi in ritardo di fila, i successivi tornano vuoti finché lo stream
   smette di contare; dopo 5.000 si rinuncia. Su un A52s uno stallo di 35 ms è
   stato recuperato in 59 blocchi. Sul Nothing non è ancora scattata.
-- **Il core perso si richiede dopo 2 s**, contando le perdite nell'ultimo
-  mezzo minuto (tre a 2 s, poi 15 s). Il core di ripiego è più lento (carico
-  87–121% sul Nothing): quei due secondi sono quasi tutto ciò che uno sblocco
-  costa ancora.
+- **Il core perso si richiede dopo 1 s** (poi 2, 5, 15 se rifiutato; chiedere
+  non sposta nulla), contando le perdite nell'ultimo mezzo minuto (tre a 1 s,
+  poi 15 s). Il core di ripiego è più lento (carico 87–121% sul Nothing):
+  quel secondo è quasi tutto ciò che uno sblocco costa ancora. Sulla 0.1.2.123
+  cpu7 è tornato a 1 s ogni volta che era stato tolto davvero.
 - **Core rallentato senza stato termico.** Il Nothing ha tenuto cpu7 a metà
   velocità con stato 0 per una sera: la patch misurava 111% a un thread e
   sceglieva 4 thread invece di 3. Un numero di thread fallito con il core
@@ -433,9 +434,15 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   tutto il blocco. L'audio è lo stesso bit per bit
   (`native/host/islands_test.cpp`). Regole, ognuna costata un difetto su
   hardware:
-  - si cronometrano i due modi (24 blocchi ciascuno, dopo 64 di assestamento
-    per i Worker appena creati) a ogni cambio di patch o di thread, e si tiene
-    il più veloce; la misura in silenzio aspetta;
+  - si cronometrano i due modi a ogni cambio di patch (e a un cambio di
+    thread solo se l'ultima volta ha vinto il ciclo di Rack) e si tiene il più
+    veloce; il confronto è contato in tempo di audio, non in blocchi: 0,15 s a
+    isole per far assestare i Worker appena creati, poi 0,1 s per modo, almeno
+    otto blocchi. Un blocco è 96 campioni su un telefono e 960 sul TB-X306X,
+    dove 112 blocchi duravano due secondi e la misura in silenzio leggeva la
+    metà lenta come carico. La misura in silenzio aspetta il confronto. Una
+    patch con un'isola oltre i tre quinti dei moduli resta sul ciclo di Rack
+    senza confronto (45 moduli + 1: 42% condivisi, 59% a isole);
   - le isole si prendono, non si assegnano: un Worker che non gira non prende
     nulla;
   - con le isole attive i Worker aspettano in un ciclo loro e la callback
@@ -444,9 +451,25 @@ Obiettivo: vedere il rack renderizzato e interagirci.
     core; multitasking aperto);
   - un Worker su un core sotto metà della capacità massima resta in attesa
     finché non è passata metà del tempo del blocco.
-  Misure sulla 0.1.2.118: Nothing x12 al 56% su 4 thread (la x4 era al 67–75%
-  su 3), Samsung x6 64% su 2 e x12 68% su 4, TB-X306X x4 62% su 4 (la x3 era
-  al 284%). Vale per le patch a parti scollegate, come le `limite-xN`; una
+  - un Worker che trova un altro thread del motore già dentro un'isola sul
+    proprio core si fa da parte e dorme fino al blocco successivo. Dopo uno
+    sblocco il Nothing ha tenuto tre Worker su cinque su cpu5 per sette
+    secondi: quello con l'isola aveva un terzo del core, gli altri giravano a
+    vuoto, callback da 8 ms, 200–300 underrun al secondo. Visto una volta; la
+    build con la correzione non l'ha più incontrato;
+  - il numero di thread si sceglie in altro modo (`ThreadChoice::bestIslands`,
+    casi in `thread_choice_test.cpp`): il più leggero, il minore fra due entro
+    cinque punti, mai più thread che isole. Qui un thread in più non costa
+    attese e dà margine quando il sistema toglie i core (A52s, sei parti: due
+    thread 64%, tre 43%). La misura legge solo i numeri che possono aiutare
+    (quattro parti non guadagnano da un terzo thread, sei da un quarto o un
+    quinto), salendo per prima cosa. La memoria delle patch è stata azzerata
+    una volta (`engine-patch-threads-3`): conteneva le risposte alla regola
+    vecchia.
+  Misure sulla 0.1.2.123: Nothing x12 al 56% su 6 thread, circa 180 underrun
+  in 80 s di sblocchi e cambi di finestra (la x4 era al 67–75% su 3 prima
+  delle isole), A52s x6 43% su 3, TB-X306X x4 62% su 4 (la x3 era al 284%),
+  8T x4 74–89% su 4. Vale per le patch a parti scollegate, come le `limite-xN`; una
   patch tutta collegata resta sul ciclo di Rack. Con le isole attive
   `Engine::getFrame()` letto dentro `process()` resta al primo campione del
   blocco.
