@@ -171,6 +171,7 @@
 	<string name="theme_blue_night">蓝夜</string>
 	<string name="theme_emerald">翡翠</string>
 	<string name="theme_violet">紫罗兰</string>
+	<string name="theme_cream">奶油白</string>
 	<string name="toast_theme_applied">主题：%1$s</string>
 	<string name="theme_restart_message">工具栏和菜单已应用主题。重启应用后，机架面板和背景也会一并换色。</string>
 	<string name="theme_restart_now">立即重启</string>

@@ -171,6 +171,7 @@
 	<string name="theme_blue_night">Nuit bleue</string>
 	<string name="theme_emerald">Émeraude</string>
 	<string name="theme_violet">Violet</string>
+	<string name="theme_cream">Crème</string>
 	<string name="toast_theme_applied">Thème : %1$s</string>
 	<string name="theme_restart_message">La barre d\'outils et les menus sont aux couleurs du thème. Redémarre l\'application pour recolorer aussi les façades et le fond du rack.</string>
 	<string name="theme_restart_now">Redémarrer maintenant</string>

@@ -58,7 +58,7 @@ private fun rowOfModules(activity: Activity, keys: List<String>, heightDp: Int):
 			adjustViewBounds = true
 			background = GradientDrawable().apply {
 				cornerRadius = dp(6).toFloat()
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 12))
+				setStroke(dp(1), AppTheme.edge(12))
 			}
 			clipToOutline = true
 			layoutParams = LinearLayout.LayoutParams(
@@ -233,7 +233,7 @@ class GuideSheet(private val activity: Activity) {
 				background = GradientDrawable().apply {
 					cornerRadius = dp(16).toFloat()
 					setColor(AppTheme.current.surfaceInset)
-					setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 9))
+					setStroke(dp(1), AppTheme.edge(9))
 				}
 				setPadding(dp(16), dp(14), dp(16), dp(14))
 				layoutParams = LinearLayout.LayoutParams(
@@ -624,7 +624,7 @@ class TutorialLibrarySheet(private val activity: Activity) {
 				background = GradientDrawable().apply {
 					cornerRadius = dp(16).toFloat()
 					setColor(AppTheme.current.surfaceInset)
-					setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 9))
+					setStroke(dp(1), AppTheme.edge(9))
 				}
 				setPadding(dp(16), dp(12), dp(16), dp(12))
 				layoutParams = LinearLayout.LayoutParams(
@@ -769,7 +769,7 @@ class Wizard(
 			background = GradientDrawable().apply {
 				cornerRadius = dp(20).toFloat()
 				setColor(AppTheme.withAlpha(AppTheme.current.surface, 94))
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			}
 			setPadding(dp(20), dp(14), dp(20), dp(12))
 		}
@@ -1090,7 +1090,7 @@ class Tour(
 			background = GradientDrawable().apply {
 				cornerRadius = dp(20).toFloat()
 				setColor(AppTheme.withAlpha(AppTheme.current.surface, 96))
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 20))
+				setStroke(dp(1), AppTheme.edge(20))
 			}
 			setPadding(dp(20), dp(15), dp(20), dp(11))
 		}

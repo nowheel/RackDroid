@@ -144,7 +144,7 @@ val packSystemAssets = tasks.register<Zip>("packSystemAssets") {
 	from(rootProject.file("graphics/system-res")) { into("themes/amber/res") }
 	from(rootProject.file("graphics/fundamental-res")) { into("themes/amber/plugins/Fundamental/res") }
 	from(rootProject.file("drums/res")) { into("themes/amber/plugins/RackDroidDrums/res") }
-	for (t in listOf("blue", "emerald", "violet")) {
+	for (t in listOf("blue", "emerald", "violet", "cream")) {
 		from(rootProject.file("graphics/themes/$t/system-res")) { into("themes/$t/res") }
 		from(rootProject.file("graphics/themes/$t/fundamental-res")) { into("themes/$t/plugins/Fundamental/res") }
 		from(rootProject.file("graphics/themes/$t/drums-res")) { into("themes/$t/plugins/RackDroidDrums/res") }

@@ -28,7 +28,7 @@ import regen_graphics as R
 import gen_drums_panels as D
 
 TP = os.path.normpath(os.path.join(HERE, "..", "third_party"))
-THEMES = ["blue", "emerald", "violet"]  # amber = canonical, not emitted
+THEMES = ["blue", "emerald", "violet", "cream"]  # amber = canonical, not emitted
 
 # Upstream source dir -> per-theme output subdir (under graphics/themes/<t>/)
 # -> generation mode. Mirrors the base-bundle subset of regen_graphics.jobs.

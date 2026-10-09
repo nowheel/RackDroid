@@ -432,7 +432,15 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   affiancati (i vicini possono essere expander) non possono accorgersi
   dell'ordine in cui girano: ognuno, un'isola, è calcolato da un thread per
   tutto il blocco. L'audio è lo stesso bit per bit
-  (`native/host/islands_test.cpp`). Regole, ognuna costata un difetto su
+  (`native/host/islands_test.cpp`), e lo è per ogni modulo distribuito:
+  `RACKDROID_HOST_SMOKE_MODE=--islands scripts/host_smoke.sh` suona quattro
+  copie di ciascun modello con un generatore su ogni ingresso, nel ciclo di
+  Rack e a isole, su uno e tre thread, e confronta ogni uscita e ogni luce
+  dopo ogni blocco. Su 1.004 modelli: 851 identici, 149 non confrontabili
+  perché nemmeno il ciclo di Rack li ripete (98 estraggono numeri casuali in
+  process(), 50 cambiano da una corsa all'altra, il lATe di Bidoo si
+  cronometra con clock()), 4 esclusi per difetti loro (elencati nel
+  commento del banco), nessuno diverso. Regole, ognuna costata un difetto su
   hardware:
   - si cronometrano i due modi a ogni cambio di patch (e a un cambio di
     thread solo se l'ultima volta ha vinto il ciclo di Rack) e si tiene il più

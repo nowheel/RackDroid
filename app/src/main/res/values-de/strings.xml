@@ -171,6 +171,7 @@
 	<string name="theme_blue_night">Blaue Nacht</string>
 	<string name="theme_emerald">Smaragd</string>
 	<string name="theme_violet">Violett</string>
+	<string name="theme_cream">Creme</string>
 	<string name="toast_theme_applied">Thema: %1$s</string>
 	<string name="theme_restart_message">Werkzeugleiste und Menüs sind eingefärbt. Starte die App neu, damit auch die Modulfronten und der Hintergrund die Farben übernehmen.</string>
 	<string name="theme_restart_now">Jetzt neu starten</string>

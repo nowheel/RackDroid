@@ -7,6 +7,7 @@
  * .tar.zst patch support.
  */
 #include "asset_extract.hpp"
+#include "label_overlay.hpp"
 
 #include <cstdio>
 #include <vector>
@@ -28,7 +29,7 @@ namespace rackdroid {
 static const char* MARKER_NAME = "/.assets-version";
 /* Bump when the system.zip contents change without a Rack version change
    (e.g. new directories added to the Gradle packSystemAssets task). */
-static const char* ASSETS_REVISION = "r31"; // r31: the missing-modules message points at module packs, not the VCV Library; r30: rail holes grouped one path per row (667 SVG shapes -> 51; one path for all of them made svgDraw quadratic); r28: translations rebranded to RackDroid (packSystemAssets rewrites them); r27: themed rack graphics (themes/<name>/); r24: 909/707/606/505 drums; r23: Geomini app typeface; r22: panel/rail contrast fix; r21: glass panels (sheen+translucency); r20: warm-studio palette; r19: modern regenerated art (gradients); r18: RackDroid Drums (first-party, original); r17: Befaco(regen art) + NLC; r16: demo audio driver fix; r15: demo seed refresh; r14: Aria + touch tutorial + demo patches; r13: AudibleInstruments (regen art); r12: Autinn + FrozenWasteland(regen art); r11: 5 new plugin packs; r10: real slider art; r9: mm-unit fix on regenerated SVGs; r8: HetrickCV res; r7: Valley plugin res; r6: perforated grate rail background; r5: original (non-VCV) graphics
+static const char* ASSETS_REVISION = "r32"; // r32: the cream theme; r31: the missing-modules message points at module packs, not the VCV Library; r30: rail holes grouped one path per row (667 SVG shapes -> 51; one path for all of them made svgDraw quadratic); r28: translations rebranded to RackDroid (packSystemAssets rewrites them); r27: themed rack graphics (themes/<name>/); r24: 909/707/606/505 drums; r23: Geomini app typeface; r22: panel/rail contrast fix; r21: glass panels (sheen+translucency); r20: warm-studio palette; r19: modern regenerated art (gradients); r18: RackDroid Drums (first-party, original); r17: Befaco(regen art) + NLC; r16: demo audio driver fix; r15: demo seed refresh; r14: Aria + touch tutorial + demo patches; r13: AudibleInstruments (regen art); r12: Autinn + FrozenWasteland(regen art); r11: 5 new plugin packs; r10: real slider art; r9: mm-unit fix on regenerated SVGs; r8: HetrickCV res; r7: Valley plugin res; r6: perforated grate rail background; r5: original (non-VCV) graphics
 
 static const char* THUMBS_MARKER_NAME = "/.thumbs-version";
 /* Bump when graphics/browser-thumbs/ is regenerated (rack_ui_smoke
@@ -156,6 +157,7 @@ void applyRackTheme(const std::string& systemDir, const std::string& userDir) {
 				|| theme.back() == ' ' || theme.back() == '\t'))
 			theme.pop_back();
 	}
+	labelOverlayLightPanels = theme == "cream";
 	std::string marker = userDir + "/.rack-theme-applied";
 	std::string stamp = theme + "+" + rack::APP_VERSION + "+" + ASSETS_REVISION;
 	if (rack::system::isFile(marker)) {

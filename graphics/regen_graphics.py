@@ -50,6 +50,13 @@ RAIL_GRATE_DARK = "#191612"
 RAIL_COL = "#332E26"
 RAIL_HOLE = "#110F0C"
 RAIL_HI = "#4C4539"
+# The dark ends of the knob, button and fader gradients and the panel's footer
+# band: literals until a light theme needed the footer and wanted to be able
+# to move the rest.
+KNOB_RING_LO = "#3B362D"
+KNOB_BODY_LO = "#2C2820"
+BUTTON_LO = "#2E2922"
+PANEL_FOOT = "#1B1813"
 
 # Alternate color themes for the rack (background/rail + module panels).
 # Amber is the canonical/default look (all values above). Each other theme
@@ -85,6 +92,18 @@ THEMES = {
         "RAIL_GRATE": "#1B1624", "RAIL_GRATE_DARK": "#171320",
         "RAIL_COL": "#322A3B", "RAIL_HOLE": "#110D16", "RAIL_HI": "#463E56",
     },
+    # The light one: cream panels and a pale rack, the controls left dark so
+    # they read against it, a burnt orange where the others have their accent
+    # (the pale accents of the dark themes vanish on cream).
+    "cream": {
+        "ACCENT": "#E07A2E", "ACCENT_DIM": "#B85C1C", "STRIP_HI": "#F2A866",
+        "PANEL_BG": "#EFE8D8", "PANEL_BG2": "#D6CCB6",
+        "PANEL_GRAD1": "#F6F0E2", "PANEL_GRAD2": "#EAE2CF",
+        "PANEL_FOOT": "#CFC5AE", "TEXT": "#2B2721",
+        "RAIL_BG": "#D8D1C1", "RAIL_BG_DARK": "#CEC7B7",
+        "RAIL_GRATE": "#CAC2B0", "RAIL_GRATE_DARK": "#C1B9A7",
+        "RAIL_COL": "#B8B09F", "RAIL_HOLE": "#8E8676", "RAIL_HI": "#E8E2D4",
+    },
 }
 
 
@@ -94,7 +113,8 @@ THEMES = {
 _THEMEABLE = ("ACCENT", "ACCENT_DIM", "STRIP_HI", "PANEL_BG", "PANEL_BG2",
               "PANEL_GRAD1", "PANEL_GRAD2", "KNOB_BODY_HI", "KNOB_RING",
               "KNOB_RING_HI", "RAIL_BG", "RAIL_BG_DARK", "RAIL_GRATE",
-              "RAIL_GRATE_DARK", "RAIL_COL", "RAIL_HOLE", "RAIL_HI")
+              "RAIL_GRATE_DARK", "RAIL_COL", "RAIL_HOLE", "RAIL_HI",
+              "KNOB_RING_LO", "KNOB_BODY_LO", "BUTTON_LO", "PANEL_FOOT", "TEXT")
 _DEFAULTS = {k: globals()[k] for k in _THEMEABLE}
 
 
@@ -152,8 +172,8 @@ def knob(w, h, indicator=True, cap=False):
     r = min(w, h) / 2 * 0.92
     out = [svg_open(w, h)]
     out.append('<defs>'
-               + lgrad("ring", KNOB_RING_HI, "#3B362D")
-               + rgrad("body", KNOB_BODY_HI, "#2C2820")
+               + lgrad("ring", KNOB_RING_HI, KNOB_RING_LO)
+               + rgrad("body", KNOB_BODY_HI, KNOB_BODY_LO)
                + '</defs>')
     # Drop shadow under the knob (offset dark disc; no blur in nanosvg)
     out.append(f'<circle cx="{cx}" cy="{cy+r*0.06:.2f}" r="{r}" fill="#000000" fill-opacity="0.35"/>')
@@ -234,10 +254,10 @@ def button(w, h, pressed):
     cx, cy = w / 2, h / 2
     r = min(w, h) / 2 * 0.9
     face = lgrad("bface", ACCENT, ACCENT_DIM) if pressed \
-        else lgrad("bface", KNOB_BODY_HI, "#2E2922")
+        else lgrad("bface", KNOB_BODY_HI, BUTTON_LO)
     return "\n".join([
         svg_open(w, h),
-        '<defs>' + lgrad("bbez", KNOB_RING_HI, "#3B362D") + face + '</defs>',
+        '<defs>' + lgrad("bbez", KNOB_RING_HI, KNOB_RING_LO) + face + '</defs>',
         f'<rect x="{cx-r}" y="{cy-r}" width="{r*2}" height="{r*2}" rx="{r*0.35}" '
         f'fill="url(#bbez)"/>',
         f'<rect x="{cx-r*0.82}" y="{cy-r*0.82}" width="{r*1.64}" height="{r*1.64}" '
@@ -286,7 +306,7 @@ def slider_handle(w, h):
     """Fader cap: metal body with a center accent grip line."""
     return "\n".join([
         svg_open(w, h),
-        '<defs>' + lgrad("cap", KNOB_BODY_HI, "#2C2820") + '</defs>',
+        '<defs>' + lgrad("cap", KNOB_BODY_HI, KNOB_BODY_LO) + '</defs>',
         f'<rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="{min(w,h)*0.18:.2f}" '
         f'fill="url(#cap)" stroke="{KNOB_RING}" stroke-width="0.8"/>',
         f'<rect x="1" y="{h*0.5 - h*0.08:.2f}" width="{w-2}" height="{h*0.16:.2f}" '
@@ -475,7 +495,7 @@ def gen_panel(name, w, h, texts):
     out.append(f'<rect x="0" y="0" width="{w}" height="{strip:.2f}" fill="url(#strip)"/>')
     out.append(f'<rect x="0" y="{strip:.2f}" width="{w}" height="0.8" '
                f'fill="#000000" fill-opacity="0.35"/>')
-    out.append(f'<rect x="0" y="{h-strip:.2f}" width="{w}" height="{strip:.2f}" fill="#1B1813"/>')
+    out.append(f'<rect x="0" y="{h-strip:.2f}" width="{w}" height="{strip:.2f}" fill="{PANEL_FOOT}"/>')
     # Hairline inner border: the "milled edge" that separates modules
     out.append(f'<rect x="0.6" y="0.6" width="{w-1.2:.2f}" height="{h-1.2:.2f}" '
                f'fill="none" stroke="#FFFFFF" stroke-opacity="0.13" stroke-width="1"/>')

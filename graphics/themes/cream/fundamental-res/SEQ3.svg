@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="330.0px" height="380.0px" viewBox="0 0 330.0 380.0">
+<defs><linearGradient id="panel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F6F0E2"/><stop offset="1" stop-color="#EAE2CF"/></linearGradient><linearGradient id="strip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F2A866"/><stop offset="1" stop-color="#B85C1C"/></linearGradient><linearGradient id="sheen" x1="0" y1="0" x2="0.65" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.09"/><stop offset="0.4" stop-color="#FFFFFF" stop-opacity="0.02"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient></defs>
+<rect width="330.0" height="380.0" fill="url(#panel)" fill-opacity="0.97"/>
+<rect width="330.0" height="380.0" fill="url(#sheen)"/>
+<rect x="0" y="0" width="330.0" height="5.32" fill="url(#strip)"/>
+<rect x="0" y="5.32" width="330.0" height="0.8" fill="#000000" fill-opacity="0.35"/>
+<rect x="0" y="374.68" width="330.0" height="5.32" fill="#CFC5AE"/>
+<rect x="0.6" y="0.6" width="328.80" height="378.80" fill="none" stroke="#FFFFFF" stroke-opacity="0.13" stroke-width="1"/>
+<rect x="0" y="0" width="1" height="380.0" fill="#FFFFFF" fill-opacity="0.07"/>
+<rect x="329.0" y="0" width="1" height="380.0" fill="#000000" fill-opacity="0.45"/>
+<text x="165.0" y="17.099999999999998" font-family="sans-serif" font-size="6" fill="#2B2721" text-anchor="middle" font-weight="bold">SEQ3</text>
+</svg>

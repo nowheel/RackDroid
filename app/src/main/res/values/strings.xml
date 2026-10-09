@@ -566,6 +566,7 @@
 	<string name="theme_blue_night">Blue Night</string>
 	<string name="theme_emerald">Emerald</string>
 	<string name="theme_violet">Violet</string>
+	<string name="theme_cream">Cream</string>
 	<string name="toast_theme_applied">Theme: %1$s</string>
 	<string name="theme_restart_message">Toolbar and menus are themed. Restart the app to recolor the rack panels and background too.</string>
 	<string name="theme_restart_now">Restart now</string>

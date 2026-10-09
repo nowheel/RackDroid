@@ -764,7 +764,7 @@ class MainActivity : NativeActivity() {
 				val w = width.toFloat()
 				val h = height.toFloat()
 				val r = h / 2f
-				paint.color = AppTheme.withAlpha(Color.WHITE, 10)
+				paint.color = AppTheme.edge(10)
 				canvas.drawRoundRect(0f, 0f, w, h, r, r, paint)
 				if (load <= 0) return
 				paint.color = when {
@@ -787,12 +787,12 @@ class MainActivity : NativeActivity() {
 		fun glassPill() = GradientDrawable().apply {
 			cornerRadius = dp(18).toFloat()
 			setColor(AppTheme.withAlpha(AppTheme.current.surface, 85))
-			setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+			setStroke(dp(1), AppTheme.edge(15))
 		}
 		val cardBg = GradientDrawable().apply {
 			cornerRadius = dp(20).toFloat()
 			setColor(AppTheme.withAlpha(AppTheme.current.surface, 85))
-			setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+			setStroke(dp(1), AppTheme.edge(15))
 		}
 		lateinit var collapseButton: ImageButton
 		lateinit var card: LinearLayout
@@ -1355,7 +1355,7 @@ class MainActivity : NativeActivity() {
 		dlg.window?.apply {
 			setBackgroundDrawable(GradientDrawable().apply {
 				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			})
 			setDimAmount(0.4f)
 		}
@@ -1460,7 +1460,7 @@ class MainActivity : NativeActivity() {
 		dlg.window?.apply {
 			setBackgroundDrawable(GradientDrawable().apply {
 				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			})
 			setDimAmount(0.4f)
 		}
@@ -1706,7 +1706,7 @@ class MainActivity : NativeActivity() {
 		dlg.window?.apply {
 			setBackgroundDrawable(GradientDrawable().apply {
 				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			})
 			setDimAmount(0.4f)
 		}
@@ -1827,7 +1827,7 @@ class MainActivity : NativeActivity() {
 		dlg.window?.apply {
 			setBackgroundDrawable(GradientDrawable().apply {
 				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			})
 			setDimAmount(0.4f)
 		}
@@ -2137,7 +2137,7 @@ class MainActivity : NativeActivity() {
 			background = GradientDrawable().apply {
 				cornerRadius = dp(20).toFloat()
 				setColor(AppTheme.withAlpha(AppTheme.current.surface, 92))
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+				setStroke(dp(1), AppTheme.edge(15))
 			}
 			addView(android.widget.ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(28), dp(28)))
 			addView(TextView(this@MainActivity).apply {
@@ -2540,7 +2540,7 @@ class MainActivity : NativeActivity() {
 					dp(28).toFloat(), dp(28).toFloat(), dp(28).toFloat(), dp(28).toFloat(),
 					0f, 0f, 0f, 0f)
 				// Liquid-glass rim: a whisper of white along the edge.
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+				setStroke(dp(1), AppTheme.edge(18))
 			}
 			setPadding(dp(8), 0, dp(8), dp(14))
 		}
@@ -2562,7 +2562,7 @@ class MainActivity : NativeActivity() {
 			val f = flags[i]
 			when {
 				f and ROW_SEPARATOR != 0 -> col.addView(View(this).apply {
-					setBackgroundColor(AppTheme.withAlpha(Color.WHITE, 8))
+					setBackgroundColor(AppTheme.edge(8))
 					layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
 						.apply { topMargin = dp(7); bottomMargin = dp(7); leftMargin = dp(12); rightMargin = dp(12) }
 				})

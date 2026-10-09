@@ -86,7 +86,21 @@ object AppTheme {
 		danger = Color.parseColor("#FF9EB0"),
 	)
 
-	val all = listOf(amber, blueNight, emerald, violet)
+	/** The light one. Its accent is darker than the others': it has to be
+	 * read on cream, where theirs are read on near-black. */
+	val cream = Palette(
+		id = "cream", nameRes = R.string.theme_cream,
+		surface = Color.parseColor("#F1EBDD"),
+		surfaceInset = Color.parseColor("#DDD5C2"),
+		textPrimary = Color.parseColor("#2B2721"),
+		textSecondary = Color.parseColor("#6E6657"),
+		textDisabled = Color.parseColor("#A39B8B"),
+		accent = Color.parseColor("#B85C1C"),
+		onAccent = Color.parseColor("#FFF8EC"),
+		danger = Color.parseColor("#C0392B"),
+	)
+
+	val all = listOf(amber, blueNight, emerald, violet, cream)
 
 	var current: Palette = amber
 		private set
@@ -116,6 +130,10 @@ object AppTheme {
 			f.writeText(palette.id)
 		}
 	}
+
+	/** A hairline or faint tint that shows on [Palette.surface]: white on the
+	 * dark themes, black on the light one. */
+	fun edge(pct: Int): Int = withAlpha(if (current === cream) Color.BLACK else Color.WHITE, pct)
 
 	/** [color] with its alpha replaced by [pct] percent (0-100). Replaces the
 	 * many hand-picked "#XXbbggrr" alpha variants of the same base hue. */

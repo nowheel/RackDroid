@@ -11,4 +11,9 @@ void installLabelOverlay();
 "pop" glow around it (called by the native browser on tap-to-place). */
 void noteModuleAdded(long long moduleId);
 
+/** The rack theme in place has light panels (asset_extract.cpp says so at
+startup): the labels over the panels that follow the theme are drawn in dark
+ink. */
+extern bool labelOverlayLightPanels;
+
 } // namespace rackdroid

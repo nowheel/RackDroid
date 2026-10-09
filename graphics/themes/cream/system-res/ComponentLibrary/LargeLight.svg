@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="5.0mm" height="5.0mm" viewBox="0 0 5.0 5.0">
+<defs><radialGradient id="lens" cx="0.4" cy="0.35" r="0.8"><stop offset="0" stop-color="#1B1813"/><stop offset="1" stop-color="#0C0A08"/></radialGradient></defs>
+<circle cx="2.5" cy="2.5" r="2.25" fill="url(#lens)"/>
+<circle cx="2.5" cy="2.5" r="2.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="0.30"/>
+</svg>

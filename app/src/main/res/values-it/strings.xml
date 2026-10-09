@@ -561,6 +561,7 @@
 	<string name="theme_blue_night">Blu notte</string>
 	<string name="theme_emerald">Verde smeraldo</string>
 	<string name="theme_violet">Violetto</string>
+	<string name="theme_cream">Crema</string>
 	<string name="toast_theme_applied">Tema: %1$s</string>
 	<string name="theme_restart_message">Barra e menu sono a tema. Riavvia l\'app per ricolorare anche i pannelli e lo sfondo del rack.</string>
 	<string name="theme_restart_now">Riavvia ora</string>

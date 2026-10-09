@@ -51,6 +51,8 @@ static const double POP_SECONDS = 0.7;
 static struct { long long id; double time; } g_added[8];
 static int g_addedNext = 0;
 
+bool labelOverlayLightPanels = false;
+
 void noteModuleAdded(long long moduleId) {
 	g_added[g_addedNext % 8] = {moduleId, system::getTime()};
 	g_addedNext++;
@@ -160,13 +162,19 @@ struct PanelLabelOverlay : widget::Widget {
 				"ImpromptuModular", "CountModula", "Bidoo", "GrandeModular", "Befaco",
 				"RackDroidDrums",
 			};
+			// Only the panels in the base APK follow the theme; a pack keeps
+			// its own, dark ones.
+			static const std::set<std::string> themedPlugins = {"Core", "Fundamental", "RackDroidDrums"};
+			darkInk = labelOverlayLightPanels && mw->model && mw->model->plugin &&
+				themedPlugins.count(mw->model->plugin->slug);
+			NVGcolor ink = darkInk ? nvgRGB(0x2B, 0x27, 0x21) : nvgRGB(0xED, 0xE6, 0xD8);
 			if (mw->model && mw->model->plugin &&
 					regenArtPlugins.count(mw->model->plugin->slug)) {
 				math::Vec top = mw->getRelativeOffset(math::Vec(mw->box.size.x * 0.5f, 0), ref);
 				nvgFontSize(args.vg, 7.5f);
 				// Warm white: the label sits on the dark panel face just
 				// below the cream header strip these panels draw.
-				drawLabel(args, top.x, top.y + 12.0f, mw->model->name, nvgRGB(0xED, 0xE6, 0xD8));
+				drawLabel(args, top.x, top.y + 12.0f, mw->model->name, ink);
 				nvgFontSize(args.vg, 6.5f);
 			}
 			// Params: label below the control
@@ -178,7 +186,7 @@ struct PanelLabelOverlay : widget::Widget {
 				float ly = c.y + pw->box.size.y * 0.5f + 0.5f;
 				if (!labelVisible(args, c.x, ly))
 					continue;
-				drawLabel(args, c.x, ly, shortLabel(pq->name), nvgRGB(0xED, 0xE6, 0xD8));
+				drawLabel(args, c.x, ly, shortLabel(pq->name), ink);
 			}
 			// Inputs/outputs: label below the jack, tinted by direction
 			for (app::PortWidget* port : mw->getPorts()) {
@@ -187,6 +195,8 @@ struct PanelLabelOverlay : widget::Widget {
 					continue;
 				NVGcolor col = (port->type == engine::Port::INPUT)
 					? nvgRGB(0xB8, 0xAF, 0x9C) : nvgRGB(0xFF, 0xDA, 0x9F);
+				if (darkInk)
+					col = (port->type == engine::Port::INPUT) ? nvgRGB(0x5E, 0x57, 0x4A) : nvgRGB(0xA8, 0x50, 0x1A);
 				math::Vec c = port->getRelativeOffset(port->box.size.mult(0.5f), ref);
 				float ly = c.y + port->box.size.y * 0.5f + 0.5f;
 				if (!labelVisible(args, c.x, ly))
@@ -200,6 +210,9 @@ struct PanelLabelOverlay : widget::Widget {
 	from drawLabel because shortLabel() allocates -- twice, for the substr and
 	the copy -- and doing that for a label that is then thrown away costs a
 	few thousand allocations a second on a full rack. */
+	/** The module being labelled has a light panel. */
+	bool darkInk = false;
+
 	static bool labelVisible(const DrawArgs& args, float x, float y) {
 		return !(x < args.clipBox.pos.x - 40 || x > args.clipBox.pos.x + args.clipBox.size.x + 40 ||
 			y < args.clipBox.pos.y - 20 || y > args.clipBox.pos.y + args.clipBox.size.y + 20);
@@ -209,8 +222,10 @@ struct PanelLabelOverlay : widget::Widget {
 		if (!labelVisible(args, x, y))
 			return;
 		// Subtle shadow for legibility over busy panels
-		nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 180));
-		nvgText(args.vg, x + 0.3f, y + 0.3f, text.c_str(), NULL);
+		if (!darkInk) {
+			nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 180));
+			nvgText(args.vg, x + 0.3f, y + 0.3f, text.c_str(), NULL);
+		}
 		nvgFillColor(args.vg, col);
 		nvgText(args.vg, x, y, text.c_str(), NULL);
 	}

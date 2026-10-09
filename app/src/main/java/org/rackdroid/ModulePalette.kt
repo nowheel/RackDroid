@@ -387,7 +387,7 @@ class ModulePalette(
 			background = GradientDrawable().apply {
 				cornerRadius = dp(20).toFloat()
 				setColor(AppTheme.withAlpha(AppTheme.current.surface, 85))
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+				setStroke(dp(1), AppTheme.edge(15))
 			}
 			clipToOutline = true
 			addView(strip, LinearLayout.LayoutParams(
@@ -432,7 +432,7 @@ class ModulePalette(
 	private fun chipBg(active: Boolean) = GradientDrawable().apply {
 		cornerRadius = dp(16).toFloat()
 		setColor(if (active) Color.WHITE else AppTheme.current.surfaceInset)
-		if (!active) setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 12))
+		if (!active) setStroke(dp(1), AppTheme.edge(12))
 	}
 
 	private fun selectChip(chip: TextView, label: String, pred: (Entry) -> Boolean) {
@@ -555,7 +555,7 @@ class ModulePalette(
 			background = GradientDrawable().apply {
 				cornerRadius = dp(14).toFloat()
 				setColor(AppTheme.current.surfaceInset)
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 12))
+				setStroke(dp(1), AppTheme.edge(12))
 			}
 			setPadding(dp(14), dp(10), dp(14), dp(10))
 			isSingleLine = true
@@ -627,7 +627,7 @@ class ModulePalette(
 			background = GradientDrawable().apply {
 				cornerRadius = dp(20).toFloat()
 				setColor(AppTheme.withAlpha(AppTheme.current.surface, 92))
-				setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 15))
+				setStroke(dp(1), AppTheme.edge(15))
 			}
 			clipToOutline = true
 			setPadding(dp(10), dp(10), dp(10), dp(6))
@@ -803,7 +803,7 @@ class ModulePalette(
 		dlg.window?.setBackgroundDrawable(GradientDrawable().apply {
 			cornerRadius = dp(22).toFloat()
 			setColor(AppTheme.withAlpha(AppTheme.current.surface, 95))
-			setStroke(dp(1), AppTheme.withAlpha(Color.WHITE, 18))
+			setStroke(dp(1), AppTheme.edge(18))
 		})
 		(ctx as? MainActivity)?.let { runCatching { it.trackTopWindow(dlg); it.glassify(dlg.window) } }
 		dlg.show()

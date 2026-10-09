@@ -171,6 +171,7 @@
 	<string name="theme_blue_night">ブルーナイト</string>
 	<string name="theme_emerald">エメラルド</string>
 	<string name="theme_violet">バイオレット</string>
+	<string name="theme_cream">クリーム</string>
 	<string name="toast_theme_applied">テーマ: %1$s</string>
 	<string name="theme_restart_message">ツールバーとメニューにテーマが適用されました。ラックのパネルと背景にも反映するには、アプリを再起動してください。</string>
 	<string name="theme_restart_now">今すぐ再起動</string>
