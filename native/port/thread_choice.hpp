@@ -167,10 +167,10 @@ struct ThreadChoice {
 	that; a Nothing A024 with twelve parts read 3:94% 4:81%.
 
 	So: the lightest count, the smaller of two within a few points. And the
-	walk goes up first and stops in a direction at the first count that is
-	worse than the lightest by more than those points: past the fast cores
-	the curve only rises (5:119% on that Nothing, 5:165% on the A52s), and
-	every count measured is a second of silence. */
+	walk goes up first, from the lightest so far to the next count that can
+	matter (usefulForIslands): past the fast cores the curve only rises
+	(5:119% on that Nothing, 5:165% on the A52s), and every count measured is
+	a second of silence. */
 	static int bestIslands(const int32_t* loads, int floor, int top) {
 		int low = 0;
 		for (int c = floor; c <= top; c++)
@@ -182,7 +182,20 @@ struct ThreadChoice {
 		return low;
 	}
 
-	static int nextIslands(const int32_t* loads, int floor, int top, bool walking) {
+	/** Whether `count` threads can finish `parts` islands sooner than one
+	thread fewer: the block ends when the busiest thread does, and that
+	thread has ceil(parts / count) of them. Four parts gain nothing from a
+	third thread (a TB-X306X read 2:110% 3:110% 4:65%), six nothing from a
+	fourth or fifth (a Galaxy A52s: 3:50% 4:49% 5:50%).
+	ponytail: as if the parts were all one size; a patch with one large part
+	and several small is measured at counts that cannot help it. */
+	static bool usefulForIslands(int count, int parts) {
+		if (count <= 1)
+			return true;
+		return (parts + count - 1) / count < (parts + count - 2) / (count - 1);
+	}
+
+	static int nextIslands(const int32_t* loads, int floor, int top, bool walking, int parts) {
 		if (!walking)
 			return -1;
 		int low = 0;
@@ -191,13 +204,15 @@ struct ThreadChoice {
 				low = c;
 		if (low == 0)
 			return -1;
+		// The nearest count each way that can make a difference, upward
+		// first. One that has been measured and is not the lightest ends
+		// that direction.
 		for (int dir : {1, -1}) {
-			for (int c = low + dir; c >= floor && c <= top; c += dir) {
-				if (loads[c] == 0)
-					return c;
-				if (loads[c] > loads[low] + NEAR_POINTS)
-					break;
-			}
+			int c = low + dir;
+			while (c >= floor && c <= top && !usefulForIslands(c, parts))
+				c += dir;
+			if (c >= floor && c <= top && loads[c] == 0)
+				return c;
 		}
 		return -1;
 	}

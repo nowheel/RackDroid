@@ -33,7 +33,7 @@ static int measure(const std::vector<int32_t>& truth, int start, int* readings) 
 }
 
 /** The same for a patch stepped as islands. */
-static void expectIslands(const char* what, std::vector<int32_t> truth, int start, int want, int maxReadings = 99) {
+static void expectIslands(const char* what, int parts, std::vector<int32_t> truth, int start, int want, int maxReadings = 99) {
 	const int floor = 1, top = (int) truth.size();
 	std::vector<int32_t> loads(top + 2, 0);
 	int current = start, readings = 0, got = 0;
@@ -41,7 +41,7 @@ static void expectIslands(const char* what, std::vector<int32_t> truth, int star
 		loads[current] = truth[current - 1];
 		readings++;
 		bool walking = readings > 1 || loads[current] >= 60;
-		int next = ThreadChoice::nextIslands(loads.data(), floor, top, walking);
+		int next = ThreadChoice::nextIslands(loads.data(), floor, top, walking, parts);
 		if (next < 0) {
 			got = ThreadChoice::bestIslands(loads.data(), floor, top);
 			break;
@@ -118,20 +118,23 @@ int main() {
 			failures++;
 		std::printf("%s  A024 waiting for a fourth thread steps down to three\n", ok ? "ok  " : "FAIL");
 	}
-	// Patches stepped as islands (0.1.2.110-118). The lightest count, found
-	// in few readings; never the far side.
+	// Patches stepped as islands (0.1.2.110-121). The lightest count, found
+	// in few readings; never the far side, never a count that cannot help.
 	// Nothing A024, twelve parts: 1:197% 2:141% 3:94% 4:81% 5:119%.
-	expectIslands("A024 x12 from three", {197, 141, 94, 81, 119, 150, 200}, 3, 4, 4);
-	expectIslands("A024 x12 from four", {197, 141, 94, 81, 119, 150, 200}, 4, 4, 3);
-	// Galaxy A52s: six parts 1:129% 2:68%, and four cores that are fast;
-	// twelve parts 1:261% 2:133% 3:90% 4:84% 5:165%.
-	expectIslands("A52s x6 from two", {129, 68, 47, 36, 80, 120, 160}, 2, 4, 4);
-	expectIslands("A52s x12 from four", {261, 133, 90, 84, 165, 200, 250}, 4, 4, 3);
-	// TB-X306X, four parts: 1:218% 2:110% 3:110% 4:65%, more threads than
-	// parts never asked for (the caller caps the top at the parts).
-	expectIslands("TB-X306X x4 from two", {218, 110, 110, 65}, 2, 4, 3);
+	expectIslands("A024 x12 from three", 12, {197, 141, 94, 81, 119, 150, 200}, 3, 4, 3);
+	expectIslands("A024 x12 from four", 12, {197, 141, 94, 81, 119, 150, 200}, 4, 4, 3);
+	// Galaxy A52s, six parts as read on 0.1.2.121: flat from three up. Four
+	// and five threads cannot help six parts and are not measured.
+	expectIslands("A52s x6 from one", 6, {129, 66, 50, 49, 50, 51}, 1, 3, 4);
+	expectIslands("A52s x6 from two", 6, {129, 66, 50, 49, 50, 51}, 2, 3, 4);
+	// The same phone, twelve parts: 3:120% 4:85% 5:159%.
+	expectIslands("A52s x12 from four", 12, {261, 133, 120, 85, 159, 200, 250}, 4, 4, 3);
+	// TB-X306X, four parts: 2:115% 3:112% 4:65%. Three threads are a step
+	// that is not one, and must not end the walk.
+	expectIslands("TB-X306X x4 from two", 4, {218, 115, 112, 65}, 2, 4, 3);
+	expectIslands("TB-X306X x4 from three", 4, {218, 115, 112, 65}, 3, 4, 3);
 	// Nothing A024, four parts: one thread at 47% is light and is left alone.
-	expectIslands("A024 x4, light on one", {47, 42, 40, 41}, 1, 1, 1);
+	expectIslands("A024 x4, light on one", 4, {47, 42, 40, 41}, 1, 1, 1);
 	std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
 	return failures ? 1 : 0;
 }

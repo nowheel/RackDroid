@@ -2240,7 +2240,7 @@ static void checkThreadCount() {
 			top = islandCount > floorCount ? islandCount : floorCount;
 		int comfy = rackdroid::ThreadChoice::comfortable(loads, floorCount, top);
 		int next = stuck ? -1
-			: islands ? rackdroid::ThreadChoice::nextIslands(loads, floorCount, top, sweepCount > 0 || !light)
+			: islands ? rackdroid::ThreadChoice::nextIslands(loads, floorCount, top, sweepCount > 0 || !light, islandCount)
 			: rackdroid::ThreadChoice::next(loads, floorCount, top, sweepCount > 0 || !light);
 		sweepStepAt = now;
 		sweepSum = 0;

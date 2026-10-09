@@ -60,7 +60,9 @@ TRIAL_WARM_SEC as islands before anything is timed: Workers just launched have
 neither their priority nor their cores yet (main_android.cpp gives them within
 a twentieth of a second), and timed in that state the islands lost to Rack's
 loop at thread counts where they are twice as fast. Then TRIAL_SEC each way,
-four blocks at least, the first TRIAL_SKIP_SEC of each left out. */
+eight blocks at least, the first TRIAL_SKIP_SEC (two blocks at least) of each
+left out: with 960-frame blocks four were too few, and the first block after
+the change of way too slow, to tell 42% from 59% on a TB-X306X. */
 static constexpr double TRIAL_WARM_SEC = 0.15;
 static constexpr double TRIAL_SEC = 0.1;
 static constexpr double TRIAL_SKIP_SEC = 0.02;
@@ -90,6 +92,8 @@ struct EngineIslands {
 	std::atomic<int> entered{0};
 	/** The Workers are in EngineIslands_work, not at Rack's barriers. */
 	bool parked = false;
+	/** One island holds over three fifths of the modules. */
+	bool lopsided = false;
 	/** When this block opened, and how long its audio lasts (seconds). */
 	double blockStart = 0.0;
 	double blockTime = 0.0;
@@ -106,6 +110,7 @@ struct EngineIslands {
 	[0, trialPhase) islands, [trialPhase, 2 trialPhase) Rack's loop, done. */
 	int64_t trialAt = -1;
 	int64_t trialPhase = 1 << 30;
+	int64_t trialSkip = 0;
 	double trialTime[2] = {};
 	int64_t trialFrames[2] = {};
 	bool useIslands = true;
@@ -209,6 +214,14 @@ static void EngineIslands_build(Engine::Internal* internal) {
 		if (it != s.islandOf.end())
 			s.islands[it->second].cables.push_back(c);
 	}
+	// One island with most of the patch in it leaves one thread with most of
+	// the work, where Rack's loop would have shared it: no trial is needed to
+	// know which is quicker (45 modules beside 1 on a TB-X306X: 42% of the
+	// deadline shared, 59% as islands).
+	size_t largest = 0;
+	for (const EngineIsland& island : s.islands)
+		largest = std::max(largest, island.modules.size());
+	s.lopsided = 5 * largest > 3 * internal->modules.size();
 	rackdroid::engineIslandCount.store((int) s.islands.size(), std::memory_order_relaxed);
 }
 
@@ -427,9 +440,9 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		EngineIslands_build(internal);
 		s.threads = 0;
 	}
-	if (s.islands.size() < 2) {
+	if (s.islands.size() < 2 || s.lopsided) {
 		EngineIslands_leave(that);
-		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
+		rackdroid::engineIslandsUsed.store(s.islands.size() < 2 ? 0 : -1, std::memory_order_relaxed);
 		return false;
 	}
 
@@ -444,7 +457,8 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		s.blocksSinceBalance = 0;
 		if (!keep) {
 			s.trialAt = -(int64_t) (TRIAL_WARM_SEC * internal->sampleRate);
-			s.trialPhase = std::max((int64_t) (TRIAL_SEC * internal->sampleRate), (int64_t) 4 * frames);
+			s.trialPhase = std::max((int64_t) (TRIAL_SEC * internal->sampleRate), (int64_t) 8 * frames);
+			s.trialSkip = std::max((int64_t) (TRIAL_SKIP_SEC * internal->sampleRate), (int64_t) 2 * frames);
 			s.trialTime[0] = s.trialTime[1] = 0.0;
 			s.trialFrames[0] = s.trialFrames[1] = 0;
 			rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
@@ -526,7 +540,7 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 	if (!decided) {
 		if (s.trialAt >= 0) {
 			int which = s.trialAt >= s.trialPhase;
-			if (s.trialAt - which * s.trialPhase >= (int64_t) (TRIAL_SKIP_SEC * internal->sampleRate)) {
+			if (s.trialAt - which * s.trialPhase >= s.trialSkip) {
 				s.trialTime[which] += system::getTime() - trialStart;
 				s.trialFrames[which] += frames;
 			}
