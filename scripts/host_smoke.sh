@@ -71,4 +71,4 @@ RACKDROID_SYSTEM_DIR="$STAGE" \
 RACKDROID_EXTRA_PLUGINS="$extra_plugins" \
 EGL_PLATFORM=surfaceless \
 LIBGL_ALWAYS_SOFTWARE=1 \
-  "$BUILD/rack_ui_smoke" "$FRAMES" --all-modules
+  "$BUILD/rack_ui_smoke" "$FRAMES" ${RACKDROID_HOST_SMOKE_MODE:---all-modules}
