@@ -94,6 +94,9 @@ struct EngineIslands {
 	bool parked = false;
 	/** One island holds over three fifths of the modules. */
 	bool lopsided = false;
+	/** Engine threads in the middle of an island, by the core they took it
+	on. See EngineIslands_run. */
+	std::atomic<int> coreBusy[64];
 	/** When this block opened, and how long its audio lasts (seconds). */
 	double blockStart = 0.0;
 	double blockTime = 0.0;
@@ -257,8 +260,15 @@ then put two Workers on one core for a minute: each waited a scheduler's turn
 (16 ms) for the other, which was only spinning, and the callback waited 16 ms
 a block for islands that any idle thread could have run -- 800% of the
 deadline, 530 underruns a second. Taken as they come, a thread that is not
-running takes nothing and holds nobody up, and a slow core does less. */
-static void EngineIslands_run(Engine* that, int threadId) {
+running takes nothing and holds nobody up, and a slow core does less.
+
+Returns true when this thread found another already in an island on its own
+core and stood back: after an unlock the same phone kept three of five Workers
+on cpu5 for seven seconds, the one that had an island got a third of the core
+while the other two spun beside it, and every callback waited 8 ms for it --
+210 to 310 underruns a second on six threads that had been clean at 44%. The
+one that stands back must sleep, not spin (EngineIslands_work). */
+static bool EngineIslands_run(Engine* that, int threadId) {
 	Engine::Internal* internal = that->internal;
 	EngineIslands& s = engineIslands;
 	Module::ProcessArgs processArgs;
@@ -292,14 +302,24 @@ static void EngineIslands_run(Engine* that, int threadId) {
 					break;
 			}
 		}
+		int myCore = threadId != 0 ? sched_getcpu() : -1;
+		if (myCore >= 64)
+			myCore = -1;
+		if (myCore >= 0 && s.coreBusy[myCore].fetch_add(1, std::memory_order_acq_rel) > 0) {
+			s.coreBusy[myCore].fetch_sub(1, std::memory_order_acq_rel);
+			return true;
+		}
 		// Never past `open`, and never while it is 0: a thread that slept
 		// through the end of its block must not move `next` in the one being
 		// prepared.
 		int taken = s.next.load(std::memory_order_acquire);
 		while (taken < s.open.load(std::memory_order_acquire)
 				&& !s.next.compare_exchange_weak(taken, taken + 1, std::memory_order_acq_rel)) {}
-		if (taken >= s.open.load(std::memory_order_acquire))
+		if (taken >= s.open.load(std::memory_order_acquire)) {
+			if (myCore >= 0)
+				s.coreBusy[myCore].fetch_sub(1, std::memory_order_acq_rel);
 			break;
+		}
 		int index = s.order[taken];
 		EngineIsland& island = s.islands[index];
 		double startTime = system::getTime();
@@ -347,10 +367,13 @@ static void EngineIslands_run(Engine* that, int threadId) {
 		island.cost = island.cost > 0.0 ? island.cost + 0.1 * (took - island.cost) : took;
 		if (threadId != 0)
 			rackdroid::engineIslandsByWorkers.fetch_add(1, std::memory_order_relaxed);
+		if (myCore >= 0)
+			s.coreBusy[myCore].fetch_sub(1, std::memory_order_acq_rel);
 		if (s.pending.fetch_sub(1, std::memory_order_acq_rel) == 1
 				&& s.callerSleeps.load(std::memory_order_acquire))
 			EngineIslands_futex(s.pending, FUTEX_WAKE_PRIVATE, 1);
 	}
+	return false;
 }
 
 
@@ -371,8 +394,17 @@ static void EngineIslands_work(Engine* that, int threadId) {
 	EngineIslands& s = engineIslands;
 	uint32_t seen = s.generation.load(std::memory_order_acquire) - 1;
 	s.entered.fetch_add(1, std::memory_order_acq_rel);
+	bool crowded = false;
 	while (true) {
 		int64_t start = 0;
+		if (crowded) {
+			// Asleep until the next block: spinning here would take the core
+			// from the thread that is working on it.
+			s.sleepers.fetch_add(1);
+			while (s.generation.load(std::memory_order_acquire) == seen)
+				EngineIslands_futex(s.generation, FUTEX_WAIT_PRIVATE, seen);
+			s.sleepers.fetch_sub(1);
+		}
 		for (unsigned i = 1; s.generation.load(std::memory_order_acquire) == seen; i++) {
 #if defined(__aarch64__)
 			__asm__ __volatile__("yield");
@@ -396,7 +428,7 @@ static void EngineIslands_work(Engine* that, int threadId) {
 		seen = s.generation.load(std::memory_order_acquire);
 		if (s.leave.load(std::memory_order_acquire))
 			return;
-		EngineIslands_run(that, threadId);
+		crowded = EngineIslands_run(that, threadId);
 	}
 }
 
