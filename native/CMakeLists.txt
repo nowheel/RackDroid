@@ -418,7 +418,13 @@ endif()
 
 # Shared, like desktop libRack.so: the app AND the dlopen'd plugin .so files
 # must all bind against one single copy of the Rack runtime.
-add_library(rack_engine SHARED ${RACK_SOURCES} ${PORT_SOURCES})
+# The oscillators' step tables come from VCV Rack's desktop binary, not from
+# this build's arithmetic (port/minblep_vcv.cpp says why): Rack's own function
+# is kept, under another name, for the sizes there is no table for.
+set_source_files_properties(${RACK_DIR}/src/dsp/minblep.cpp PROPERTIES
+	COMPILE_DEFINITIONS minBlepImpulse=minBlepImpulseComputed)
+add_library(rack_engine SHARED ${RACK_SOURCES} ${PORT_SOURCES}
+	${CMAKE_CURRENT_SOURCE_DIR}/port/minblep_vcv.cpp)
 if(ANDROID)
 	# window_android/dep_android (EGL/GLES3) and log live inside rack_engine
 	target_link_libraries(rack_engine PUBLIC android log EGL GLESv3)
@@ -1036,4 +1042,22 @@ else()
 		target_compile_definitions(rack_islands_test PRIVATE RACKDROID_RACK_DIR="${RACK_DIR}")
 		target_link_libraries(rack_islands_test rack_engine)
 	endif()
+endif()
+
+# No fused multiply-add. clang contracts a*b+c into one instruction on arm64,
+# rounding once where an x86 build of VCV Rack (no FMA under its
+# -march=nehalem) rounds twice: nearly every module then differs from the
+# desktop in the last bit, and an oscillator's phase drifts away from there.
+# Here at the end, on every target, because -funsafe-math-optimizations (which
+# the targets ask for, as Rack's compile.mk does) turns contraction back on in
+# clang and the last flag wins. Measured against VCV Rack 2.6.4
+# (rack_ui_smoke --dump): see PORTING.md.
+if(ANDROID)
+	get_property(ALL_TARGETS DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY BUILDSYSTEM_TARGETS)
+	foreach(T ${ALL_TARGETS})
+		get_target_property(T_TYPE ${T} TYPE)
+		if(NOT T_TYPE STREQUAL "INTERFACE_LIBRARY" AND NOT T_TYPE STREQUAL "UTILITY")
+			target_compile_options(${T} PRIVATE -ffp-contract=off)
+		endif()
+	endforeach()
 endif()

@@ -427,6 +427,32 @@ Obiettivo: vedere il rack renderizzato e interagirci.
   velocità con stato 0 per una sera: la patch misurava 111% a un thread e
   sceglieva 4 thread invece di 3. Un numero di thread fallito con il core
   sotto il 90% della velocità non viene scritto come "non regge".
+- **Confronto con VCV Rack desktop.** `native/host/vcv_dump.cpp` suona dentro
+  la `libRack.so` ufficiale di VCV Rack Free 2.6.4 (Linux x64) le stesse corse
+  di `rack_ui_smoke --dump` (PC) e di `native/host/arm_dump.cpp` (telefono, con
+  le librerie dell'APK): i 39 moduli Fundamental uno per uno e la patch del
+  tester, ingressi generati con sola aritmetica intera. Trovati e corretti due
+  difetti del port su arm64:
+  - la tabella minBLEP, da cui nasce ogni fronte di quadra e dente di sega, si
+    calcola con un cepstrum che amplifica il rumore di arrotondamento della
+    FFT: sul telefono usciva fino al 19% lontana da quella del desktop. Ora le
+    due misure usate dai moduli (16 zeri, sovracampionamento 16 e 32) sono le
+    tabelle del desktop, bit per bit (`port/minblep_vcv.cpp`). Fundamental
+    VCO: da -17 dB a -134 dB di distanza dal desktop;
+  - clang su arm64 fonde a*b+c in una sola istruzione (e
+    `-funsafe-math-optimizations` la riattiva): `-ffp-contract=off` su ogni
+    target, in fondo a CMakeLists. Moduli identici al desktop bit per bit sul
+    TB-X306X: da 15 a 24 su 39. Costo misurato: nessuno (legata-x2 65%,
+    limite-x4 62%).
+  Quello che resta NON e' eliminabile da qui: 12 moduli differiscono
+  sull'ultima cifra (da -110 a -210 dB sotto il segnale) perche' compilatore,
+  libreria matematica e FFT (NEON invece di SSE) arrotondano in altri punti;
+  VCO2, VCF e la patch intera divergono di piu' (da -15 a -45 dB) perche'
+  amplificano quella cifra: fasi che scorrono, filtri in risonanza. Nemmeno
+  VCV e' identico a se stesso: lo stesso Fundamental compilato con e senza
+  `-march=nehalem` da' VCF a -6 dB, e la 2.6.2 distribuita con Rack differisce
+  dalla 2.6.4 su tre moduli. Il nostro build per PC contro il desktop: 37
+  corse su 41 identiche, le altre da -70 a -146 dB.
 - **Le parti indipendenti di una patch si calcolano a blocchi interi**
   (`port/engine_islands.inc`). Gruppi di moduli senza cavi fra loro e non
   affiancati (i vicini possono essere expander) non possono accorgersi
