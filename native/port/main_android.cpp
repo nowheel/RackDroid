@@ -757,7 +757,12 @@ static void audioCoreLost() {
 	}
 	inWindow++;
 	g_audioCpuLostAt = now;
-	g_audioCpuRetryAfter = inWindow <= 3 ? 2.0 : 15.0;
+	// One second, not two: the core it falls back to is slower, and with a
+	// patch near its limit every second there is over the deadline (a Nothing
+	// A024 on cpu3 with twelve islands: 144%, 280 underruns). Asking and
+	// being refused moves nothing, so the cost of asking too soon is one more
+	// ask a second later.
+	g_audioCpuRetryAfter = inWindow <= 3 ? 1.0 : 15.0;
 }
 static bool g_audioRepinWanted = false;
 
@@ -1193,7 +1198,8 @@ static void checkWorkerPriority() {
 			// every second on the other core is some 500 underruns on a patch
 			// at its limit (a Nothing A024, five seconds on cpu6 after an
 			// unlock: 2550 of them).
-			g_audioCpuRetryAfter = g_audioCpuRetryAfter < 5.0 ? 5.0
+			g_audioCpuRetryAfter = g_audioCpuRetryAfter < 2.0 ? 2.0
+				: g_audioCpuRetryAfter < 5.0 ? 5.0
 				: g_audioCpuRetryAfter < 15.0 ? 15.0 : g_audioCpuRetryAfter * 4.0;
 			if (best >= 0 && sched_setaffinity(audioTid, sizeof(bestMask), &bestMask) == 0) {
 				LOGI("Engine: the audio callback is back on cpu%d, %.0fs after losing it", best, lostFor);
@@ -2213,10 +2219,18 @@ static void checkThreadCount() {
 		}
 		// What to measure next, and below what to play on: thread_choice.hpp,
 		// which has the reasons and a test that runs without a phone.
-		const int top = ceiling < MAX_TRACKED_THREADS ? ceiling : MAX_TRACKED_THREADS;
+		int top = ceiling < MAX_TRACKED_THREADS ? ceiling : MAX_TRACKED_THREADS;
 		bool light = load > 0 && load < SWEEP_ENOUGH_PERCENT;
+		// A patch the engine is stepping as islands is chosen for differently
+		// (ThreadChoice::bestIslands says why), and never given more threads
+		// than it has islands for them to take.
+		int islandCount = rackdroid::engineIslandCount.load(std::memory_order_relaxed);
+		bool islands = rackdroid::engineIslandsUsed.load(std::memory_order_relaxed) > 0 && islandCount > 1;
+		if (islands && islandCount < top)
+			top = islandCount > floorCount ? islandCount : floorCount;
 		int comfy = rackdroid::ThreadChoice::comfortable(loads, floorCount, top);
 		int next = stuck ? -1
+			: islands ? rackdroid::ThreadChoice::nextIslands(loads, floorCount, top, sweepCount > 0 || !light)
 			: rackdroid::ThreadChoice::next(loads, floorCount, top, sweepCount > 0 || !light);
 		sweepStepAt = now;
 		sweepSum = 0;
@@ -2230,7 +2244,8 @@ static void checkThreadCount() {
 			return;
 		}
 		// Done.
-		int best = rackdroid::ThreadChoice::best(loads, floorCount, top);
+		int best = islands ? rackdroid::ThreadChoice::bestIslands(loads, floorCount, top)
+			: rackdroid::ThreadChoice::best(loads, floorCount, top);
 		if (best == 0)
 			best = measured;
 		if (g_patchMemo.bad && loads[best] >= 100) {
@@ -2470,6 +2485,10 @@ static void checkThreadCount() {
 	stallWindows = (judged && stalls >= rackdroid::ThreadChoice::STALLS_PER_WINDOW)
 		? stallWindows + 1 : 0;
 	int fewer = rackdroid::ThreadChoice::fewerForStalls(loads, floorCount, current, stallWindows);
+	// With islands the callback waits for no Worker; a long callback there is
+	// an island in progress, and a thread fewer makes it longer.
+	if (rackdroid::engineIslandsUsed.load(std::memory_order_relaxed) > 0)
+		fewer = 0;
 	// A Nothing A024 on four threads had 3, 5, 8 and 4 of these in four
 	// windows running, three threads measured at 82%, and stayed where it
 	// was. Which condition held it there is not in that log; it is in this.

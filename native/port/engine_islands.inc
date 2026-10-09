@@ -57,6 +57,9 @@ gives them within a twentieth of a second), and timed in that state the islands
 lost to Rack's loop on a TB-X306X at thread counts where they are twice as
 fast; the silent measurement then read Rack's loop and chose the wrong count. */
 static const int TRIAL_WARM_BLOCKS = 64;
+/** Blocks timed each way, and how many of them at the start are left out. */
+static const int TRIAL_BLOCKS = 24;
+static const int TRIAL_SKIP = 4;
 
 
 struct EngineIslands {
@@ -407,7 +410,9 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 		return false;
 	}
 	uint64_t signature = EngineIslands_signature(internal);
+	bool rebuilt = false;
 	if (s.owner != that || signature != s.signature) {
+		rebuilt = true;
 		// Parked Workers touch no island between blocks, so the islands may
 		// be rebuilt under them.
 		s.owner = that;
@@ -423,11 +428,18 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 
 	int threads = std::max(internal->threadCount, 1);
 	if (threads != s.threads) {
+		// Timed again on another thread count only if Rack's loop won the
+		// last time: islands that were the quicker on some count are the
+		// quicker on more threads, and each trial is a quarter of a second of
+		// the silent measurement, half of it spent the slow way.
+		bool keep = s.threads > 0 && !rebuilt && s.trialBlock >= 2 * TRIAL_BLOCKS && s.useIslands;
 		s.threads = threads;
 		s.blocksSinceBalance = 0;
-		s.trialBlock = -TRIAL_WARM_BLOCKS;
-		s.trialTime[0] = s.trialTime[1] = 0.0;
-		rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
+		if (!keep) {
+			s.trialBlock = -TRIAL_WARM_BLOCKS;
+			s.trialTime[0] = s.trialTime[1] = 0.0;
+			rackdroid::engineIslandsUsed.store(0, std::memory_order_relaxed);
+		}
 		EngineIslands_sort();
 	}
 	else if (++s.blocksSinceBalance >= 256) {
@@ -438,8 +450,6 @@ static bool EngineIslands_stepBlock(Engine* that, int frames) {
 
 	// The trial: islands, then Rack's loop, the first blocks of each left out
 	// while caches and Workers settle.
-	static const int TRIAL_BLOCKS = 24;
-	static const int TRIAL_SKIP = 4;
 	bool trial = s.trialBlock < 2 * TRIAL_BLOCKS;
 	bool islandsNow = trial ? s.trialBlock < TRIAL_BLOCKS : s.useIslands;
 	double trialStart = trial ? system::getTime() : 0.0;

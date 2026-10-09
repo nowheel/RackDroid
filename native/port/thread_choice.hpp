@@ -154,6 +154,53 @@ struct ThreadChoice {
 				return c;
 		return best;
 	}
+
+	/** The same two questions for a patch the engine is stepping as islands
+	(engine_islands.inc), where they have other answers.
+
+	Everything above is about Workers the callback has to wait for twice a
+	sample: fewest is safest there. With islands it waits for none of them --
+	a thread takes an island when it is free, and one that is not running
+	holds nobody up -- so a thread more costs nothing and buys room for the
+	moments the system takes cores away. A Galaxy A52s played a patch of six
+	parts on two threads at 64% "as the fewest that fit" when four read half
+	that; a Nothing A024 with twelve parts read 3:94% 4:81%.
+
+	So: the lightest count, the smaller of two within a few points. And the
+	walk goes up first and stops in a direction at the first count that is
+	worse than the lightest by more than those points: past the fast cores
+	the curve only rises (5:119% on that Nothing, 5:165% on the A52s), and
+	every count measured is a second of silence. */
+	static int bestIslands(const int32_t* loads, int floor, int top) {
+		int low = 0;
+		for (int c = floor; c <= top; c++)
+			if (loads[c] > 0 && (low == 0 || loads[c] < loads[low]))
+				low = c;
+		for (int c = floor; c < low; c++)
+			if (loads[c] > 0 && loads[c] <= loads[low] + NEAR_POINTS)
+				return c;
+		return low;
+	}
+
+	static int nextIslands(const int32_t* loads, int floor, int top, bool walking) {
+		if (!walking)
+			return -1;
+		int low = 0;
+		for (int c = floor; c <= top; c++)
+			if (loads[c] > 0 && (low == 0 || loads[c] < loads[low]))
+				low = c;
+		if (low == 0)
+			return -1;
+		for (int dir : {1, -1}) {
+			for (int c = low + dir; c >= floor && c <= top; c += dir) {
+				if (loads[c] == 0)
+					return c;
+				if (loads[c] > loads[low] + NEAR_POINTS)
+					break;
+			}
+		}
+		return -1;
+	}
 };
 
 
