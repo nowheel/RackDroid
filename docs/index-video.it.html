@@ -596,6 +596,13 @@
   }
   .mod-card h4 { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px; color: var(--text); margin: 0; }
   .mod-card p { font-size: 13px; color: var(--text-dim); margin: 0; line-height: 1.45; }
+  .mod-dl {
+    display: inline-block; margin-top: 12px; padding: 7px 12px;
+    border: 1px solid var(--amber); border-radius: 999px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    color: var(--amber-soft); text-decoration: none;
+  }
+  .mod-dl:hover { background: var(--amber); color: #17140f; }
 </style>
 
 <nav class="nav">
@@ -606,7 +613,7 @@
       <a class="nav-link" href="coming-soon.it.html">News</a>
       <a class="nav-link" href="privacy.html">Privacy</a>
       <a class="nav-lang" href="index-video.html">EN</a>
-      <a class="nav-cta" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">Scarica su GitHub</a>
+      <a class="nav-cta" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3/rackdroid-0.1.3-sideload-arm64-v8a.apk" target="_blank" rel="noopener">Scarica l'APK</a>
     </div>
   </div>
 </nav>
@@ -661,7 +668,7 @@
         compromesso, nessun clone: è lo stesso engine, reso nativo per il telefono.
       </p>
       <div class="hero-ctas">
-        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica RackDroid</a>
+        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3/rackdroid-0.1.3-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica RackDroid</a>
         <a class="btn btn-ghost" href="#showcase">Guarda l'interfaccia</a>
       </div>
       <div class="hero-meta">
@@ -809,7 +816,7 @@
       <svg class="scope" viewBox="0 0 400 46" preserveAspectRatio="none"><path id="scopePath" d="M0 23 L400 23" stroke="#f9b130" stroke-width="1.5" fill="none"/></svg>
       <h2>Pronto a costruire il tuo primo suono?</h2>
       <p>Gratis, open source, senza account. Scarica l'APK dal repository e sei dentro in un minuto.</p>
-      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica RackDroid su GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3/rackdroid-0.1.3-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica RackDroid su GitHub</a>
       <div class="req-line">Richiede Android 10 (API 29) o successivo · arm64-v8a &amp; x86_64 · OpenGL ES 3.0</div>
     </div>
   </div>
@@ -953,27 +960,28 @@
     { name: 'RackDroid Cowbell', cat: 'drum', badge: 'Drums', desc: 'Campanaccio metallico a due toni in stile 808.' },
     { name: 'RackDroid Rimshot', cat: 'drum', badge: 'Drums', desc: 'Percussione rimshot analogica corta stile blocco di legno.' },
     { name: 'RackDroid Cymbal', cat: 'drum', badge: 'Drums', desc: 'Piatto crash/ride metallico generato da 6 oscillatori.' },
-    { name: 'Pacchetto Bogaudio', cat: 'extra', badge: '.rdmod', desc: 'Suite DSP: VCO, VCF, Matrix Sequencer, LFO, Mult e dinamica.' },
-    { name: 'Pacchetto Valley', cat: 'extra', badge: '.rdmod', desc: 'Riverbero Plateau, sequencer generativo Topograph e Interop.' },
-    { name: 'Audible Instruments', cat: 'extra', badge: '.rdmod', desc: 'Mutable Instruments: Braids, Clouds, Rings, Elements, Plaits.' },
-    { name: 'Pacchetto Befaco', cat: 'extra', badge: '.rdmod', desc: 'EvenVCO, Rampage, Spring Reverb, Chopper, Noise Plethora.' },
-    { name: 'Impromptu Modular', cat: 'extra', badge: '.rdmod', desc: 'Phrase Sequencer 16, Clocked, Tact, Chord, Gate-Seq.' },
-    { name: 'Stoermelder PackOne', cat: 'extra', badge: '.rdmod', desc: 'Strip, Move, Sail, morpher di parametri Transit.' },
-    { name: 'CountModula Package', cat: 'extra', badge: '.rdmod', desc: 'Divisori di clock, contatori, porte logiche, routing CV.' },
-    { name: 'FrozenWasteland', cat: 'extra', badge: '.rdmod', desc: 'Delay multi-tap Portland Weather e clock avanzato.' },
-    { name: 'Pacchetto Bidoo', cat: 'extra', badge: '.rdmod', desc: 'Canard, Limbo, ZouMai, mixer vettoriali e granulari.' },
-    { name: 'HetrickCV Package', cat: 'extra', badge: '.rdmod', desc: 'Crackles, Chaos, Phase shift e processori CV Eurorack.' },
-    { name: 'JW-Modules', cat: 'extra', badge: '.rdmod', desc: 'GridSeq, BouncyBalls, NoteSeq e moduli visualizzatori.' },
-    { name: 'ML_modules', cat: 'extra', badge: '.rdmod', desc: 'Quantizer, Counter, Sequential Switch, Triggers a CV.' },
-    { name: 'RJModules', cat: 'extra', badge: '.rdmod', desc: 'Pulsanti, Glitch, Supersaw VCO, Filtri e Panner.' },
-    { name: 'NonlinearCircuits', cat: 'extra', badge: '.rdmod', desc: 'Generatori di caos, Sloth LFO e Squid Axon.' },
-    { name: 'Venom Modules', cat: 'extra', badge: '.rdmod', desc: 'Recurse, Porta Bernouilli polifonica, Rhythm, Control.' },
-    { name: 'Aria Salvatrice', cat: 'extra', badge: '.rdmod', desc: 'Splork, Arcane, Darvaza, Splittter e utilità Aria.' },
-    { name: 'Sonus Modular', cat: 'extra', badge: '.rdmod', desc: 'Loom, Campana, Scie e utilità DSP modulare.' },
-    { name: 'computerscare', cat: 'extra', badge: '.rdmod', desc: 'Roly Poly, Knifty, Custom Display, Laundry Soup.' },
-    { name: 'LittleUtils', cat: 'extra', badge: '.rdmod', desc: 'Teleport, Button, display di valori e utilità cavi.' },
-    { name: 'Grande Modular', cat: 'extra', badge: '.rdmod', desc: 'Quantovox, VCA, VCO polifonico, Attenuatori.' },
-    { name: 'Pacchetto Autinn', cat: 'extra', badge: '.rdmod', desc: 'Utilità specializzate di elaborazione e modulazione DSP.' }
+    { name: 'Tutti i pacchetti', cat: 'extra', badge: '.zip', file: 'all_rdmods.zip', desc: 'I 21 pacchetti in un solo file: l\'app lo installa così com\'è.' },
+    { name: 'Pacchetto Bogaudio', cat: 'extra', badge: '.rdmod', file: 'Bogaudio.rdmod', desc: 'Suite DSP: VCO, VCF, Matrix Sequencer, LFO, Mult e dinamica.' },
+    { name: 'Pacchetto Valley', cat: 'extra', badge: '.rdmod', file: 'Valley.rdmod', desc: 'Riverbero Plateau, sequencer generativo Topograph e Interop.' },
+    { name: 'Audible Instruments', cat: 'extra', badge: '.rdmod', file: 'AudibleInstruments.rdmod', desc: 'Mutable Instruments: Braids, Clouds, Rings, Elements, Plaits.' },
+    { name: 'Pacchetto Befaco', cat: 'extra', badge: '.rdmod', file: 'Befaco.rdmod', desc: 'EvenVCO, Rampage, Spring Reverb, Chopper, Noise Plethora.' },
+    { name: 'Impromptu Modular', cat: 'extra', badge: '.rdmod', file: 'ImpromptuModular.rdmod', desc: 'Phrase Sequencer 16, Clocked, Tact, Chord, Gate-Seq.' },
+    { name: 'Stoermelder PackOne', cat: 'extra', badge: '.rdmod', file: 'Stoermelder-P1.rdmod', desc: 'Strip, Move, Sail, morpher di parametri Transit.' },
+    { name: 'CountModula Package', cat: 'extra', badge: '.rdmod', file: 'CountModula.rdmod', desc: 'Divisori di clock, contatori, porte logiche, routing CV.' },
+    { name: 'FrozenWasteland', cat: 'extra', badge: '.rdmod', file: 'FrozenWasteland.rdmod', desc: 'Delay multi-tap Portland Weather e clock avanzato.' },
+    { name: 'Pacchetto Bidoo', cat: 'extra', badge: '.rdmod', file: 'Bidoo.rdmod', desc: 'Canard, Limbo, ZouMai, mixer vettoriali e granulari.' },
+    { name: 'HetrickCV Package', cat: 'extra', badge: '.rdmod', file: 'HetrickCV.rdmod', desc: 'Crackles, Chaos, Phase shift e processori CV Eurorack.' },
+    { name: 'JW-Modules', cat: 'extra', badge: '.rdmod', file: 'JW-Modules.rdmod', desc: 'GridSeq, BouncyBalls, NoteSeq e moduli visualizzatori.' },
+    { name: 'ML_modules', cat: 'extra', badge: '.rdmod', file: 'ML_modules.rdmod', desc: 'Quantizer, Counter, Sequential Switch, Triggers a CV.' },
+    { name: 'RJModules', cat: 'extra', badge: '.rdmod', file: 'RJModules.rdmod', desc: 'Pulsanti, Glitch, Supersaw VCO, Filtri e Panner.' },
+    { name: 'NonlinearCircuits', cat: 'extra', badge: '.rdmod', file: 'NonlinearCircuits.rdmod', desc: 'Generatori di caos, Sloth LFO e Squid Axon.' },
+    { name: 'Venom Modules', cat: 'extra', badge: '.rdmod', file: 'Venom.rdmod', desc: 'Recurse, Porta Bernouilli polifonica, Rhythm, Control.' },
+    { name: 'Aria Salvatrice', cat: 'extra', badge: '.rdmod', file: 'AriaSalvatrice.rdmod', desc: 'Splork, Arcane, Darvaza, Splittter e utilità Aria.' },
+    { name: 'Sonus Modular', cat: 'extra', badge: '.rdmod', file: 'SonusModular.rdmod', desc: 'Loom, Campana, Scie e utilità DSP modulare.' },
+    { name: 'computerscare', cat: 'extra', badge: '.rdmod', file: 'computerscare.rdmod', desc: 'Roly Poly, Knifty, Custom Display, Laundry Soup.' },
+    { name: 'LittleUtils', cat: 'extra', badge: '.rdmod', file: 'LittleUtils.rdmod', desc: 'Teleport, Button, display di valori e utilità cavi.' },
+    { name: 'Grande Modular', cat: 'extra', badge: '.rdmod', file: 'GrandeModular.rdmod', desc: 'Quantovox, VCA, VCO polifonico, Attenuatori.' },
+    { name: 'Pacchetto Autinn', cat: 'extra', badge: '.rdmod', file: 'Autinn.rdmod', desc: 'Utilità specializzate di elaborazione e modulazione DSP.' }
   ];
 
   var grid = document.getElementById('moduleGrid');
@@ -998,6 +1006,7 @@
         var card = document.createElement('div');
         card.className = 'mod-card';
         card.innerHTML = '<div class="mod-card-top"><h4>' + m.name + '</h4><span class="mod-card-badge">' + m.badge + '</span></div><p>' + m.desc + '</p>';
+        if (m.file) card.innerHTML += '<a class="mod-dl" href="https://github.com/nowheel/RackDroid/releases/latest/download/' + m.file + '">↓ Scarica ' + m.file + '</a>';
         grid.appendChild(card);
       });
     }

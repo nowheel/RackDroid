@@ -177,6 +177,15 @@ Manual checks still required on at least one phone:
   module-pack installation on the release package, the OnePlus 8T (off the
   network that day).
 
+- The site's download buttons link the arm64 APK of the current release by
+  its full name (`releases/download/vX/rackdroid-X-sideload-arm64-v8a.apk`),
+  which has the version in it: at every release replace it in `docs/*.html`
+  and upload the site again. The module packs' buttons need nothing: they go
+  through `releases/latest/download/<Pack>.rdmod`, and those names do not
+  change. rackdroid.org is a server of its own, updated by hand from `docs/`
+  (the `index-video` pages are not on it); GitHub Pages serves the same folder
+  at nowheel.github.io/RackDroid.
+
 - Releases publish THREE APKs: sideload only, for arm64-v8a, x86_64 and
   universal. A plain `assembleSideloadRelease` builds arm64 only; the other two
   come from `-PtargetAbis` (see the build section).
