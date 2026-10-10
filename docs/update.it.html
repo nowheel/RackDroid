@@ -467,6 +467,11 @@
     .step { opacity: 1; }
   }
 
+  .changes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 800px) { .changes-grid { grid-template-columns: 1fr; } }
+  .changes-list { margin: 10px 0 0; padding-left: 20px; color: var(--text-dim); font-size: 15.5px; line-height: 1.6; }
+  .changes-list li { margin: 0 0 9px; }
+  .changes-list li::marker { color: var(--amber); }
 </style>
 
 <nav class="nav">
@@ -553,6 +558,48 @@
       <div class="hl"></div>
     </div>
   </div>
+  </div>
+</section>
+<section id="changes" style="padding: 30px 0 10px">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="kicker">In breve</p>
+      <h2 class="section-title">Tutto quello che cambia nella 0.1.3</h2>
+      <p>Novità e correzioni, in elenco: così decidi tu se e quando aggiornare.</p>
+    </div>
+    <div class="changes-grid">
+      <div class="why-card">
+        <h3>Novità</h3>
+        <ul class="changes-list">
+          <li>Il motore sceglie da solo quanti core usare e se lo ricorda per ogni patch</li>
+          <li>Le parti indipendenti di una patch lavorano in parallelo, ciascuna su un core</li>
+          <li>Avviso di patch troppo pesante, con la proposta di dimezzare la frequenza di campionamento</li>
+          <li>Motore ▸ Blocco audio: automatico oppure fissato da te</li>
+          <li>Carico del motore visibile nella barra degli strumenti</li>
+          <li>Onde quadre e a dente di sega con gli stessi fronti di VCV Rack su computer</li>
+          <li>Tema chiaro Crema</li>
+          <li>File ▸ Salva sul dispositivo</li>
+          <li>Mouse: tasto destro, rotella, suggerimenti al passaggio</li>
+          <li>Zoom con due dita più fluido e avvio più rapido</li>
+        </ul>
+      </div>
+      <div class="why-card">
+        <h3>Correzioni</h3>
+        <ul class="changes-list">
+          <li>Crepitio audio su diversi telefoni, anche con patch leggere</li>
+          <li>Crepitio prolungato dopo lo sblocco dello schermo o con la tendina delle notifiche: ora si chiude in circa un secondo</li>
+          <li>Una patch poteva andare persa se l'app veniva chiusa durante l'avvio</li>
+          <li>Lo scorrimento del rack poteva partire da solo dopo un trascinamento</li>
+          <li>Un menu poteva restare aperto e sembrare un blocco dell'app</li>
+          <li>Aprire una patch pesante poteva bloccare l'app per oltre un minuto</li>
+          <li>La registrazione partiva anche senza un'uscita audio e produceva un file vuoto</li>
+          <li>La lingua scelta da Aiuto ▸ Lingua non valeva per tutta l'app</li>
+          <li>Una patch grande si disegnava un pannello alla volta, ora in pochi secondi</li>
+          <li>Etichette poco leggibili e deformate sul tema chiaro</li>
+          <li>Diversi crash rari</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 <section class="ann">
