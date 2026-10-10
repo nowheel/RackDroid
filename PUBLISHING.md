@@ -177,6 +177,15 @@ Manual checks still required on at least one phone:
   module-pack installation on the release package, the OnePlus 8T (off the
   network that day).
 
+- The list of what a release brings is written once and shown in four
+  places; keep them the same. In the app: `app/src/main/res/raw/changes.txt`
+  and `raw-it/changes.txt`, shown in the info dialog (rewrite both at every
+  release). In the release notes: the part between `<!-- changes it -->` or
+  `<!-- changes en -->` and `<!-- end changes -->` is what the update dialog
+  shows, in the app's language, to someone offered that release (from 0.1.3
+  on); and the notes OPEN with a summary of a few lines, because the versions
+  up to 0.1.2.1 show the first 700 characters and nothing else. On the site:
+  the two lists at the bottom of `docs/update*.html`.
 - The site's download buttons link the arm64 APK of the current release by
   its full name (`releases/download/vX/rackdroid-X-sideload-arm64-v8a.apk`),
   which has the version in it: at every release replace it in `docs/*.html`

@@ -1,0 +1,24 @@
+WHAT IS NEW IN THIS VERSION
+• The engine chooses how many cores to use and remembers it for each patch
+• Independent parts of a patch run in parallel, each on a core of its own
+• A notice when a patch is too heavy, offering to halve the sample rate
+• Engine ▸ Audio block: automatic, or fixed by you
+• The engine's load shown on the toolbar
+• Square and saw waves with the same edges as VCV Rack on a computer
+• A light theme, Cream
+• File ▸ Save to device
+• Mouse: right button, wheel, tooltips on hover
+• Smoother pinch zoom and a faster start
+
+FIXES
+• Audio crackling on several phones, even with light patches
+• Crackling that went on after unlocking the screen or under the notification shade
+• A patch could be lost if the app was closed while starting
+• The rack could start scrolling by itself after a drag
+• A menu could stay open and look like a frozen app
+• Opening a heavy patch could hang the app for over a minute
+• Recording started even with no audio output and wrote an empty file
+• The language chosen in Help ▸ Language did not apply to the whole app
+• A large patch was drawn one panel at a time
+• Labels hard to read and misshapen on the light theme
+• Several rare crashes

@@ -314,8 +314,21 @@ object AppUpdates {
 		}
 	}
 
+	/** What a release changes, for the dialog that offers it: the part of its
+	 * notes between "<!-- changes xx -->" and "<!-- end changes -->" for the
+	 * app's language, or the English one. The comments do not show on GitHub;
+	 * PUBLISHING.md says how the notes are laid out. Notes without them (and
+	 * every release up to 0.1.2.1) fall back to their opening lines. */
+	private fun changesIn(raw: String, language: String): String? {
+		fun block(code: String) = Regex("<!--\\s*changes\\s+$code\\s*-->(.*?)<!--\\s*end changes\\s*-->",
+			RegexOption.DOT_MATCHES_ALL).find(raw)?.groupValues?.get(1)?.trim()
+		return (block(language) ?: block("en"))?.takeIf { it.isNotEmpty() }
+	}
+
 	private fun offer(activity: Activity, release: Release) {
-		val notes = plainNotes(release.notes).take(700)
+		val language = activity.resources.configuration.locales[0].language
+		val notes = (changesIn(release.notes, language)?.let { plainNotes(it) }
+			?: plainNotes(release.notes).take(700))
 			.ifEmpty { activity.getString(R.string.updates_no_notes) }
 		AlertDialog.Builder(activity)
 			.setTitle(activity.getString(R.string.updates_available_title, release.versionName))

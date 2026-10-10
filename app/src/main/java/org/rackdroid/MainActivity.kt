@@ -1038,9 +1038,17 @@ class MainActivity : NativeActivity() {
 	}
 
 	private fun showCredits() {
+		// What this version brought, in the app's language where it was
+		// written (res/raw-xx/changes.txt, English otherwise): rewritten at
+		// every release, from the same list as the release notes.
+		val changes = runCatching {
+			resources.openRawResource(R.raw.changes).bufferedReader().use { it.readText().trim() }
+		}.getOrDefault("")
 		val text = """
 			RackDroid ${packageManager.getPackageInfo(packageName, 0).versionName}
 			An unofficial Android build of the VCV Rack engine.
+
+			%CHANGES%
 
 			LICENSES
 			• Engine & modules (VCV Rack, Fundamental, Bogaudio): GPL-3.0-or-later. Complete source:
@@ -1050,7 +1058,7 @@ class MainActivity : NativeActivity() {
 			• Fonts: DejaVu (free), Noto/Share Tech Mono/Nunito/DSEG (OFL).
 
 			Not affiliated with or endorsed by VCV. "VCV" is a trademark of VCV and is not used here.
-		""".trimIndent()
+		""".trimIndent().replace("%CHANGES%", changes)
 		val dialog = AlertDialog.Builder(this)
 			.setTitle("Credits & licenses")
 			.setMessage(text)

@@ -1,0 +1,24 @@
+NOVITÀ DI QUESTA VERSIONE
+• Il motore sceglie da solo quanti core usare e se lo ricorda per ogni patch
+• Le parti indipendenti di una patch lavorano in parallelo, ciascuna su un core
+• Avviso di patch troppo pesante, con la proposta di dimezzare la frequenza di campionamento
+• Motore ▸ Blocco audio: automatico oppure fissato da te
+• Carico del motore visibile nella barra degli strumenti
+• Onde quadre e a dente di sega con gli stessi fronti di VCV Rack su computer
+• Tema chiaro Crema
+• File ▸ Salva sul dispositivo
+• Mouse: tasto destro, rotella, suggerimenti al passaggio
+• Zoom con due dita più fluido e avvio più rapido
+
+CORREZIONI
+• Crepitio audio su diversi telefoni, anche con patch leggere
+• Crepitio prolungato dopo lo sblocco dello schermo o con la tendina delle notifiche
+• Una patch poteva andare persa se l'app veniva chiusa durante l'avvio
+• Lo scorrimento del rack poteva partire da solo dopo un trascinamento
+• Un menu poteva restare aperto e sembrare un blocco dell'app
+• Aprire una patch pesante poteva bloccare l'app per oltre un minuto
+• La registrazione partiva anche senza un'uscita audio e produceva un file vuoto
+• La lingua scelta da Aiuto ▸ Lingua non valeva per tutta l'app
+• Una patch grande si disegnava un pannello alla volta
+• Etichette poco leggibili e deformate sul tema chiaro
+• Diversi crash rari
