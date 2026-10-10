@@ -657,6 +657,12 @@
     color: var(--amber-soft); text-decoration: none;
   }
   .mod-dl:hover { background: var(--amber); color: #17140f; }
+  .mod-img {
+    height: 170px; margin: -4px -4px 14px; border-radius: 10px; overflow: hidden;
+    background: #120f0b; border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mod-img img { height: 100%; width: auto; max-width: none; display: block; }
 </style>
 
 <nav class="nav">
@@ -999,57 +1005,58 @@
 
   // ---- Module Explorer ----
   var moduleData = [
-    { name: 'VCO', cat: 'vco', badge: 'Fundamental', desc: 'Voltage-controlled analog modeling oscillator with sine, triangle, saw, and square outputs.' },
-    { name: 'Wavetable VCO', cat: 'vco', badge: 'Fundamental', desc: 'Voltage-controlled wavetable oscillator with morphing control.' },
-    { name: 'VCF', cat: 'vcf', badge: 'Fundamental', desc: 'Voltage-controlled lowpass and highpass filter with CV cutoff & resonance.' },
-    { name: 'VCA', cat: 'fx', badge: 'Fundamental', desc: 'Linear and exponential voltage-controlled amplifier.' },
-    { name: 'LFO', cat: 'vco', badge: 'Fundamental', desc: 'Low-frequency oscillator with reset trigger and FM depth.' },
-    { name: 'Wavetable LFO', cat: 'vco', badge: 'Fundamental', desc: 'Morphing wavetable LFO for complex CV modulation.' },
-    { name: 'Delay', cat: 'fx', badge: 'Fundamental', desc: 'Stereo tape-style delay with feedback loop and CV time modulation.' },
-    { name: 'ADSR EG', cat: 'fx', badge: 'Fundamental', desc: 'Attack/Decay/Sustain/Release envelope generator with retrigger input.' },
-    { name: 'Mix (6-Chan)', cat: 'fx', badge: 'Fundamental', desc: '6-channel audio & CV mixer with pan and master level.' },
-    { name: 'VCA Mix', cat: 'fx', badge: 'Fundamental', desc: '4-channel mixer with built-in per-channel VCAs.' },
-    { name: 'SEQ 3', cat: 'seq', badge: 'Fundamental', desc: '3-channel 8-step sequencer with step gates and CV knobs.' },
-    { name: '8vert', cat: 'fx', badge: 'Fundamental', desc: '8-channel attenuverter and constant DC voltage generator.' },
-    { name: 'Mutes', cat: 'fx', badge: 'Fundamental', desc: '10-channel signal mute/solo switch bank.' },
-    { name: 'Pulses', cat: 'seq', badge: 'Fundamental', desc: 'Generates 10 trigger and gate clock division signals.' },
-    { name: 'Scope', cat: 'fx', badge: 'Fundamental', desc: 'Dual-channel real-time oscilloscope for waveform visualization.' },
-    { name: 'Sequential Switch 1-4', cat: 'seq', badge: 'Fundamental', desc: 'Routes 1 input to one of 4 outputs sequentially.' },
-    { name: 'Sequential Switch 4-1', cat: 'seq', badge: 'Fundamental', desc: 'Routes one of 4 inputs to 1 output sequentially.' },
-    { name: 'Quantizer', cat: 'seq', badge: 'Fundamental', desc: '12-note chromatic and scale pitch quantizer.' },
-    { name: 'Octave', cat: 'seq', badge: 'Fundamental', desc: 'Octave transposer for 1V/oct pitch control signals.' },
-    { name: 'Noise', cat: 'vco', badge: 'Fundamental', desc: 'White, pink, and red multicolored noise generator.' },
-    { name: 'Random', cat: 'fx', badge: 'Fundamental', desc: 'Sample & Hold random voltage generator with clock input.' },
-    { name: 'Split / Merge', cat: 'fx', badge: 'Fundamental', desc: 'Polyphonic cable splitter and monophonic merger.' },
-    { name: 'RackDroid Kick', cat: 'drum', badge: 'Drums', desc: 'Punchy analog kick drum voice with sub pitch decay and click.' },
-    { name: 'RackDroid Snare', cat: 'drum', badge: 'Drums', desc: 'Analog snare drum with snappy noise blend and tone control.' },
-    { name: 'RackDroid Hi-Hat', cat: 'drum', badge: 'Drums', desc: 'Metallic closed and open hi-hat voice generator with sizzle.' },
-    { name: 'RackDroid Tom', cat: 'drum', badge: 'Drums', desc: 'Tunable low/mid/high analog tom drum voice.' },
-    { name: 'RackDroid Clap', cat: 'drum', badge: 'Drums', desc: 'Multi-pulse analog handclap with reverb-like noise tail.' },
-    { name: 'RackDroid Cowbell', cat: 'drum', badge: 'Drums', desc: 'Dual-tuned metallic 808-style cowbell module.' },
-    { name: 'RackDroid Rimshot', cat: 'drum', badge: 'Drums', desc: 'Short wood-block style analog rimshot percussion.' },
-    { name: 'RackDroid Cymbal', cat: 'drum', badge: 'Drums', desc: '6-oscillator metallic crash/ride cymbal voice.' },
-    { name: 'Bogaudio Package', cat: 'extra', badge: '.rdmod', file: 'Bogaudio.rdmod', desc: 'Comprehensive DSP suite: VCO, VCF, Matrix Sequencer, LFO, Mult, Dynamics.' },
-    { name: 'Valley Package', cat: 'extra', badge: '.rdmod', file: 'Valley.rdmod', desc: 'Features Plateau Reverb, Topograph generative sequencer, and Interop.' },
-    { name: 'Audible Instruments', cat: 'extra', badge: '.rdmod', file: 'AudibleInstruments.rdmod', desc: 'Mutable Instruments ports: Braids, Clouds, Rings, Elements, Plaits.' },
-    { name: 'Befaco Package', cat: 'extra', badge: '.rdmod', file: 'Befaco.rdmod', desc: 'EvenVCO, Rampage dual function generator, Spring Reverb, Chopper.' },
-    { name: 'Impromptu Modular', cat: 'extra', badge: '.rdmod', file: 'ImpromptuModular.rdmod', desc: 'Phrase Sequencer 16, Clocked master clock, Tact, Chord, Gate-Seq.' },
-    { name: 'Stoermelder PackOne', cat: 'extra', badge: '.rdmod', file: 'Stoermelder-P1.rdmod', desc: 'Strip preset manager, Move, Sail, Transit parameter morpher.' },
-    { name: 'CountModula Package', cat: 'extra', badge: '.rdmod', file: 'CountModula.rdmod', desc: 'Clock dividers, binary counters, logic gates, and CV utility routing.' },
-    { name: 'FrozenWasteland', cat: 'extra', badge: '.rdmod', file: 'FrozenWasteland.rdmod', desc: 'Portland Weather multi-tap delay, BPF, Q&A, and advanced clocking.' },
-    { name: 'Bidoo Package', cat: 'extra', badge: '.rdmod', file: 'Bidoo.rdmod', desc: 'Canard, Limbo, ZouMai, vector mixers and granular samplers.' },
-    { name: 'HetrickCV Package', cat: 'extra', badge: '.rdmod', file: 'HetrickCV.rdmod', desc: 'Crackles, Chaos, Phase shift, and Euro-style CV processors.' },
-    { name: 'JW-Modules', cat: 'extra', badge: '.rdmod', file: 'JW-Modules.rdmod', desc: 'GridSeq, BouncyBalls, NoteSeq, and visualizer modules.' },
-    { name: 'ML_modules', cat: 'extra', badge: '.rdmod', file: 'ML_modules.rdmod', desc: 'Quantizer, Counter, Sequential Switch, Triggers to CV.' },
-    { name: 'RJModules', cat: 'extra', badge: '.rdmod', file: 'RJModules.rdmod', desc: 'Buttons, Glitch, Supersaw VCO, Filters, and Panner.' },
-    { name: 'NonlinearCircuits', cat: 'extra', badge: '.rdmod', file: 'NonlinearCircuits.rdmod', desc: 'Chaos generators, Let\'s Splosh, Sloth LFO, and Squid Axon.' },
-    { name: 'Venom Modules', cat: 'extra', badge: '.rdmod', file: 'Venom.rdmod', desc: 'Recurse, Polyphonic Bernoulli Gate, Rhythm, Control.' },
-    { name: 'Aria Salvatrice', cat: 'extra', badge: '.rdmod', file: 'AriaSalvatrice.rdmod', desc: 'Splork, Arcane, Darvaza, Splittter, and utility modules.' },
-    { name: 'Sonus Modular', cat: 'extra', badge: '.rdmod', file: 'SonusModular.rdmod', desc: 'Loom, Campana, Scie, and OS-X style utility DSP.' },
-    { name: 'computerscare', cat: 'extra', badge: '.rdmod', file: 'computerscare.rdmod', desc: 'Roly Poly, Knifty, Custom Display, Laundry Soup.' },
-    { name: 'LittleUtils', cat: 'extra', badge: '.rdmod', file: 'LittleUtils.rdmod', desc: 'Teleport, Button, Value display, and cable neatness utilities.' },
-    { name: 'Grande Modular', cat: 'extra', badge: '.rdmod', file: 'GrandeModular.rdmod', desc: 'Quantovox, VCA, Polyphonic VCO, Attenuators.' },
-    { name: 'Autinn Package', cat: 'extra', badge: '.rdmod', file: 'Autinn.rdmod', desc: 'Specialized DSP and modulation utilities.' }
+    { name: 'VCO', cat: 'vco', badge: 'Fundamental', img: 'assets/mods/fundamental-vco.webp', desc: 'Voltage-controlled analog modeling oscillator with sine, triangle, saw, and square outputs.' },
+    { name: 'Wavetable VCO', cat: 'vco', badge: 'Fundamental', img: 'assets/mods/fundamental-vco2.webp', desc: 'Voltage-controlled wavetable oscillator with morphing control.' },
+    { name: 'VCF', cat: 'vcf', badge: 'Fundamental', img: 'assets/mods/fundamental-vcf.webp', desc: 'Voltage-controlled lowpass and highpass filter with CV cutoff & resonance.' },
+    { name: 'VCA', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-vca-1.webp', desc: 'Linear and exponential voltage-controlled amplifier.' },
+    { name: 'LFO', cat: 'vco', badge: 'Fundamental', img: 'assets/mods/fundamental-lfo.webp', desc: 'Low-frequency oscillator with reset trigger and FM depth.' },
+    { name: 'Wavetable LFO', cat: 'vco', badge: 'Fundamental', img: 'assets/mods/fundamental-lfo2.webp', desc: 'Morphing wavetable LFO for complex CV modulation.' },
+    { name: 'Delay', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-delay.webp', desc: 'Stereo tape-style delay with feedback loop and CV time modulation.' },
+    { name: 'ADSR EG', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-adsr.webp', desc: 'Attack/Decay/Sustain/Release envelope generator with retrigger input.' },
+    { name: 'Mix (6-Chan)', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-mixer.webp', desc: '6-channel audio & CV mixer with pan and master level.' },
+    { name: 'VCA Mix', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-vcmixer.webp', desc: '4-channel mixer with built-in per-channel VCAs.' },
+    { name: 'SEQ 3', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-seq3.webp', desc: '3-channel 8-step sequencer with step gates and CV knobs.' },
+    { name: '8vert', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-8vert.webp', desc: '8-channel attenuverter and constant DC voltage generator.' },
+    { name: 'Mutes', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-mutes.webp', desc: '10-channel signal mute/solo switch bank.' },
+    { name: 'Pulses', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-pulses.webp', desc: 'Generates 10 trigger and gate clock division signals.' },
+    { name: 'Scope', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-scope.webp', desc: 'Dual-channel real-time oscilloscope for waveform visualization.' },
+    { name: 'Sequential Switch 1-4', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-sequentialswitch1.webp', desc: 'Routes 1 input to one of 4 outputs sequentially.' },
+    { name: 'Sequential Switch 4-1', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-sequentialswitch2.webp', desc: 'Routes one of 4 inputs to 1 output sequentially.' },
+    { name: 'Quantizer', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-quantizer.webp', desc: '12-note chromatic and scale pitch quantizer.' },
+    { name: 'Octave', cat: 'seq', badge: 'Fundamental', img: 'assets/mods/fundamental-octave.webp', desc: 'Octave transposer for 1V/oct pitch control signals.' },
+    { name: 'Noise', cat: 'vco', badge: 'Fundamental', img: 'assets/mods/fundamental-noise.webp', desc: 'White, pink, and red multicolored noise generator.' },
+    { name: 'Random', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-random.webp', desc: 'Sample & Hold random voltage generator with clock input.' },
+    { name: 'Split / Merge', cat: 'fx', badge: 'Fundamental', img: 'assets/mods/fundamental-split-merge.webp', desc: 'Polyphonic cable splitter and monophonic merger.' },
+    { name: 'RackDroid Kick', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-bd808.webp', desc: 'Punchy analog kick drum voice with sub pitch decay and click.' },
+    { name: 'RackDroid Snare', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-sd808.webp', desc: 'Analog snare drum with snappy noise blend and tone control.' },
+    { name: 'RackDroid Hi-Hat', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-hh808.webp', desc: 'Metallic closed and open hi-hat voice generator with sizzle.' },
+    { name: 'RackDroid Tom', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-tm808.webp', desc: 'Tunable low/mid/high analog tom drum voice.' },
+    { name: 'RackDroid Clap', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-cp808.webp', desc: 'Multi-pulse analog handclap with reverb-like noise tail.' },
+    { name: 'RackDroid Cowbell', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-cb808.webp', desc: 'Dual-tuned metallic 808-style cowbell module.' },
+    { name: 'RackDroid Rimshot', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-sd707.webp', desc: 'Short wood-block style analog rimshot percussion.' },
+    { name: 'RackDroid Cymbal', cat: 'drum', badge: 'Drums', img: 'assets/mods/drums-hh909.webp', desc: '6-oscillator metallic crash/ride cymbal voice.' },
+    { name: 'All the packs', cat: 'extra', badge: '.zip', img: 'assets/mods/pack-all.webp', file: 'all_rdmods.zip', desc: 'The 21 packs in one file: the app installs it as it is.' },
+    { name: 'Bogaudio Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-bogaudio.webp', file: 'Bogaudio.rdmod', desc: 'Comprehensive DSP suite: VCO, VCF, Matrix Sequencer, LFO, Mult, Dynamics.' },
+    { name: 'Valley Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-valley.webp', file: 'Valley.rdmod', desc: 'Features Plateau Reverb, Topograph generative sequencer, and Interop.' },
+    { name: 'Audible Instruments', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-audibleinstruments.webp', file: 'AudibleInstruments.rdmod', desc: 'Mutable Instruments ports: Braids, Clouds, Rings, Elements, Plaits.' },
+    { name: 'Befaco Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-befaco.webp', file: 'Befaco.rdmod', desc: 'EvenVCO, Rampage dual function generator, Spring Reverb, Chopper.' },
+    { name: 'Impromptu Modular', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-impromptumodular.webp', file: 'ImpromptuModular.rdmod', desc: 'Phrase Sequencer 16, Clocked master clock, Tact, Chord, Gate-Seq.' },
+    { name: 'Stoermelder PackOne', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-stoermelder-p1.webp', file: 'Stoermelder-P1.rdmod', desc: 'Strip preset manager, Move, Sail, Transit parameter morpher.' },
+    { name: 'CountModula Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-countmodula.webp', file: 'CountModula.rdmod', desc: 'Clock dividers, binary counters, logic gates, and CV utility routing.' },
+    { name: 'FrozenWasteland', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-frozenwasteland.webp', file: 'FrozenWasteland.rdmod', desc: 'Portland Weather multi-tap delay, BPF, Q&A, and advanced clocking.' },
+    { name: 'Bidoo Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-bidoo.webp', file: 'Bidoo.rdmod', desc: 'Canard, Limbo, ZouMai, vector mixers and granular samplers.' },
+    { name: 'HetrickCV Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-hetrickcv.webp', file: 'HetrickCV.rdmod', desc: 'Crackles, Chaos, Phase shift, and Euro-style CV processors.' },
+    { name: 'JW-Modules', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-jw-modules.webp', file: 'JW-Modules.rdmod', desc: 'GridSeq, BouncyBalls, NoteSeq, and visualizer modules.' },
+    { name: 'ML_modules', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-ml_modules.webp', file: 'ML_modules.rdmod', desc: 'Quantizer, Counter, Sequential Switch, Triggers to CV.' },
+    { name: 'RJModules', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-rjmodules.webp', file: 'RJModules.rdmod', desc: 'Buttons, Glitch, Supersaw VCO, Filters, and Panner.' },
+    { name: 'NonlinearCircuits', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-nonlinearcircuits.webp', file: 'NonlinearCircuits.rdmod', desc: 'Chaos generators, Let\'s Splosh, Sloth LFO, and Squid Axon.' },
+    { name: 'Venom Modules', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-venom.webp', file: 'Venom.rdmod', desc: 'Recurse, Polyphonic Bernoulli Gate, Rhythm, Control.' },
+    { name: 'Aria Salvatrice', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-ariasalvatrice.webp', file: 'AriaSalvatrice.rdmod', desc: 'Splork, Arcane, Darvaza, Splittter, and utility modules.' },
+    { name: 'Sonus Modular', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-sonusmodular.webp', file: 'SonusModular.rdmod', desc: 'Loom, Campana, Scie, and OS-X style utility DSP.' },
+    { name: 'computerscare', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-computerscare.webp', file: 'computerscare.rdmod', desc: 'Roly Poly, Knifty, Custom Display, Laundry Soup.' },
+    { name: 'LittleUtils', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-littleutils.webp', file: 'LittleUtils.rdmod', desc: 'Teleport, Button, Value display, and cable neatness utilities.' },
+    { name: 'Grande Modular', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-grandemodular.webp', file: 'GrandeModular.rdmod', desc: 'Quantovox, VCA, Polyphonic VCO, Attenuators.' },
+    { name: 'Autinn Package', cat: 'extra', badge: '.rdmod', img: 'assets/mods/pack-autinn.webp', file: 'Autinn.rdmod', desc: 'Specialized DSP and modulation utilities.' }
   ];
 
   var grid = document.getElementById('moduleGrid');
@@ -1074,7 +1081,7 @@
       filtered.forEach(function (m) {
         var card = document.createElement('div');
         card.className = 'mod-card';
-        card.innerHTML = '<div class="mod-card-top"><h4>' + m.name + '</h4><span class="mod-card-badge">' + m.badge + '</span></div><p>' + m.desc + '</p>';
+        card.innerHTML = (m.img ? '<div class="mod-img"><img src="' + m.img + '" alt="" loading="lazy"></div>' : '') + '<div class="mod-card-top"><h4>' + m.name + '</h4><span class="mod-card-badge">' + m.badge + '</span></div><p>' + m.desc + '</p>';
         if (m.file) card.innerHTML += '<a class="mod-dl" href="https://github.com/nowheel/RackDroid/releases/latest/download/' + m.file + '">↓ Download ' + m.file + '</a>';
         grid.appendChild(card);
       });
