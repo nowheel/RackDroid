@@ -22,25 +22,19 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 
 <img src="graphics/readme/head-why-it.svg" width="100%" alt="Perché RackDroid">
 
-- **È VCV Rack, non un clone.** Stesso DSP, stessi 66 moduli di base, stesso
-  formato patch `.vcv`, compilato dai sorgenti upstream v2.6.4. Per i telefoni
-  è adattato il modo in cui i thread del motore si danno il turno — meno di
-  cento righe di Rack cambiate, in fase di compilazione, con i sorgenti
-  lasciati come sono — e non tocca il suono: ogni modulo confrontabile dà gli
-  stessi campioni, bit per bit, del ciclo originale di Rack. Misurato anche
-  contro VCV Rack desktop: resta l'ultima cifra, che un processore diverso
-  arrotonda in altro modo.
+- **È VCV Rack, non un clone.** Stesso motore, stessi 66 moduli di base,
+  stesso formato patch `.vcv`: una patch fatta sul computer si apre sul
+  telefono, e viceversa, e suona allo stesso modo.
 - **Pensato per il tocco fin dall'inizio**, non una UI desktop rimpicciolita:
   cavi che si trascinano col dito, manopole che si tengono premute per
   digitare un valore, pizzico per lo zoom, palette moduli pensata per schermi
   piccoli, e una **barra di parcheggio cavi** che risolve il problema dei "due
   moduli che non stanno mai insieme sullo schermo".
-- **Latenza nativa bassa** (Oboe/AAudio, full-duplex) — suona in tempo reale,
-  non un giocattolo. Quanto bassa lo decide in parte il telefono, non l'app:
-  alcuni produttori riservano il percorso audio veloce alle app di una loro
-  lista e lo negano a tutte le altre (un OnePlus 8T lo nega perfino ai synth
-  commerciali). Il motore misura quello che ha davvero ottenuto e si regola di
-  conseguenza — vedi [Prestazioni](#prestazioni).
+- **Latenza bassa** (Oboe/AAudio, full-duplex): suona in tempo reale. Quanto
+  bassa dipende anche dal telefono, perché alcuni produttori riservano il
+  percorso audio più veloce a certe app: RackDroid usa il migliore che il
+  dispositivo concede e si regola di conseguenza — vedi
+  [Prestazioni](#prestazioni).
 - **Cresce con te**: parti con i 66 moduli inclusi, poi aggiungi pacchetti
   interi (Bogaudio, Valley, Befaco, HetrickCV…) al volo, senza aggiornare
   l'app.
@@ -50,7 +44,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 
 | | |
 |---|---|
-| 🎚️ **Motore audio nativo** | Oboe/AAudio, full-duplex, bassa latenza dove il dispositivo la concede — il motore misura cosa ha ottenuto e regola da sé il numero di thread ([Prestazioni](#prestazioni)) |
+| 🎚️ **Motore audio nativo** | Oboe/AAudio, full-duplex, bassa latenza dove il dispositivo la concede; il motore sceglie da solo il numero di thread ([Prestazioni](#prestazioni)) |
 | 🧩 **66 moduli di base** | Core (Audio/MIDI), Fundamental (39 moduli: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 voci originali stile 808) |
 | 👆 **Interfaccia touch** | un dito fa scorrere il rack, trascini per cavi/moduli, pizzichi per zoom, tieni premuta una manopola per digitare un valore |
 | 🪟 **Barra strumenti a vetro** | menu File/Modifica/Visualizza/Motore/Aiuto più sedici strumenti su due righe: palette, gestore moduli, parcheggio cavi, tema, MIDI, tastiera, registrazione, info; annulla/ripeti, selezione multipla, copia/incolla, elimina, i due lucchetti — si richiude in una linguetta |
@@ -96,48 +90,31 @@ compatibili.
 <a name="prestazioni"></a>
 <img src="graphics/readme/head-performance-it.svg" width="100%" alt="Prestazioni">
 
-**Il motore si regola da solo. Non c'è un'impostazione dei thread da sbagliare**,
-ed è il motivo per cui il menu Thread su Android non c'è: il numero giusto è
-risultato 8 su un telefono e 2 su un altro, e 3 sullo stesso telefono una volta
-scaldato.
+**Il motore si regola da solo.** Non c'è un'impostazione dei thread: quando
+apri una patch, RackDroid sceglie quanti core usare per quel telefono e quella
+patch, e se lo ricorda. La prima apertura di una patch può richiedere qualche
+secondo di silenzio; le successive partono subito.
 
-Dipende da quale percorso audio concede il dispositivo. Dove quello veloce
-(esclusivo) è disponibile, il motore distribuisce il lavoro su tutti i core che
-può usare. Dove viene negato — alcuni produttori lo riservano a una lista di app
-approvate — i core in più smettono di aiutare e iniziano a nuocere, perché il
-motore sincronizza i suoi thread due volte per ogni sample e quel costo cresce
-col numero di thread, non con la patch. Su un dispositivo così, due thread
-suonano puliti una patch da 76 moduli dove sette crepitano di continuo, con un
-terzo della CPU e molto meno calore. Quindi il motore misura gli underrun e si
-ferma dove smettono.
+**Le parti indipendenti lavorano in parallelo.** I gruppi di moduli che non
+hanno cavi fra loro — più voci, o più strumenti nello stesso rack — vengono
+calcolati ciascuno su un core diverso. Un rack fatto di parti separate regge
+quindi molto più di uno in cui tutto è collegato.
 
-E poi riscende. Qualunque cosa passeggera — un momento pesante, un'altra app,
-una scaldata — spinge il numero verso l'alto, e se nulla lo riportasse giù il
-motore passerebbe il resto della sessione su core che non gli servono più.
-Così, quando un numero regge pulito per un minuto, spende una finestra a
-chiedersi se ne bastino di meno, e si tiene la risposta. Si ricorda anche dove
-si era assestato, così l'avvio successivo parte da lì invece di ripercorrere
-tutta la scala.
+**Il blocco audio** è automatico; dal menu Motore puoi fissarne tu la
+dimensione, e in quel caso l'app non la cambia più.
 
-Niente di tutto questo dà retta a una misura di cui non deve fidarsi: una
-finestra che contiene un tocco, una rotazione, un passaggio alla schermata
-principale o una riapertura dello stream audio viene buttata, non addebitata
-alla patch.
+Se l'audio crepita:
 
-Se l'audio si rompe:
+- **La patch può essere troppo pesante per il telefono.** L'app lo dice e
+  propone di dimezzare la frequenza di campionamento del motore.
+- **Il calore conta.** Un telefono caldo rallenta e regge meno.
+- **Allo sblocco dello schermo o aprendo la tendina delle notifiche** un breve
+  crepitio è possibile: in quei momenti Android toglie all'app i core veloci.
+- **Per segnalare un problema** servono i log: premi Home subito dopo, poi
+  allega `log.txt` e `java-log.txt` da `Documents/RackDroid/`, indicando il
+  modello del telefono. Li vedi anche dall'app: tasto ⓘ, poi **Log**.
 
-- **Guarda il log** — il tasto ⓘ nella toolbar, poi **Log** — cercando le righe
-  che iniziano con `Engine:`. Dicono quale percorso ha concesso il dispositivo e
-  dove si è assestato il motore.
-- **Il calore conta più di quanto sembri.** Un telefono caldo riduce le
-  prestazioni e il numero di thread migliore si sposta; il motore lo segue, ma
-  un telefono che ha lavorato a pieno regime per un'ora ha meno da dare.
-- **Una patch può semplicemente essere troppo pesante.** Il motore lo dice,
-  invece di lasciarti indovinare.
-
-Lo zoom si ferma a 2×. Oltre, ogni modulo visibile viene ridisegnato in un
-buffer molto più grande a ogni passo di zoom, e su un telefono questo compete
-con la callback audio per gli stessi core — spezzava il suono allo zoom massimo.
+Lo zoom si ferma a 2×, per non togliere tempo all'audio.
 
 <img src="graphics/readme/head-build-it.svg" width="100%" alt="Build">
 

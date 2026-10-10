@@ -22,24 +22,17 @@ audio engine, made native for your phone.
 
 <img src="graphics/readme/head-why-en.svg" width="100%" alt="Why RackDroid">
 
-- **It's VCV Rack, not a clone.** Same DSP, same 66 built-in modules, same
-  `.vcv` patch format, built from the upstream v2.6.4 sources. What is
-  adapted for phones is how the engine's threads take turns — under a hundred
-  lines of Rack changed, at build time, the sources left as they are — and it
-  does not touch the sound: every module that can be compared gives the same
-  samples, bit for bit, as Rack's own loop. Measured against VCV Rack on
-  desktop too: what remains is the last digit, which a different processor
-  rounds differently.
+- **It's VCV Rack, not a clone.** Same engine, same 66 built-in modules,
+  same `.vcv` patch format: a patch made on the computer opens on the phone,
+  and the other way round, and sounds the same.
 - **Touch-first from day one**, not a shrunk-down desktop UI: drag cables with
   a finger, long-press a knob to type a value, pinch to zoom, a module palette
   designed for small screens, and a **cable-parking bar** that solves the "two
   modules never fit on screen at once" problem.
-- **Low native latency** (Oboe/AAudio, full-duplex) — it plays in real time,
-  not a toy. How low is partly the phone's decision, not the app's: some
-  manufacturers reserve the fast audio path for apps on a list of their own,
-  and refuse it to everything else (a OnePlus 8T refuses it even to commercial
-  synths). The engine measures what it actually got and tunes itself to it —
-  see [Performance](#performance).
+- **Low latency** (Oboe/AAudio, full-duplex): it plays in real time. How low
+  is partly up to the phone, because some manufacturers keep the fastest audio
+  path for certain apps: RackDroid uses the best one the device grants and
+  adjusts to it — see [Performance](#performance).
 - **Grows with you**: start with the 66 built-in modules, then add whole
   packages (Bogaudio, Valley, Befaco, HetrickCV…) on the fly, without updating
   the app.
@@ -49,7 +42,7 @@ audio engine, made native for your phone.
 
 | | |
 |---|---|
-| 🎚️ **Native audio engine** | Oboe/AAudio, full-duplex, low latency where the device grants it — the engine measures what it got and tunes its own thread count to suit ([Performance](#performance)) |
+| 🎚️ **Native audio engine** | Oboe/AAudio, full-duplex, low latency where the device grants it; the engine picks its own thread count ([Performance](#performance)) |
 | 🧩 **66 built-in modules** | Core (Audio/MIDI), Fundamental (39 modules: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 original 808-style drum voices) |
 | 👆 **Touch interface** | one finger pans the rack, drag for cables/modules, pinch to zoom, long-press a knob to type a value |
 | 🪟 **Glass toolbar** | File/Edit/View/Engine/Help menus plus sixteen tools on two rows: palette, module manager, cable parking, theme, MIDI, keyboard, recording, info; undo/redo, multi-select, copy/paste, delete, the two padlocks — collapses into a tab |
@@ -94,46 +87,33 @@ device. Requires OpenGL ES 3.0. `arm64-v8a` is the normal phone/tablet build;
 <a name="performance"></a>
 <img src="graphics/readme/head-performance-en.svg" width="100%" alt="Performance">
 
-**The engine tunes itself. There is no thread setting to get wrong**, which is
-why the Threads menu is not there on Android: the right number turned out to be
-8 on one phone and 2 on another, and 3 on the same phone once it was warm.
+**The engine tunes itself.** There is no thread setting: when you open a
+patch, RackDroid chooses how many cores to use for that phone and that patch,
+and remembers it. The first time a patch is opened it may take a few seconds
+of silence; after that it starts at once.
 
-It depends on which audio path the device grants. Where the fast (exclusive)
-path is available, the engine spreads work across every core it can use. Where
-it is refused — some manufacturers reserve that path for an approved list of
-apps — extra cores stop helping and start hurting, because the engine
-synchronises its worker threads twice per sample and that cost grows with the
-thread count rather than with the patch. On such a device, two threads can run
-a 76-module patch cleanly where seven crackle constantly, at a third of the CPU
-and far less heat. So the engine measures underruns and settles wherever they
-stop.
+**Independent parts run in parallel.** Groups of modules with no cable
+between them — several voices, or several instruments in one rack — are each
+computed on a core of their own. A rack made of separate parts therefore
+holds far more than one where everything is connected.
 
-It also comes back down. Anything transient — a heavy moment, another app, a
-warm spell — pushes the count up, and if nothing ever brought it back the
-engine would spend the rest of the session on cores it no longer needs. So
-once a count has held clean for a minute, it spends one window asking whether
-a smaller one would do, and keeps the answer. It remembers where it settled,
-too, so the next launch starts there instead of walking the whole ladder
-again.
+**The audio block** is automatic; the Engine menu lets you fix its size, and
+then the app leaves it alone.
 
-None of this counts a measurement it should not trust: a window containing a
-touch, a rotation, a trip to the home screen or a reopened audio stream is
-thrown away rather than blamed on the patch.
+If the audio crackles:
 
-If the audio breaks up:
+- **The patch may be too heavy for the phone.** The app says so and offers to
+  halve the engine's sample rate.
+- **Heat matters.** A hot phone slows down and holds less.
+- **When you unlock the screen or pull down the notification shade** a short
+  crackle is possible: at those moments Android takes the fast cores away
+  from the app.
+- **To report a problem** the logs are what helps: press Home right after it
+  happens, then attach `log.txt` and `java-log.txt` from
+  `Documents/RackDroid/`, with the phone's model. They are in the app too:
+  the ⓘ tool, then **Log**.
 
-- **Check the log** — the ⓘ tool in the toolbar, then **Log** — for lines
-  starting `Engine:`. They say which path the device granted and where the
-  engine settled.
-- **Heat matters more than you would think.** A hot phone throttles, and the
-  best thread count moves; the engine follows it, but a phone that has been
-  rendering at full tilt for an hour has less to give.
-- **A patch can simply be too heavy.** The engine says so rather than leaving
-  you guessing.
-
-Zoom stops at 2×. Past that, every visible module is redrawn into a far larger
-buffer on each zoom step, and on a phone that competes with the audio callback
-for the same cores — it was breaking the sound up at maximum zoom.
+Zoom stops at 2×, so that drawing does not take time from the audio.
 
 <img src="graphics/readme/head-build-en.svg" width="100%" alt="Build">
 
