@@ -843,6 +843,13 @@ if(RACKDROID_UI)
 		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/soundtouch_stub/soundtouch_config.h "")
 		target_compile_options(plugin_packone PRIVATE
 			-I${CMAKE_CURRENT_BINARY_DIR}/soundtouch_stub)
+		# SirenTagClassifier.cpp copies from C99 compound literals
+		# ("(double[]){1.0, 0.0}"): clang takes them, gcc 14 takes them, gcc 13
+		# (GitHub's Ubuntu 24.04 runner) calls it taking the address of a
+		# temporary array, an error -fpermissive turns back into a warning.
+		if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+			target_compile_options(plugin_packone PRIVATE -fpermissive)
+		endif()
 	endif()
 
 	# Bidoo (49 modules): GPL code; res/ art CC BY-NC-ND -> ships
