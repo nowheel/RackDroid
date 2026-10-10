@@ -796,6 +796,7 @@
     display: flex; align-items: center; justify-content: center;
   }
   .mod-img img { height: 100%; width: auto; max-width: none; display: block; }
+  .mod-dl-n { display: block; margin-top: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--text-faint); }
 </style>
 
 <nav class="nav">
@@ -874,6 +875,8 @@
         <span><b>Android 10+</b></span>
         <span><b>GPLv3</b>, open source</span>
         <span><b>~40 MB</b></span>
+        <span id="dlApk" hidden><b></b> APK downloads</span>
+        <span id="dlMods" hidden><b></b> pack downloads</span>
       </div>
     </div>
     <div class="device">
@@ -1349,6 +1352,7 @@ function toggleParkCable() {
         card.className = 'mod-card';
         card.innerHTML = (m.img ? '<div class="mod-img"><img src="' + m.img + '" alt="" loading="lazy"></div>' : '') + '<div class="mod-card-top"><h4>' + m.name + '</h4><span class="mod-card-badge">' + m.badge + '</span></div><p>' + m.desc + '</p>';
         if (m.file) card.innerHTML += '<a class="mod-dl" href="https://github.com/nowheel/RackDroid/releases/latest/download/' + m.file + '">↓ Download ' + m.file + '</a>';
+        if (m.file && window.rdCounts && window.rdCounts[m.file]) card.innerHTML += '<span class="mod-dl-n">' + window.rdCounts[m.file].toLocaleString() + ' downloads</span>';
         grid.appendChild(card);
       });
     }
@@ -1363,6 +1367,7 @@ function toggleParkCable() {
       });
     });
     renderModules();
+    document.addEventListener('rd-counts', renderModules);
   }
 
   // ---- Interactive Synth Rack Logic & Animated Patch Cables ----
@@ -1723,4 +1728,43 @@ function toggleParkCable() {
     requestAnimationFrame(animateMiniRacks);
   }
 })();
+</script>
+
+<script>
+  // Download counters, from GitHub's own figures: every release asset carries
+  // a download_count. APKs are added up across all releases; for the packs,
+  // a file and its -x86_64 twin count together. Kept for an hour in the
+  // browser, because the public API allows sixty requests an hour per address.
+  // If it cannot be read, the counters simply stay hidden.
+  (function () {
+    function show(c) {
+      window.rdCounts = c.files;
+      var a = document.getElementById('dlApk'), m = document.getElementById('dlMods');
+      if (a && c.apk) { a.querySelector('b').textContent = c.apk.toLocaleString(); a.hidden = false; }
+      if (m && c.mods) { m.querySelector('b').textContent = c.mods.toLocaleString(); m.hidden = false; }
+      document.dispatchEvent(new Event('rd-counts'));
+    }
+    try {
+      var saved = JSON.parse(localStorage.getItem('rdCounts') || 'null');
+      if (saved && Date.now() - saved.at < 3600000) { show(saved); return; }
+    } catch (e) {}
+    fetch('https://api.github.com/repos/nowheel/RackDroid/releases?per_page=100')
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (releases) {
+        var c = { at: Date.now(), apk: 0, mods: 0, files: {} };
+        releases.forEach(function (rel) {
+          (rel.assets || []).forEach(function (as) {
+            var n = as.download_count || 0, name = as.name;
+            if (/\.apk$/i.test(name)) { c.apk += n; return; }
+            if (!/\.rdmod$/i.test(name) && !/rdmods.*\.zip$/i.test(name)) return;
+            c.mods += n;
+            var key = name.replace('-x86_64', '');
+            c.files[key] = (c.files[key] || 0) + n;
+          });
+        });
+        try { localStorage.setItem('rdCounts', JSON.stringify(c)); } catch (e) {}
+        show(c);
+      })
+      .catch(function () {});
+  })();
 </script>
