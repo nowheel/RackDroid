@@ -52,7 +52,7 @@ audio engine, made native for your phone.
 | 🎹 **MIDI** | on-screen musical keyboard, USB and Bluetooth LE MIDI |
 | ⏺️ **Recording** | output to a WAV file in `Documents/RackDroid/` |
 | 🎓 **Guided learning** | a 20-step interface tour on first run that demonstrates itself: a step per menu that says what is inside and then opens it, plus framing your modules, opening the palette, moving a module, zooming and scrolling the rack, and drawing a cable with the compatible jacks lit, then putting everything back. Also 30 step-by-step tutorials across 5 levels, plus a topic-based guide |
-| 🔄 **Updates (GitHub build)** | opt-in: RackDroid can ask GitHub once a day whether a newer release exists and install it. Refuse and it never connects. The Play build has no updater and no network permission at all |
+| 🔄 **Updates** | opt-in: RackDroid can ask GitHub once a day whether a newer release exists and install it. Refuse and it never connects. |
 
 <img src="graphics/readme/head-themes-en.svg" width="100%" alt="Five themes">
 
@@ -125,11 +125,10 @@ clone compiles as-is, no submodule init needed.
 export JAVA_HOME=~/jdk21; export ANDROID_HOME=~/android-sdk
 ./gradlew assembleSideloadRelease -PdevKeystore                 # arm64-v8a (default)
 ./gradlew assembleSideloadRelease -PdevKeystore -PtargetAbis=x86_64  # x86_64
-./gradlew bundlePlayRelease -PtargetAbis=arm64-v8a,x86_64       # Play AAB, both 64-bit ABIs
 ```
 
-- `-PdevKeystore` signs with the public development key (update continuity for
-  sideloading; use a private key for Play).
+- `-PdevKeystore` signs with the public development key (it keeps updates
+  installed by hand working).
 - The base APK is ~40 MB and contains only the built-in modules. Optional
   libraries are built with `-PallPlugins`, excluded from the APK, and
   distributed as ABI-specific `.rdmod` files (`packaging.jniLibs.excludes`,
@@ -167,12 +166,8 @@ bump.
   (`graphics/`, GPLv3) in their place to be distributable; the
   Fundamental/Bogaudio etc. plugins are GPLv3 with their graphics included ✓.
 - **Signing**: `keystore/rackdroid.keystore` is a **development** key with a
-  public password (`rackdroid`): it is for update continuity when sideloading, NOT
-  for authenticity. For a store, generate a private key (or use Play App
-  Signing).
-- **Google Play**: distributing native code executed from **outside** Play
-  violates their policies; the `.rdmod` folder / file installation are for
-  sideload/GitHub builds. For Play, deliver extra packages via *asset packs*.
+  public password (`rackdroid`): it keeps updates installed by
+  hand working, and does NOT vouch for authenticity.
 
 <img src="graphics/readme/divider.svg" width="100%" alt="">
 

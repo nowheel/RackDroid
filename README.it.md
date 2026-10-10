@@ -54,7 +54,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 | 🎹 **MIDI** | tastiera musicale a schermo, MIDI USB e Bluetooth LE |
 | ⏺️ **Registrazione** | uscita su file WAV in `Documents/RackDroid/` |
 | 🎓 **Apprendimento guidato** | un tour dell'interfaccia in 20 passi al primo avvio che si dimostra da solo: un passo per ogni menu, che dice cosa contiene e poi lo apre davvero, più l'inquadratura dei tuoi moduli, la palette, lo spostamento di un modulo, zoom e scorrimento del rack e un cavo tracciato con i jack compatibili accesi, poi rimette tutto a posto. In più, 30 tutorial passo-passo su 5 livelli, più una guida per argomenti |
-| 🔄 **Aggiornamenti (build GitHub)** | a scelta tua: RackDroid può chiedere a GitHub una volta al giorno se è uscita una versione nuova e installarla. Se rifiuti non si connette mai. La build per Play non ha l'aggiornatore né alcun permesso di rete |
+| 🔄 **Aggiornamenti** | a scelta tua: RackDroid può chiedere a GitHub una volta al giorno se è uscita una versione nuova e installarla. Se rifiuti non si connette mai. |
 
 <img src="graphics/readme/head-themes-it.svg" width="100%" alt="Cinque temi">
 
@@ -126,15 +126,10 @@ repo**: un clone pulito compila così com'è, senza init di submodule.
 export JAVA_HOME=~/jdk21; export ANDROID_HOME=~/android-sdk
 ./gradlew assembleSideloadRelease -PdevKeystore                 # arm64-v8a (predefinito)
 ./gradlew assembleSideloadRelease -PdevKeystore -PtargetAbis=x86_64  # x86_64
-./gradlew bundlePlayRelease -PtargetAbis=arm64-v8a,x86_64       # AAB Play, entrambe le ABI 64 bit
 ```
 
-- Due distribuzioni: `sideload` (GitHub) può controllare e installare i propri
-  aggiornamenti, quindi dichiara INTERNET e REQUEST_INSTALL_PACKAGES; `play` non
-  ha né i permessi né quel codice, perché le policy dello store vietano a
-  un'app di aggiornarsi da sola.
-- `-PdevKeystore` firma con la chiave di sviluppo pubblica (continuità di
-  aggiornamento per il sideload; per Play usare una chiave privata).
+- `-PdevKeystore` firma con la chiave di sviluppo pubblica (serve alla
+  continuità degli aggiornamenti installati a mano).
 - L'APK di base pesa ~40 MB e contiene solo i moduli base. Le librerie opzionali
   si compilano con `-PallPlugins`, restano escluse dall'APK e sono distribuite
   come `.rdmod` specifici per ABI (`packaging.jniLibs.excludes`, vedi
@@ -172,12 +167,8 @@ bump del submodule.
   (`graphics/`, GPLv3) al loro posto per essere distribuibile; i plugin
   Fundamental/Bogaudio ecc. sono GPLv3 con grafica inclusa ✓.
 - **Firma**: `keystore/rackdroid.keystore` è una chiave di **sviluppo** con
-  password pubblica (`rackdroid`): serve alla continuità di aggiornamento per il sideload,
-  NON autenticità. Per uno store generare una chiave privata (o Play App
-  Signing).
-- **Google Play**: distribuire codice nativo eseguito da **fuori** Play viola le
-  policy; la cartella `.rdmod` / l'installazione da file sono per la build
-  sideload/GitHub. Per Play, consegnare i pacchetti extra via *asset packs*.
+  password pubblica (`rackdroid`): serve alla continuità degli
+  aggiornamenti installati a mano, NON a garantire l'autenticità.
 
 <img src="graphics/readme/divider.svg" width="100%" alt="">
 
