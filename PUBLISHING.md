@@ -20,7 +20,7 @@ scripts/make_rdmods.sh /tmp/rdmods-x86_64 x86_64 # requires 21 valid archives
 ```
 
 Play Store accepts only the **AAB**. Sideloading/other stores use the APK.
-The current application is version **0.1.2.1** (`versionCode 4`), targets API 35,
+The current application is version **0.1.3** (`versionCode 200`), targets API 35,
 supports Android 10+ (`minSdk 29`), and builds arm64-v8a libraries with 16 KB
 page-size support. The optional x86_64 target is intended for emulators and
 compatible ChromeOS devices. The 32-bit x86 ABI is not supported.
@@ -166,6 +166,16 @@ Manual checks still required on at least one phone:
   played clean, with no crackle and no dropouts. Also exercised: the first-run
   interface tour in landscape and portrait, multi-select, and patch load/save.
   MIDI and long sessions remain untested on this machine.
+
+- 2026-10-09/10, the 0.1.3 work, on a Lenovo TB-X306X (Android 10) and a
+  Samsung Galaxy A52s 5G (Android 16; it reports itself as SM-S901E): the
+  tester build 0.1.2.126, which is the 0.1.3 source under the test package
+  name, installed over the previous one and played the reference patch and
+  its multi-copy versions with no crash; the cream theme seen on the tablet
+  (rack, panels, labels, toolbar, File menu). The 0.1.3 release APK itself:
+  see the entry made at release time below. Not covered: MIDI, recording,
+  module-pack installation on the release package, the OnePlus 8T (off the
+  network that day).
 
 - Releases publish THREE APKs: sideload only, for arm64-v8a, x86_64 and
   universal. A plain `assembleSideloadRelease` builds arm64 only; the other two

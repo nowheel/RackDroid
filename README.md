@@ -2,7 +2,7 @@
 
 <img src="graphics/readme/hero-en.svg" width="100%" alt="RackDroid: your modular rack, in your pocket">
 
-<p><img src="https://img.shields.io/badge/version-0.1.2.1-FFDA9F?style=flat-square&labelColor=2B2721" alt="Version 0.1.2.1"> <img src="https://img.shields.io/badge/Android-10%2B-FFDA9F?style=flat-square&labelColor=2B2721" alt="Android 10 or later"> <img src="https://img.shields.io/badge/engine-VCV%20Rack%202.6.4-FFDA9F?style=flat-square&labelColor=2B2721" alt="VCV Rack 2.6.4 engine"> <img src="https://img.shields.io/badge/modules-66%20built--in%20%C2%B7%20900%2B%20in%20packs-FFDA9F?style=flat-square&labelColor=2B2721" alt="66 built-in modules, over 900 in packs"> <img src="https://img.shields.io/badge/license-GPLv3-FFDA9F?style=flat-square&labelColor=2B2721" alt="GPLv3"></p>
+<p><img src="https://img.shields.io/badge/version-0.1.3-FFDA9F?style=flat-square&labelColor=2B2721" alt="Version 0.1.3"> <img src="https://img.shields.io/badge/Android-10%2B-FFDA9F?style=flat-square&labelColor=2B2721" alt="Android 10 or later"> <img src="https://img.shields.io/badge/engine-VCV%20Rack%202.6.4-FFDA9F?style=flat-square&labelColor=2B2721" alt="VCV Rack 2.6.4 engine"> <img src="https://img.shields.io/badge/modules-66%20built--in%20%C2%B7%20900%2B%20in%20packs-FFDA9F?style=flat-square&labelColor=2B2721" alt="66 built-in modules, over 900 in packs"> <img src="https://img.shields.io/badge/license-GPLv3-FFDA9F?style=flat-square&labelColor=2B2721" alt="GPLv3"></p>
 
 <p><b>English</b> · <a href="README.it.md">Italiano</a> · 🌐 <a href="https://rackdroid.org">rackdroid.org</a> · unofficial, not affiliated with VCV</p>
 
