@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="graphics/readme/hero-it.svg" width="100%" alt="RackDroid — il tuo rack modulare, in tasca">
+<img src="graphics/readme/hero-it.svg" width="100%" alt="RackDroid: il tuo rack modulare, in tasca">
 
 <p><img src="https://img.shields.io/badge/versione-0.1.2.1-FFDA9F?style=flat-square&labelColor=2B2721" alt="Versione 0.1.2.1"> <img src="https://img.shields.io/badge/Android-10%2B-FFDA9F?style=flat-square&labelColor=2B2721" alt="Android 10 o successivo"> <img src="https://img.shields.io/badge/motore-VCV%20Rack%202.6.4-FFDA9F?style=flat-square&labelColor=2B2721" alt="Motore VCV Rack 2.6.4"> <img src="https://img.shields.io/badge/moduli-66%20di%20base%20%C2%B7%20900%2B%20nei%20pacchetti-FFDA9F?style=flat-square&labelColor=2B2721" alt="66 moduli di base, oltre 900 nei pacchetti"> <img src="https://img.shields.io/badge/licenza-GPLv3-FFDA9F?style=flat-square&labelColor=2B2721" alt="GPLv3"></p>
 
 <p><a href="README.md">English</a> · <b>Italiano</b> · 🌐 <a href="https://rackdroid.org">rackdroid.org</a> · non ufficiale, non affiliato a VCV</p>
 
-Sintetizzatore modulare **touch-first** per Android — costruisci patch vere
+Sintetizzatore modulare **touch-first** per Android: costruisci patch vere
 trascinando cavi tra oscillatori, filtri, inviluppi e sequencer, esattamente
 come su un rack hardware. Nessun compromesso: è il motore audio di
 [VCV Rack 2](https://vcvrack.com), reso nativo per il telefono.
@@ -16,7 +16,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 <img src="graphics/screenshots/toolbar-menus.png" width="250" alt="Barra strumenti e menu">
 <img src="graphics/screenshots/theme-cream.png" width="250" alt="Il tema Crema">
 
-*Screenshot reali, da dispositivi veri — nessun mockup.*
+*Screenshot reali, da dispositivi veri, nessun mockup.*
 
 </div>
 
@@ -33,7 +33,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 - **Latenza bassa** (Oboe/AAudio, full-duplex): suona in tempo reale. Quanto
   bassa dipende anche dal telefono, perché alcuni produttori riservano il
   percorso audio più veloce a certe app: RackDroid usa il migliore che il
-  dispositivo concede e si regola di conseguenza — vedi
+  dispositivo concede e si regola di conseguenza: vedi
   [Prestazioni](#prestazioni).
 - **Cresce con te**: parti con i 66 moduli inclusi, poi aggiungi pacchetti
   interi (Bogaudio, Valley, Befaco, HetrickCV…) al volo, senza aggiornare
@@ -47,20 +47,20 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 | 🎚️ **Motore audio nativo** | Oboe/AAudio, full-duplex, bassa latenza dove il dispositivo la concede; il motore sceglie da solo il numero di thread ([Prestazioni](#prestazioni)) |
 | 🧩 **66 moduli di base** | Core (Audio/MIDI), Fundamental (39 moduli: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 voci originali stile 808) |
 | 👆 **Interfaccia touch** | un dito fa scorrere il rack, trascini per cavi/moduli, pizzichi per zoom, tieni premuta una manopola per digitare un valore |
-| 🪟 **Barra strumenti a vetro** | menu File/Modifica/Visualizza/Motore/Aiuto più sedici strumenti su due righe: palette, gestore moduli, parcheggio cavi, tema, MIDI, tastiera, registrazione, info; annulla/ripeti, selezione multipla, copia/incolla, elimina, i due lucchetti — si richiude in una linguetta |
+| 🪟 **Barra strumenti a vetro** | menu File/Modifica/Visualizza/Motore/Aiuto più sedici strumenti su due righe: palette, gestore moduli, parcheggio cavi, tema, MIDI, tastiera, registrazione, info; annulla/ripeti, selezione multipla, copia/incolla, elimina, i due lucchetti. Si richiude in una linguetta |
 | ✅ **Selezione e modifica** | attivi la selezione multipla e un tocco sceglie un modulo (un altro tocco lo toglie); una pressione prolungata sposta tutta la selezione. I moduli scelti prendono un alone rosso invece di un velo sul pannello, così la grafica resta leggibile. L'eliminazione chiede conferma e dice quanti moduli spariscono |
 | 🧲 **Palette dei moduli** | chip per categoria (VCO, LFO, VCF, VCA, ENV, SEQ, DRUM, MIX, FX, NOISE, QNT, MIDI, UTIL), anteprime trascinabili, badge ⓘ con nome/descrizione/tag |
-| 🧵 **Parcheggio cavi** | una barra sul bordo sinistro dove un capo del cavo aspetta mentre scorri fino alla destinazione — cresce da 3 fino a 10 buchi man mano che li riempi, illumina le porte compatibili mentre miri, si richiude in una maniglia |
+| 🧵 **Parcheggio cavi** | una barra sul bordo sinistro dove un capo del cavo aspetta mentre scorri fino alla destinazione: cresce da 3 fino a 10 buchi man mano che li riempi, illumina le porte compatibili mentre miri, si richiude in una maniglia |
 | 🎹 **MIDI** | tastiera musicale a schermo, MIDI USB e Bluetooth LE |
 | ⏺️ **Registrazione** | uscita su file WAV in `Documents/RackDroid/` |
-| 🎓 **Apprendimento guidato** | un tour dell'interfaccia in 20 passi al primo avvio che si dimostra da solo — un passo per ogni menu, che dice cosa contiene e poi lo apre davvero, più l'inquadratura dei tuoi moduli, la palette, lo spostamento di un modulo, zoom e scorrimento del rack e un cavo tracciato con i jack compatibili accesi, poi rimette tutto a posto — 30 tutorial passo-passo su 5 livelli, più una guida per argomenti |
-| 🔄 **Aggiornamenti (build GitHub)** | a scelta tua: RackDroid può chiedere a GitHub una volta al giorno se è uscita una versione nuova e installarla. Se rifiuti non si connette mai — la build per Play non ha l'aggiornatore né alcun permesso di rete |
+| 🎓 **Apprendimento guidato** | un tour dell'interfaccia in 20 passi al primo avvio che si dimostra da solo: un passo per ogni menu, che dice cosa contiene e poi lo apre davvero, più l'inquadratura dei tuoi moduli, la palette, lo spostamento di un modulo, zoom e scorrimento del rack e un cavo tracciato con i jack compatibili accesi, poi rimette tutto a posto. In più, 30 tutorial passo-passo su 5 livelli, più una guida per argomenti |
+| 🔄 **Aggiornamenti (build GitHub)** | a scelta tua: RackDroid può chiedere a GitHub una volta al giorno se è uscita una versione nuova e installarla. Se rifiuti non si connette mai. La build per Play non ha l'aggiornatore né alcun permesso di rete |
 
 <img src="graphics/readme/head-themes-it.svg" width="100%" alt="Cinque temi">
 
 <img src="graphics/readme/themes-it.svg" width="100%" alt="I cinque temi: Ambra, Blu notte, Verde smeraldo, Violetto, Crema">
 
-Ambra, Blu notte, Verde smeraldo, Violetto e quello chiaro, Crema — dal pulsante tavolozza nella barra. Un tema ricolora barra, menu, rack e moduli di base; i pacchetti di moduli tengono i loro pannelli.
+Ambra, Blu notte, Verde smeraldo, Violetto e quello chiaro, Crema: si scelgono dal pulsante tavolozza nella barra. Un tema ricolora barra, menu, rack e moduli di base; i pacchetti di moduli tengono i loro pannelli.
 
 <img src="graphics/readme/head-modules-it.svg" width="100%" alt="Moduli aggiuntivi (.rdmod)">
 
@@ -96,7 +96,7 @@ patch, e se lo ricorda. La prima apertura di una patch può richiedere qualche
 secondo di silenzio; le successive partono subito.
 
 **Le parti indipendenti lavorano in parallelo.** I gruppi di moduli che non
-hanno cavi fra loro — più voci, o più strumenti nello stesso rack — vengono
+hanno cavi fra loro (più voci, o più strumenti nello stesso rack) vengono
 calcolati ciascuno su un core diverso. Un rack fatto di parti separate regge
 quindi molto più di uno in cui tutto è collegato.
 
@@ -161,7 +161,7 @@ piattaforma-specifico vive in `native/port/`; i file desktop-only sono esclusi
 dal build e rimpiazzati, così l'aggiornamento a nuove versioni upstream resta un
 bump del submodule.
 
-<img src="graphics/readme/head-licenses-it.svg" width="100%" alt="Licenze, trademark e pubblicazione — importante">
+<img src="graphics/readme/head-licenses-it.svg" width="100%" alt="Licenze, trademark e pubblicazione: importante">
 
 - Il codice di Rack è **GPLv3**: questo port è GPLv3 e i sorgenti completi sono
   nel repository (obbligo di licenza soddisfatto ✓).
@@ -172,7 +172,7 @@ bump del submodule.
   (`graphics/`, GPLv3) al loro posto per essere distribuibile; i plugin
   Fundamental/Bogaudio ecc. sono GPLv3 con grafica inclusa ✓.
 - **Firma**: `keystore/rackdroid.keystore` è una chiave di **sviluppo** con
-  password pubblica (`rackdroid`) — continuità di aggiornamento per il sideload,
+  password pubblica (`rackdroid`): serve alla continuità di aggiornamento per il sideload,
   NON autenticità. Per uno store generare una chiave privata (o Play App
   Signing).
 - **Google Play**: distribuire codice nativo eseguito da **fuori** Play viola le

@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="graphics/readme/hero-en.svg" width="100%" alt="RackDroid — your modular rack, in your pocket">
+<img src="graphics/readme/hero-en.svg" width="100%" alt="RackDroid: your modular rack, in your pocket">
 
 <p><img src="https://img.shields.io/badge/version-0.1.2.1-FFDA9F?style=flat-square&labelColor=2B2721" alt="Version 0.1.2.1"> <img src="https://img.shields.io/badge/Android-10%2B-FFDA9F?style=flat-square&labelColor=2B2721" alt="Android 10 or later"> <img src="https://img.shields.io/badge/engine-VCV%20Rack%202.6.4-FFDA9F?style=flat-square&labelColor=2B2721" alt="VCV Rack 2.6.4 engine"> <img src="https://img.shields.io/badge/modules-66%20built--in%20%C2%B7%20900%2B%20in%20packs-FFDA9F?style=flat-square&labelColor=2B2721" alt="66 built-in modules, over 900 in packs"> <img src="https://img.shields.io/badge/license-GPLv3-FFDA9F?style=flat-square&labelColor=2B2721" alt="GPLv3"></p>
 
 <p><b>English</b> · <a href="README.it.md">Italiano</a> · 🌐 <a href="https://rackdroid.org">rackdroid.org</a> · unofficial, not affiliated with VCV</p>
 
-A **touch-first** modular synthesizer for Android — build real patches by
+A **touch-first** modular synthesizer for Android: build real patches by
 dragging cables between oscillators, filters, envelopes and sequencers, just
 like a hardware rack. No compromises: it's the [VCV Rack 2](https://vcvrack.com)
 audio engine, made native for your phone.
@@ -16,7 +16,7 @@ audio engine, made native for your phone.
 <img src="graphics/screenshots/toolbar-menus.png" width="250" alt="Toolbar and menus">
 <img src="graphics/screenshots/theme-cream.png" width="250" alt="The Cream theme">
 
-*Real screenshots, from real devices — no mockups.*
+*Real screenshots, from real devices, no mockups.*
 
 </div>
 
@@ -32,7 +32,7 @@ audio engine, made native for your phone.
 - **Low latency** (Oboe/AAudio, full-duplex): it plays in real time. How low
   is partly up to the phone, because some manufacturers keep the fastest audio
   path for certain apps: RackDroid uses the best one the device grants and
-  adjusts to it — see [Performance](#performance).
+  adjusts to it: see [Performance](#performance).
 - **Grows with you**: start with the 66 built-in modules, then add whole
   packages (Bogaudio, Valley, Befaco, HetrickCV…) on the fly, without updating
   the app.
@@ -45,20 +45,20 @@ audio engine, made native for your phone.
 | 🎚️ **Native audio engine** | Oboe/AAudio, full-duplex, low latency where the device grants it; the engine picks its own thread count ([Performance](#performance)) |
 | 🧩 **66 built-in modules** | Core (Audio/MIDI), Fundamental (39 modules: VCO, VCF, VCA, ADSR, LFO, SEQ-3, Delay, Mixer, Scope, Quantizer…), RackDroid Drums (14 original 808-style drum voices) |
 | 👆 **Touch interface** | one finger pans the rack, drag for cables/modules, pinch to zoom, long-press a knob to type a value |
-| 🪟 **Glass toolbar** | File/Edit/View/Engine/Help menus plus sixteen tools on two rows: palette, module manager, cable parking, theme, MIDI, keyboard, recording, info; undo/redo, multi-select, copy/paste, delete, the two padlocks — collapses into a tab |
+| 🪟 **Glass toolbar** | File/Edit/View/Engine/Help menus plus sixteen tools on two rows: palette, module manager, cable parking, theme, MIDI, keyboard, recording, info; undo/redo, multi-select, copy/paste, delete, the two padlocks. It collapses into a tab |
 | ✅ **Select and edit** | turn on multi-select and a tap picks a module out (tap again to drop it); a hold moves the whole selection. Selected modules get a red halo instead of a wash over the panel, so the artwork stays readable. Delete asks first and says how many are going |
 | 🧲 **Module palette** | chips by category (VCO, LFO, VCF, VCA, ENV, SEQ, DRUM, MIX, FX, NOISE, QNT, MIDI, UTIL), draggable previews, ⓘ badge with name/description/tags |
-| 🧵 **Cable parking** | a left-edge bar where a cable end waits while you scroll to its destination — grows from 3 up to 10 holes as you fill them, lights up compatible ports while you aim, collapses to a handle |
+| 🧵 **Cable parking** | a left-edge bar where a cable end waits while you scroll to its destination: it grows from 3 up to 10 holes as you fill them, lights up compatible ports while you aim, collapses to a handle |
 | 🎹 **MIDI** | on-screen musical keyboard, USB and Bluetooth LE MIDI |
 | ⏺️ **Recording** | output to a WAV file in `Documents/RackDroid/` |
-| 🎓 **Guided learning** | a 20-step interface tour on first run that demonstrates itself — a step per menu that says what is inside and then opens it, plus framing your modules, opening the palette, moving a module, zooming and scrolling the rack, and drawing a cable with the compatible jacks lit, then putting everything back — 30 step-by-step tutorials across 5 levels, plus a topic-based guide |
-| 🔄 **Updates (GitHub build)** | opt-in: RackDroid can ask GitHub once a day whether a newer release exists and install it. Refuse and it never connects — the Play build has no updater and no network permission at all |
+| 🎓 **Guided learning** | a 20-step interface tour on first run that demonstrates itself: a step per menu that says what is inside and then opens it, plus framing your modules, opening the palette, moving a module, zooming and scrolling the rack, and drawing a cable with the compatible jacks lit, then putting everything back. Also 30 step-by-step tutorials across 5 levels, plus a topic-based guide |
+| 🔄 **Updates (GitHub build)** | opt-in: RackDroid can ask GitHub once a day whether a newer release exists and install it. Refuse and it never connects. The Play build has no updater and no network permission at all |
 
 <img src="graphics/readme/head-themes-en.svg" width="100%" alt="Five themes">
 
 <img src="graphics/readme/themes-en.svg" width="100%" alt="The five themes: Amber, Blue Night, Emerald, Violet, Cream">
 
-Amber, Blue Night, Emerald, Violet and the light one, Cream — from the palette button in the toolbar. A theme recolours the toolbar, the menus, the rack and the built-in modules; module packs keep their own panels.
+Amber, Blue Night, Emerald, Violet and the light one, Cream: pick one from the palette button in the toolbar. A theme recolours the toolbar, the menus, the rack and the built-in modules; module packs keep their own panels.
 
 <img src="graphics/readme/head-modules-en.svg" width="100%" alt="Additional modules (.rdmod)">
 
@@ -93,7 +93,7 @@ and remembers it. The first time a patch is opened it may take a few seconds
 of silence; after that it starts at once.
 
 **Independent parts run in parallel.** Groups of modules with no cable
-between them — several voices, or several instruments in one rack — are each
+between them (several voices, or several instruments in one rack) are each
 computed on a core of their own. A rack made of separate parts therefore
 holds far more than one where everything is connected.
 
@@ -156,7 +156,7 @@ code lives in `native/port/`; desktop-only files are excluded from the build
 and replaced, so upgrading to new upstream versions remains a simple submodule
 bump.
 
-<img src="graphics/readme/head-licenses-en.svg" width="100%" alt="Licenses, trademarks and distribution — important">
+<img src="graphics/readme/head-licenses-en.svg" width="100%" alt="Licenses, trademarks and distribution: important">
 
 - Rack's code is **GPLv3**: this port is GPLv3 and the complete sources are in
   the repository (license obligation satisfied ✓).
@@ -167,7 +167,7 @@ bump.
   (`graphics/`, GPLv3) in their place to be distributable; the
   Fundamental/Bogaudio etc. plugins are GPLv3 with their graphics included ✓.
 - **Signing**: `keystore/rackdroid.keystore` is a **development** key with a
-  public password (`rackdroid`) — for update continuity when sideloading, NOT
+  public password (`rackdroid`): it is for update continuity when sideloading, NOT
   for authenticity. For a store, generate a private key (or use Play App
   Signing).
 - **Google Play**: distributing native code executed from **outside** Play
