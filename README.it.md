@@ -24,8 +24,14 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 
 ## Perché RackDroid
 
-- **È VCV Rack, non un clone.** Stesso motore DSP, stessi 66 moduli di base,
-  stesso formato patch `.vcv` — sui sorgenti upstream v2.6.4, non modificati.
+- **È VCV Rack, non un clone.** Stesso DSP, stessi 66 moduli di base, stesso
+  formato patch `.vcv`, compilato dai sorgenti upstream v2.6.4. Per i telefoni
+  è adattato il modo in cui i thread del motore si danno il turno — meno di
+  cento righe di Rack cambiate, in fase di compilazione, con i sorgenti
+  lasciati come sono — e non tocca il suono: ogni modulo confrontabile dà gli
+  stessi campioni, bit per bit, del ciclo originale di Rack. Misurato anche
+  contro VCV Rack desktop: resta l'ultima cifra, che un processore diverso
+  arrotonda in altro modo.
 - **Pensato per il tocco fin dall'inizio**, non una UI desktop rimpicciolita:
   cavi che si trascinano col dito, manopole che si tengono premute per
   digitare un valore, pizzico per lo zoom, palette moduli pensata per schermi

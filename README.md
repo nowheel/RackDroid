@@ -24,8 +24,14 @@ audio engine, made native for your phone.
 
 ## Why RackDroid
 
-- **It's VCV Rack, not a clone.** Same DSP engine, same 66 built-in modules,
-  same `.vcv` patch format — built on unmodified upstream v2.6.4 sources.
+- **It's VCV Rack, not a clone.** Same DSP, same 66 built-in modules, same
+  `.vcv` patch format, built from the upstream v2.6.4 sources. What is
+  adapted for phones is how the engine's threads take turns — under a hundred
+  lines of Rack changed, at build time, the sources left as they are — and it
+  does not touch the sound: every module that can be compared gives the same
+  samples, bit for bit, as Rack's own loop. Measured against VCV Rack on
+  desktop too: what remains is the last digit, which a different processor
+  rounds differently.
 - **Touch-first from day one**, not a shrunk-down desktop UI: drag cables with
   a finger, long-press a knob to type a value, pinch to zoom, a module palette
   designed for small screens, and a **cable-parking bar** that solves the "two
