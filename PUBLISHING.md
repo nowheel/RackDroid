@@ -173,7 +173,8 @@ Manual checks still required on at least one phone:
   name, installed over the previous one and played the reference patch and
   its multi-copy versions with no crash; the cream theme seen on the tablet
   (rack, panels, labels, toolbar, File menu). The 0.1.3 release APK itself:
-  see the entry made at release time below. Not covered: MIDI, recording,
+  installed on the A52s over a 0.1.2.22 of the release package (same key,
+  no uninstall), started, played the patch it had, no crash. Not covered: MIDI, recording,
   module-pack installation on the release package, the OnePlus 8T (off the
   network that day).
 
