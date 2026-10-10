@@ -94,6 +94,16 @@ struct PanelLabelOverlay : widget::Widget {
 		float xform[6];
 		nvgCurrentTransform(args.vg, xform);
 		bool tooSmall = 6.5f * xform[0] < 7.f; // the transform already carries the pixel ratio
+		// The text is laid out on whole pixels and then moved by the rack's
+		// scroll, which is any fraction of one: half a pixel off, a letter's
+		// horizontal strokes are smeared over two rows and a thin face loses
+		// them -- E read as F, "TFMPO" and "RFSFT" under the jacks, which a
+		// tester saw as deformed text. The fraction is taken off here, so
+		// every label lands on the grid (it moves by half a pixel at most).
+		if (xform[0] > 0.f)
+			inkSpread = 0.5f / xform[0];
+		if (xform[0] > 0.f && xform[3] > 0.f)
+			nvgTranslate(args.vg, (std::round(xform[4]) - xform[4]) / xform[0], (std::round(xform[5]) - xform[5]) / xform[3]);
 
 		// Module currently being dragged. Only when the drag target IS the
 		// ModuleWidget itself (finger on the panel body): knob/port drags
@@ -167,7 +177,7 @@ struct PanelLabelOverlay : widget::Widget {
 			static const std::set<std::string> themedPlugins = {"Core", "Fundamental", "RackDroidDrums"};
 			darkInk = labelOverlayLightPanels && mw->model && mw->model->plugin &&
 				themedPlugins.count(mw->model->plugin->slug);
-			NVGcolor ink = darkInk ? nvgRGB(0x2B, 0x27, 0x21) : nvgRGB(0xED, 0xE6, 0xD8);
+			NVGcolor ink = darkInk ? nvgRGB(0x1C, 0x18, 0x13) : nvgRGB(0xED, 0xE6, 0xD8);
 			if (mw->model && mw->model->plugin &&
 					regenArtPlugins.count(mw->model->plugin->slug)) {
 				math::Vec top = mw->getRelativeOffset(math::Vec(mw->box.size.x * 0.5f, 0), ref);
@@ -196,7 +206,7 @@ struct PanelLabelOverlay : widget::Widget {
 				NVGcolor col = (port->type == engine::Port::INPUT)
 					? nvgRGB(0xB8, 0xAF, 0x9C) : nvgRGB(0xFF, 0xDA, 0x9F);
 				if (darkInk)
-					col = (port->type == engine::Port::INPUT) ? nvgRGB(0x5E, 0x57, 0x4A) : nvgRGB(0xA8, 0x50, 0x1A);
+					col = (port->type == engine::Port::INPUT) ? nvgRGB(0x3F, 0x39, 0x30) : nvgRGB(0x8A, 0x3C, 0x0E);
 				math::Vec c = port->getRelativeOffset(port->box.size.mult(0.5f), ref);
 				float ly = c.y + port->box.size.y * 0.5f + 0.5f;
 				if (!labelVisible(args, c.x, ly))
@@ -212,6 +222,8 @@ struct PanelLabelOverlay : widget::Widget {
 	few thousand allocations a second on a full rack. */
 	/** The module being labelled has a light panel. */
 	bool darkInk = false;
+	/** Half a physical pixel, in the rack's units. */
+	float inkSpread = 0.2f;
 
 	static bool labelVisible(const DrawArgs& args, float x, float y) {
 		return !(x < args.clipBox.pos.x - 40 || x > args.clipBox.pos.x + args.clipBox.size.x + 40 ||
@@ -225,6 +237,19 @@ struct PanelLabelOverlay : widget::Widget {
 		if (!darkInk) {
 			nvgFillColor(args.vg, nvgRGBA(0, 0, 0, 180));
 			nvgText(args.vg, x + 0.3f, y + 0.3f, text.c_str(), NULL);
+		}
+		else {
+			// The dark shadow is what gives the light labels their weight.
+			// Dark ink on a light panel has none, and this face is thin: at
+			// phone sizes its horizontal strokes cover a fraction of a pixel
+			// row and went missing -- E read as F, L as I ("TFMPO", "CI OCK"),
+			// which a tester reported as deformed text. The text is drawn
+			// three more times, half a physical pixel to each side and below,
+			// which thickens stems and bars alike.
+			nvgFillColor(args.vg, col);
+			nvgText(args.vg, x - inkSpread, y, text.c_str(), NULL);
+			nvgText(args.vg, x + inkSpread, y, text.c_str(), NULL);
+			nvgText(args.vg, x, y + inkSpread, text.c_str(), NULL);
 		}
 		nvgFillColor(args.vg, col);
 		nvgText(args.vg, x, y, text.c_str(), NULL);
