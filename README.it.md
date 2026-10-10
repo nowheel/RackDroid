@@ -1,28 +1,26 @@
-Versione inglese: [`README.md`](https://github.com/nowheel/RackDroid/blob/main/README.md)
-
 <div align="center">
 
-# 🎛️ RackDroid
+<img src="graphics/readme/hero-it.svg" width="100%" alt="RackDroid — il tuo rack modulare, in tasca">
 
-### Il tuo rack modulare, in tasca.
+<p><img src="https://img.shields.io/badge/versione-0.1.2.1-FFDA9F?style=flat-square&labelColor=2B2721" alt="Versione 0.1.2.1"> <img src="https://img.shields.io/badge/Android-10%2B-FFDA9F?style=flat-square&labelColor=2B2721" alt="Android 10 o successivo"> <img src="https://img.shields.io/badge/motore-VCV%20Rack%202.6.4-FFDA9F?style=flat-square&labelColor=2B2721" alt="Motore VCV Rack 2.6.4"> <img src="https://img.shields.io/badge/moduli-66%20di%20base%20%C2%B7%20900%2B%20nei%20pacchetti-FFDA9F?style=flat-square&labelColor=2B2721" alt="66 moduli di base, oltre 900 nei pacchetti"> <img src="https://img.shields.io/badge/licenza-GPLv3-FFDA9F?style=flat-square&labelColor=2B2721" alt="GPLv3"></p>
+
+<p><a href="README.md">English</a> · <b>Italiano</b> · 🌐 <a href="https://rackdroid.org">rackdroid.org</a> · non ufficiale, non affiliato a VCV</p>
 
 Sintetizzatore modulare **touch-first** per Android — costruisci patch vere
 trascinando cavi tra oscillatori, filtri, inviluppi e sequencer, esattamente
 come su un rack hardware. Nessun compromesso: è il motore audio di
 [VCV Rack 2](https://vcvrack.com), reso nativo per il telefono.
 
-<img src="graphics/screenshots/patch-rack.png" width="280" alt="Una patch attiva in RackDroid">
-<img src="graphics/screenshots/toolbar-menus.png" width="280" alt="Barra strumenti e menu">
 
-*Uno screenshot reale, da un dispositivo vero — nessun mockup.*
+<img src="graphics/screenshots/patch-rack.png" width="250" alt="Una patch attiva in RackDroid">
+<img src="graphics/screenshots/toolbar-menus.png" width="250" alt="Barra strumenti e menu">
+<img src="graphics/screenshots/theme-cream.png" width="250" alt="Il tema Crema">
+
+*Screenshot reali, da dispositivi veri — nessun mockup.*
 
 </div>
 
-> **Versione 0.1.2.1** · 🌐 [rackdroid.org](https://rackdroid.org) · repo: [`nowheel/RackDroid`](https://github.com/nowheel/RackDroid) · non ufficiale, non affiliato a VCV
-
----
-
-## Perché RackDroid
+<img src="graphics/readme/head-why-it.svg" width="100%" alt="Perché RackDroid">
 
 - **È VCV Rack, non un clone.** Stesso DSP, stessi 66 moduli di base, stesso
   formato patch `.vcv`, compilato dai sorgenti upstream v2.6.4. Per i telefoni
@@ -48,7 +46,7 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
   l'app.
 - **Gira anche su hardware datato**: supporto da Android 10 in su.
 
-## Cosa include
+<img src="graphics/readme/head-includes-it.svg" width="100%" alt="Cosa include">
 
 | | |
 |---|---|
@@ -64,7 +62,13 @@ come su un rack hardware. Nessun compromesso: è il motore audio di
 | 🎓 **Apprendimento guidato** | un tour dell'interfaccia in 20 passi al primo avvio che si dimostra da solo — un passo per ogni menu, che dice cosa contiene e poi lo apre davvero, più l'inquadratura dei tuoi moduli, la palette, lo spostamento di un modulo, zoom e scorrimento del rack e un cavo tracciato con i jack compatibili accesi, poi rimette tutto a posto — 30 tutorial passo-passo su 5 livelli, più una guida per argomenti |
 | 🔄 **Aggiornamenti (build GitHub)** | a scelta tua: RackDroid può chiedere a GitHub una volta al giorno se è uscita una versione nuova e installarla. Se rifiuti non si connette mai — la build per Play non ha l'aggiornatore né alcun permesso di rete |
 
-## Moduli aggiuntivi (.rdmod)
+<img src="graphics/readme/head-themes-it.svg" width="100%" alt="Cinque temi">
+
+<img src="graphics/readme/themes-it.svg" width="100%" alt="I cinque temi: Ambra, Blu notte, Verde smeraldo, Violetto, Crema">
+
+Ambra, Blu notte, Verde smeraldo, Violetto e quello chiaro, Crema — dal pulsante tavolozza nella barra. Un tema ricolora barra, menu, rack e moduli di base; i pacchetti di moduli tengono i loro pannelli.
+
+<img src="graphics/readme/head-modules-it.svg" width="100%" alt="Moduli aggiuntivi (.rdmod)">
 
 Oltre ai moduli di base, puoi aggiungere pacchetti (Bogaudio, Valley, Audible,
 Impromptu, Befaco, HetrickCV…) **al volo**, senza aggiornare l'app:
@@ -82,14 +86,15 @@ Formato del pacchetto, meccanismo di caricamento nativo e istruzioni per
 **creare** un plugin: vedi **[MODULES.md](MODULES.md)** e il manuale in
 **[docs/rackdroid-manuale.pdf](docs/rackdroid-manuale.pdf)**.
 
-## Requisiti
+<img src="graphics/readme/head-requirements-it.svg" width="100%" alt="Requisiti">
 
 **Android 10 (API 29) o successivo** su dispositivo 64 bit `arm64-v8a` o
 `x86_64`. Serve OpenGL ES 3.0. `arm64-v8a` è il build normale per telefoni e
 tablet; `x86_64` è pensato soprattutto per emulatori e dispositivi ChromeOS
 compatibili.
 
-## Prestazioni
+<a name="prestazioni"></a>
+<img src="graphics/readme/head-performance-it.svg" width="100%" alt="Prestazioni">
 
 **Il motore si regola da solo. Non c'è un'impostazione dei thread da sbagliare**,
 ed è il motivo per cui il menu Thread su Android non c'è: il numero giusto è
@@ -134,7 +139,7 @@ Lo zoom si ferma a 2×. Oltre, ogni modulo visibile viene ridisegnato in un
 buffer molto più grande a ogni passo di zoom, e su un telefono questo compete
 con la callback audio per gli stessi core — spezzava il suono allo zoom massimo.
 
-## Build
+<img src="graphics/readme/head-build-it.svg" width="100%" alt="Build">
 
 Progetto Gradle alla radice del repo (`minSdk 29`). I sorgenti
 `third_party/` (Rack v2.6.4, Oboe, tutti i plugin) sono **vendorizzati nel
@@ -158,7 +163,7 @@ export JAVA_HOME=~/jdk21; export ANDROID_HOME=~/android-sdk
   come `.rdmod` specifici per ABI (`packaging.jniLibs.excludes`, vedi
   `scripts/make_rdmods.sh`).
 
-## Struttura
+<img src="graphics/readme/head-structure-it.svg" width="100%" alt="Struttura">
 
 ```
 app/            modulo Android (Gradle, manifest, MainActivity + UI Kotlin)
@@ -179,7 +184,7 @@ piattaforma-specifico vive in `native/port/`; i file desktop-only sono esclusi
 dal build e rimpiazzati, così l'aggiornamento a nuove versioni upstream resta un
 bump del submodule.
 
-## Licenze, trademark e pubblicazione — importante
+<img src="graphics/readme/head-licenses-it.svg" width="100%" alt="Licenze, trademark e pubblicazione — importante">
 
 - Il codice di Rack è **GPLv3**: questo port è GPLv3 e i sorgenti completi sono
   nel repository (obbligo di licenza soddisfatto ✓).
@@ -197,7 +202,7 @@ bump del submodule.
   policy; la cartella `.rdmod` / l'installazione da file sono per la build
   sideload/GitHub. Per Play, consegnare i pacchetti extra via *asset packs*.
 
----
+<img src="graphics/readme/divider.svg" width="100%" alt="">
 
 <div align="center">
 
