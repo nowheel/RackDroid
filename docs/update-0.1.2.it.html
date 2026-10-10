@@ -1,7 +1,7 @@
 <meta charset="utf-8">
-<title>RackDroid 0.1.3: the sound comes first</title>
+<title>RackDroid — tutto il rack sotto un dito</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="RackDroid 0.1.3: the engine chooses how many cores to use, independent parts of a patch run in parallel, oscillators as on desktop, a light theme and mouse support.">
+<meta name="description" content="Disponibile: parcheggio cavi per collegare tutto il rack, moduli che prendi col dito e sposti insieme, copia, incolla e cestino dalla barra.">
 <style>
   @font-face {
     font-family: "Geomini";
@@ -473,83 +473,62 @@
   <div class="wrap">
     <div class="nav-brand"><img src="assets/logo.svg" style="width: 25%;"><span class="dot"></span>RackDroid</div>
     <div class="nav-right">
-      <a class="nav-link" href="index.html">Home</a>
-      <a class="nav-link active" href="update.html">News</a>
-      <a class="nav-lang" href="update.it.html">IT</a>
-      <a class="nav-cta" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">Download on GitHub</a>
+      <a class="nav-link" href="index.it.html">Home</a>
+      <a class="nav-link active" href="update.it.html">News</a>
+      <a class="nav-lang" href="update-0.1.2.html">EN</a>
+      <a class="nav-cta" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">Scarica su GitHub</a>
     </div>
   </div>
 </nav>
 <section class="ann">
   <div class="wrap">
     <div class="ann-head">
-      <span class="stamp">OUT NOW · 10 OCTOBER 2026</span>
-      <h1>The sound<br>comes first<span class="rd">.</span></h1>
+      <span class="stamp">DISPONIBILE · 1 AGOSTO 2026</span>
+      <h1>Adesso il rack sta<br>tutto sotto un dito<span class="rd">.</span></h1>
       <p class="ann-lede">
-        Two months of work on one thing: making patches play clean, on phones that have little in common. Plus a few comforts that were missing.
+        Collegare due moduli lontani, riordinare la patch, fare spazio: le tre cose che
+        su un telefono erano una lotta, e che da oggi si fanno con un gesto.
       </p>
       <div class="ann-ctas">
-        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/latest" target="_blank" rel="noopener">↓ Download 0.1.3</a>
-        <a class="btn btn-ghost" href="rackdroid-manuale.html">Read the manual</a>
+        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica l'APK</a>
+        <a class="btn btn-ghost" href="rackdroid-manuale.html">Leggi il manuale</a>
       </div>
     </div>
-    <div class="clip" style="max-width:560px">
-      <div style="display:flex;gap:18px;justify-content:center">
-        <img src="assets/shots/013-rack-en.png" alt="" style="width:48%;border-radius:18px;border:1px solid var(--border-strong);box-shadow:0 26px 50px -22px rgba(0,0,0,0.8)">
-        <img src="assets/shots/013-cream-en.png" alt="" style="width:48%;border-radius:18px;border:1px solid var(--border-strong);box-shadow:0 26px 50px -22px rgba(0,0,0,0.8)">
-      </div>
-      <p class="cap">The Violet theme, and the new Cream theme.</p>
-    </div>
+    <div class="clip">
+    <video src="assets/shots/cable-park.mp4" autoplay muted loop playsinline></video>
+    <p class="cap">Il capo del cavo resta agganciato alla barra mentre il rack scorre fino al modulo lontano.</p>
+  </div>
   </div>
 </section>
 <section class="scrolly">
   <div class="wrap scrolly-grid">
     <div class="steps">
-      <div class="step" data-shot="rack" data-hl="5,9.2,90,2.4">
-      <p class="kicker">Audio</p>
-      <h2>The engine tunes itself</h2>
-      <p>Open a patch and RackDroid chooses how many cores to use, for that phone and that patch. Then it remembers: next time it starts at once.</p>
-      <p>The Threads menu is gone, because there is nothing left to set by hand. The thin bar under the menus shows how hard the engine is working.</p>
-    </div><div class="step" data-shot="rack">
-      <p class="kicker">In parallel</p>
-      <h2>More instruments, more cores</h2>
-      <p>Groups of modules with no cable between them (several voices, several instruments in one rack) are each computed on a core of their own.</p>
-      <p>A rack made of separate parts holds far more than before. And it sounds exactly as it did: who does the work changes, the result does not.</p>
-    </div><div class="step" data-shot="heavy" data-hl="3,39,94,26">
-      <p class="kicker">No guessing</p>
-      <h2>It tells you when it is too much</h2>
-      <p>When a patch asks for more than the phone can give, the app says so and offers to halve the engine's sample rate.</p>
-      <p>One tap, and the patch that crackled plays again.</p>
-    </div><div class="step" data-shot="engine" data-hl="3,92.3,60,6.2">
-      <p class="kicker">Audio block</p>
-      <h2>Automatic, or your way</h2>
-      <p>The Engine menu lets you choose the audio block size. On Automatic the app looks after it; fix one, and it stays.</p>
-    </div><div class="step" data-shot="rack">
-      <p class="kicker">Sound</p>
-      <h2>The same edges as on desktop</h2>
-      <p>Square and saw waves now have the shape they have in VCV Rack on a computer. On a phone they were being computed slightly differently.</p>
-      <p>A patch made on the computer opens on the phone, and the other way round, and sounds the same.</p>
-    </div><div class="step" data-shot="cream" data-hl="39,11.2,10.5,4.4">
-      <p class="kicker">Themes</p>
-      <h2>There is light, too</h2>
-      <p>Beside the four dark themes comes Cream: off-white panels, a pale rack, dark knobs. Pick it from the palette button.</p>
-    </div><div class="step" data-shot="file" data-hl="3,92.3,72,6.2">
-      <p class="kicker">File</p>
-      <h2>Save where you like</h2>
-      <p>File ▸ Save to device opens the system picker: the patch lands in the folder you choose, ready to copy or share.</p>
-    </div><div class="step" data-shot="rack">
-      <p class="kicker">Mouse</p>
-      <h2>A mouse changes everything</h2>
-      <p>Right button for the context menu, wheel to scroll, zoom and turn knobs, tooltips on hover. On a tablet or a Chromebook you work as you would at a computer.</p>
+      <div class="step" data-shot="parked" data-hl="0.5,38,10,23">
+      <p class="kicker">Parcheggio cavi</p>
+      <h2>Nessun modulo è troppo lontano</h2>
+      <p>Lascia un capo del cavo in un buco della barra a sinistra, scorri il rack fin dove ti serve, poi tiralo fuori sulla presa che volevi. Mentre miri, le prese compatibili si accendono.</p>
+      <p>Su ogni buco resta scritto da quale modulo e da quale uscita arriva quel capo, perché dopo il terzo cavo non te lo ricordi più.</p>
+    </div><div class="step" data-shot="selection" data-hl="28,16,9,4.5">
+      <p class="kicker">Selezione</p>
+      <h2>Prendi mezzo rack e spostalo</h2>
+      <p>Tocca i moduli che ti servono, toccali di nuovo per lasciarli. Poi tieni premuto e trascina: si muovono tutti insieme, coi cavi al seguito.</p>
+      <p>Mentre scegli, manopole e prese restano ferme: non cambi un valore per sbaglio mentre stai facendo ordine.</p>
+    </div><div class="step" data-shot="selection" data-hl="4,38,42,25">
+      <p class="kicker">A colpo d'occhio</p>
+      <h2>Vedi cosa hai in mano</h2>
+      <p>I moduli scelti prendono un alone rosso tutt'intorno. Il pannello resta leggibile — continui a vedere manopole, etichette e cavi mentre lavori.</p>
+    </div><div class="step" data-shot="rack" data-hl="63,16,9,4.5">
+      <p class="kicker">Spazio</p>
+      <h2>Fai piazza pulita in un gesto</h2>
+      <p>Il cestino porta via tutto quello che hai scelto. Ti dice quanti moduli stanno per sparire e chiede conferma; se poi cambi idea, annulla è lì di fianco.</p>
+      <p>Accanto trovi copia e incolla: un angolo di patch che funziona lo ripeti dove vuoi.</p>
     </div>
     </div>
     <div class="stage">
     <div class="phone">
-      <img data-shot="rack" src="assets/shots/013-rack-en.png" alt="">
-      <img data-shot="heavy" src="assets/shots/013-heavy-en.png" alt="">
-      <img data-shot="engine" src="assets/shots/013-engine-en.png" alt="">
-      <img data-shot="cream" src="assets/shots/013-cream-en.png" alt="">
-      <img data-shot="file" src="assets/shots/013-file-en.png" alt="">
+      <img data-shot="rack" src="assets/shots/rack.png" alt="">
+      <img data-shot="parked" src="assets/shots/parked.png" alt="">
+      <img data-shot="selection" src="assets/shots/selection.png" alt="">
       <div class="hl"></div>
     </div>
   </div>
@@ -558,22 +537,22 @@
 <section class="ann">
   <div class="wrap ann-head">
     <div class="ann-ctas">
-      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/latest" target="_blank" rel="noopener">↓ Download 0.1.3</a>
-      <a class="btn btn-ghost" href="index.html">Back to the site</a>
+      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica l'APK</a>
+      <a class="btn btn-ghost" href="index.it.html">Torna al sito</a>
     </div>
-    <p class="ann-lede" style="font-size:14.5px;margin-top:18px"><a href="update-0.1.2.html" style="color:var(--amber-soft)">The previous update: cable parking and selection</a></p>
   </div>
 </section>
 <footer>
   <div class="wrap">
     <div class="foot-links">
-      <a href="index.html">Home</a>
+      <a href="index.it.html">Home</a>
       <a href="https://github.com/nowheel/RackDroid">Repository</a>
       <a href="privacy.html">Privacy</a>
       <a href="https://vcvrack.com" target="_blank" rel="noopener">VCV Rack</a>
     </div>
     <p class="foot-fine">
-      RackDroid is an <strong>unofficial</strong> port of the VCV Rack 2 engine, built from the upstream sources (GPLv3). Not affiliated with or endorsed by VCV.
+      RackDroid è un port <strong>non ufficiale</strong> del motore di VCV Rack 2, costruito su
+      sorgenti upstream non modificati (GPLv3). Non affiliato né approvato da VCV.
     </p>
   </div>
 </footer>

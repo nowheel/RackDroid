@@ -1,7 +1,7 @@
 <meta charset="utf-8">
-<title>RackDroid — tutto il rack sotto un dito</title>
+<title>RackDroid 0.1.3: il suono, prima di tutto</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Disponibile: parcheggio cavi per collegare tutto il rack, moduli che prendi col dito e sposti insieme, copia, incolla e cestino dalla barra.">
+<meta name="description" content="RackDroid 0.1.3: il motore sceglie da solo quanti core usare, le parti indipendenti di una patch lavorano in parallelo, oscillatori come su desktop, tema chiaro e mouse.">
 <style>
   @font-face {
     font-family: "Geomini";
@@ -483,52 +483,73 @@
 <section class="ann">
   <div class="wrap">
     <div class="ann-head">
-      <span class="stamp">DISPONIBILE · 1 AGOSTO 2026</span>
-      <h1>Adesso il rack sta<br>tutto sotto un dito<span class="rd">.</span></h1>
+      <span class="stamp">DISPONIBILE · 10 OTTOBRE 2026</span>
+      <h1>Il suono,<br>prima di tutto<span class="rd">.</span></h1>
       <p class="ann-lede">
-        Collegare due moduli lontani, riordinare la patch, fare spazio: le tre cose che
-        su un telefono erano una lotta, e che da oggi si fanno con un gesto.
+        Due mesi di lavoro su una cosa sola: far suonare pulite le patch, su telefoni molto diversi fra loro. Più qualche comodità che mancava.
       </p>
       <div class="ann-ctas">
-        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica l'APK</a>
+        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/latest" target="_blank" rel="noopener">↓ Scarica la 0.1.3</a>
         <a class="btn btn-ghost" href="rackdroid-manuale.html">Leggi il manuale</a>
       </div>
     </div>
-    <div class="clip">
-    <video src="assets/shots/cable-park.mp4" autoplay muted loop playsinline></video>
-    <p class="cap">Il capo del cavo resta agganciato alla barra mentre il rack scorre fino al modulo lontano.</p>
-  </div>
+    <div class="clip" style="max-width:560px">
+      <div style="display:flex;gap:18px;justify-content:center">
+        <img src="assets/shots/013-rack-it.png" alt="" style="width:48%;border-radius:18px;border:1px solid var(--border-strong);box-shadow:0 26px 50px -22px rgba(0,0,0,0.8)">
+        <img src="assets/shots/013-cream-it.png" alt="" style="width:48%;border-radius:18px;border:1px solid var(--border-strong);box-shadow:0 26px 50px -22px rgba(0,0,0,0.8)">
+      </div>
+      <p class="cap">Il tema Violetto, e il nuovo tema Crema.</p>
+    </div>
   </div>
 </section>
 <section class="scrolly">
   <div class="wrap scrolly-grid">
     <div class="steps">
-      <div class="step" data-shot="parked" data-hl="0.5,38,10,23">
-      <p class="kicker">Parcheggio cavi</p>
-      <h2>Nessun modulo è troppo lontano</h2>
-      <p>Lascia un capo del cavo in un buco della barra a sinistra, scorri il rack fin dove ti serve, poi tiralo fuori sulla presa che volevi. Mentre miri, le prese compatibili si accendono.</p>
-      <p>Su ogni buco resta scritto da quale modulo e da quale uscita arriva quel capo, perché dopo il terzo cavo non te lo ricordi più.</p>
-    </div><div class="step" data-shot="selection" data-hl="28,16,9,4.5">
-      <p class="kicker">Selezione</p>
-      <h2>Prendi mezzo rack e spostalo</h2>
-      <p>Tocca i moduli che ti servono, toccali di nuovo per lasciarli. Poi tieni premuto e trascina: si muovono tutti insieme, coi cavi al seguito.</p>
-      <p>Mentre scegli, manopole e prese restano ferme: non cambi un valore per sbaglio mentre stai facendo ordine.</p>
-    </div><div class="step" data-shot="selection" data-hl="4,38,42,25">
-      <p class="kicker">A colpo d'occhio</p>
-      <h2>Vedi cosa hai in mano</h2>
-      <p>I moduli scelti prendono un alone rosso tutt'intorno. Il pannello resta leggibile — continui a vedere manopole, etichette e cavi mentre lavori.</p>
-    </div><div class="step" data-shot="rack" data-hl="63,16,9,4.5">
-      <p class="kicker">Spazio</p>
-      <h2>Fai piazza pulita in un gesto</h2>
-      <p>Il cestino porta via tutto quello che hai scelto. Ti dice quanti moduli stanno per sparire e chiede conferma; se poi cambi idea, annulla è lì di fianco.</p>
-      <p>Accanto trovi copia e incolla: un angolo di patch che funziona lo ripeti dove vuoi.</p>
+      <div class="step" data-shot="rack" data-hl="5,9.2,90,2.4">
+      <p class="kicker">Audio</p>
+      <h2>Il motore si regola da solo</h2>
+      <p>Apri una patch e RackDroid sceglie quanti core usare, per quel telefono e per quella patch. Poi se lo ricorda: la volta dopo parte subito.</p>
+      <p>Il menu dei thread non c'è più, perché non c'è niente da regolare a mano. La barra sottile sotto i menu ti dice quanto sta lavorando il motore.</p>
+    </div><div class="step" data-shot="rack">
+      <p class="kicker">In parallelo</p>
+      <h2>Più strumenti, più core</h2>
+      <p>I gruppi di moduli che non hanno cavi fra loro (più voci, più strumenti nello stesso rack) vengono calcolati ciascuno su un core diverso.</p>
+      <p>Un rack fatto di parti separate regge molto più di prima. E suona esattamente come suonava: cambia chi fa il lavoro, non il risultato.</p>
+    </div><div class="step" data-shot="heavy" data-hl="3,36.5,94,31">
+      <p class="kicker">Senza indovinare</p>
+      <h2>Ti dice quando è troppo</h2>
+      <p>Se una patch chiede più di quello che il telefono può dare, l'app lo dice e propone di dimezzare la frequenza di campionamento del motore.</p>
+      <p>Un tocco, e la patch che crepitava torna a suonare.</p>
+    </div><div class="step" data-shot="engine" data-hl="3,92.3,60,6.2">
+      <p class="kicker">Blocco audio</p>
+      <h2>Automatico, o come vuoi tu</h2>
+      <p>Dal menu Motore scegli la dimensione del blocco audio. Su Automatico ci pensa l'app; se ne fissi una, resta quella.</p>
+    </div><div class="step" data-shot="rack">
+      <p class="kicker">Suono</p>
+      <h2>Gli stessi fronti d'onda del desktop</h2>
+      <p>Onde quadre e a dente di sega hanno ora la stessa forma che hanno in VCV Rack sul computer. Sul telefono venivano calcolate in modo leggermente diverso.</p>
+      <p>Una patch fatta al computer si apre sul telefono, e viceversa, e suona allo stesso modo.</p>
+    </div><div class="step" data-shot="cream" data-hl="39,11.2,10.5,4.4">
+      <p class="kicker">Temi</p>
+      <h2>C'è anche la luce</h2>
+      <p>Accanto ai quattro temi scuri arriva Crema: pannelli bianco panna, rack chiaro, manopole scure. Si sceglie dal pulsante tavolozza.</p>
+    </div><div class="step" data-shot="file" data-hl="3,92.3,72,6.2">
+      <p class="kicker">File</p>
+      <h2>Salva dove vuoi</h2>
+      <p>File ▸ Salva sul dispositivo apre il selettore di sistema: la patch finisce nella cartella che scegli tu, pronta da copiare o condividere.</p>
+    </div><div class="step" data-shot="rack">
+      <p class="kicker">Mouse</p>
+      <h2>Con un mouse è un'altra cosa</h2>
+      <p>Tasto destro per il menu contestuale, rotella per scorrere, zoomare e girare le manopole, suggerimenti al passaggio del puntatore. Su tablet e Chromebook si lavora come al computer.</p>
     </div>
     </div>
     <div class="stage">
     <div class="phone">
-      <img data-shot="rack" src="assets/shots/rack.png" alt="">
-      <img data-shot="parked" src="assets/shots/parked.png" alt="">
-      <img data-shot="selection" src="assets/shots/selection.png" alt="">
+      <img data-shot="rack" src="assets/shots/013-rack-it.png" alt="">
+      <img data-shot="heavy" src="assets/shots/013-heavy-it.png" alt="">
+      <img data-shot="engine" src="assets/shots/013-engine-it.png" alt="">
+      <img data-shot="cream" src="assets/shots/013-cream-it.png" alt="">
+      <img data-shot="file" src="assets/shots/013-file-it.png" alt="">
       <div class="hl"></div>
     </div>
   </div>
@@ -537,9 +558,10 @@
 <section class="ann">
   <div class="wrap ann-head">
     <div class="ann-ctas">
-      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid" target="_blank" rel="noopener">↓ Scarica l'APK</a>
+      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/latest" target="_blank" rel="noopener">↓ Scarica la 0.1.3</a>
       <a class="btn btn-ghost" href="index.it.html">Torna al sito</a>
     </div>
+    <p class="ann-lede" style="font-size:14.5px;margin-top:18px"><a href="update-0.1.2.it.html" style="color:var(--amber-soft)">L'aggiornamento precedente: parcheggio cavi e selezione</a></p>
   </div>
 </section>
 <footer>
@@ -551,8 +573,7 @@
       <a href="https://vcvrack.com" target="_blank" rel="noopener">VCV Rack</a>
     </div>
     <p class="foot-fine">
-      RackDroid è un port <strong>non ufficiale</strong> del motore di VCV Rack 2, costruito su
-      sorgenti upstream non modificati (GPLv3). Non affiliato né approvato da VCV.
+      RackDroid è un port <strong>non ufficiale</strong> del motore di VCV Rack 2, compilato dai sorgenti upstream (GPLv3). Non affiliato né approvato da VCV.
     </p>
   </div>
 </footer>
