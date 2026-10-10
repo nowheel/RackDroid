@@ -832,9 +832,30 @@ if(RACKDROID_UI)
 		${P1_DIR}/dep/soundtouch/source/SoundTouch/cpu_detect_x86.cpp
 		${P1_DIR}/dep/soundtouch/source/SoundTouch/mmx_optimized.cpp
 		${P1_DIR}/dep/soundtouch/source/SoundTouch/sse_optimized.cpp)
+	if(NOT ANDROID AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+		# SirenTagClassifier.cpp copies from C99 compound literals
+		# ("memcpy(v, (double[]){1.0, 0.0}, ...)"). clang takes them, and so
+		# does gcc 14; gcc 13 (GitHub's Ubuntu 24.04 runner) calls it taking
+		# the address of a temporary array, an error -fpermissive does not
+		# lift. The host build compiles a copy with a named array in their
+		# place; what ships for Android is the file as it is.
+		set(P1_SIREN ${P1_DIR}/src/modules/siren/SirenTagClassifier.cpp)
+		file(READ ${P1_SIREN} P1_SIREN_CONTENT)
+		string(REGEX REPLACE
+			"memcpy\\((var[0-9]+), \\(double\\[\\]\\){([^}]*)}, [0-9]+ \\* sizeof\\(double\\)\\);"
+			"{ const double literal_[] = {\\2}; memcpy(\\1, literal_, sizeof(literal_)); }"
+			P1_SIREN_CONTENT "${P1_SIREN_CONTENT}")
+		if(P1_SIREN_CONTENT MATCHES "\\(double\\[\\]\\)")
+			message(FATAL_ERROR "SirenTagClassifier.cpp: a compound literal the host patch does not know")
+		endif()
+		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/packone_patched/SirenTagClassifier.cpp "${P1_SIREN_CONTENT}")
+		list(REMOVE_ITEM P1_SOURCES ${P1_SIREN})
+		list(APPEND P1_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/packone_patched/SirenTagClassifier.cpp)
+	endif()
 	add_simple_plugin(plugin_packone ${P1_DIR} ${P1_SOURCES})
 	target_compile_options(plugin_packone PRIVATE
 		-I${P1_DIR}/dep
+		-I${P1_DIR}/src/modules/siren
 		-I${P1_DIR}/dep/soundtouch/include
 		-I${P1_DIR}/dep/soundtouch/source/SoundTouch)
 	if(NOT ANDROID)
@@ -843,13 +864,6 @@ if(RACKDROID_UI)
 		file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/soundtouch_stub/soundtouch_config.h "")
 		target_compile_options(plugin_packone PRIVATE
 			-I${CMAKE_CURRENT_BINARY_DIR}/soundtouch_stub)
-		# SirenTagClassifier.cpp copies from C99 compound literals
-		# ("(double[]){1.0, 0.0}"): clang takes them, gcc 14 takes them, gcc 13
-		# (GitHub's Ubuntu 24.04 runner) calls it taking the address of a
-		# temporary array, an error -fpermissive turns back into a warning.
-		if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-			target_compile_options(plugin_packone PRIVATE -fpermissive)
-		endif()
 	endif()
 
 	# Bidoo (49 modules): GPL code; res/ art CC BY-NC-ND -> ships
