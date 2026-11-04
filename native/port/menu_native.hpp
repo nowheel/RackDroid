@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace rackdroid {
 
 /** Bridges Rack menus to native Android bottom sheets. Call every frame from
@@ -11,8 +13,8 @@ void processNativeMenus();
 /** Tell the menu layer that the context menu about to open belongs to a module,
 so its Copy/Paste rows can be dropped (the toolbar owns those now). Called from
 the touch layer when a long press lands on a ModuleWidget; the flag is consumed
-by the next captured top-level menu. */
-void menuExpectModuleMenu();
+by the next captured top-level menu. The module's id is for the bookmark row. */
+void menuExpectModuleMenu(int64_t moduleId);
 
 /** The menus about to open did NOT come from a module (a toolbar menu, or a
 long press on empty rack), so their Copy/Paste rows are somebody else's. */

@@ -47,6 +47,7 @@
 #include "window_android.hpp"
 #include "touch_input.hpp"
 #include "menu_touch.hpp"
+#include "bookmarks.hpp"
 
 /** Set from the frame loop (main_android.cpp), which is the layer that can see
 both the audio driver and the window: this file lives in the engine library and
@@ -473,6 +474,7 @@ void Window::step() {
 #if defined(__ANDROID__)
 		rackdroid::processNativeMenus();
 		rackdroid::processNativeBrowser();
+		rackdroid::processBookmarks();
 #endif
 		rackdroid::fixupMenus();
 

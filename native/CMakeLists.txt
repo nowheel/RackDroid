@@ -370,11 +370,32 @@ if(RACKDROID_UI)
 	file(WRITE ${RACK_PATCH_DIR}/Knob.cpp "${_knob_cpp}")
 	list(REMOVE_ITEM RACK_APP_SOURCES ${RACK_DIR}/src/app/Knob.cpp)
 	list(APPEND RACK_APP_SOURCES ${RACK_PATCH_DIR}/Knob.cpp)
+	# Module bookmarks (port/bookmarks.cpp) travel in the patch file under a key
+	# of their own: the patched copy hands the JSON to them on save and on load.
+	file(READ ${RACK_DIR}/src/patch.cpp _patch_cpp)
+	foreach(_needle "#include <patch.hpp>\n"
+			"\t\tAPP->scene->rack->mergeJson(rootJ);\n\t}\n\n\treturn rootJ;"
+			"\t// At this point, ModuleWidgets and CableWidgets should own all Modules and Cables.")
+		string(FIND "${_patch_cpp}" "${_needle}" _pos)
+		if(_pos EQUAL -1)
+			message(FATAL_ERROR "patch.cpp no longer contains '${_needle}': update the bookmarks patch")
+		endif()
+	endforeach()
+	string(REPLACE "#include <patch.hpp>\n"
+		"#include <patch.hpp>\nnamespace rackdroid { void bookmarksToJson(json_t*); void bookmarksFromJson(json_t*); }\n"
+		_patch_cpp "${_patch_cpp}")
+	string(REPLACE "\t\tAPP->scene->rack->mergeJson(rootJ);\n\t}\n\n\treturn rootJ;"
+		"\t\tAPP->scene->rack->mergeJson(rootJ);\n\t}\n\n\trackdroid::bookmarksToJson(rootJ);\n\treturn rootJ;"
+		_patch_cpp "${_patch_cpp}")
+	string(REPLACE "\t// At this point, ModuleWidgets and CableWidgets should own all Modules and Cables."
+		"\trackdroid::bookmarksFromJson(rootJ);\n\t// At this point, ModuleWidgets and CableWidgets should own all Modules and Cables."
+		_patch_cpp "${_patch_cpp}")
+	file(WRITE ${RACK_PATCH_DIR}/patch.cpp "${_patch_cpp}")
 	file(GLOB RACK_CORE_SOURCES ${RACK_DIR}/src/core/*.cpp)
 	list(APPEND RACK_SOURCES
 		${RACK_DIR}/src/context.cpp
 		${RACK_DIR}/src/plugin/Model.cpp
-		${RACK_DIR}/src/patch.cpp
+		${RACK_PATCH_DIR}/patch.cpp
 		${RACK_DIR}/src/history.cpp
 		${RACK_DIR}/src/library.cpp
 		${RACK_DIR}/src/keyboard.cpp
@@ -393,6 +414,7 @@ if(RACKDROID_UI)
 		${CMAKE_CURRENT_SOURCE_DIR}/port/selection_glow.cpp
 		${CMAKE_CURRENT_SOURCE_DIR}/port/tour_demo.cpp
 		${CMAKE_CURRENT_SOURCE_DIR}/port/cable_park.cpp
+		${CMAKE_CURRENT_SOURCE_DIR}/port/bookmarks.cpp
 	)
 	if(ANDROID)
 		list(APPEND PORT_SOURCES

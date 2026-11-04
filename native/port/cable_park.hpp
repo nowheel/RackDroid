@@ -54,6 +54,8 @@ bar's top cap -- the collapse handle -- slid underneath it and could not be
 tapped. The bar is pushed down only when it would otherwise start above this;
 where there is room to centre, nothing moves. */
 void cableParkSetTopInsetPx(float px);
+/** That same edge in screen units: where the rack stops being covered. */
+float cableParkTopInset();
 
 /** Adds the bar widget to the scene. Call once, after the Scene exists. */
 void installCableParkBar();

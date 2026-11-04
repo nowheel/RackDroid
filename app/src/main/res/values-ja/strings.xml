@@ -51,6 +51,9 @@
 	<string name="updates_permission_title">許可が必要です</string>
 	<string name="updates_permission_message">RackDroidがアップデートをインストールするには、Androidの許可が必要です。「この提供元のアプリを許可」を有効にしてから、もう一度お試しください。</string>
 	<string name="updates_permission_open">設定を開く</string>
+	<string name="menu_bookmark_add">ブックマークに追加</string>
+	<string name="menu_bookmark_remove">ブックマークを解除</string>
+	<string name="bookmarks_title">ブックマーク</string>
 	<string name="menu_preset_copy">設定をコピー</string>
 	<string name="menu_preset_paste">設定を貼り付け</string>
 	<string name="toolbar_undo">元に戻す</string>

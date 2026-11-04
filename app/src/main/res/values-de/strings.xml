@@ -51,6 +51,9 @@
 	<string name="updates_permission_title">Berechtigung erforderlich</string>
 	<string name="updates_permission_message">Android braucht deine Erlaubnis, damit RackDroid ein Update installieren darf. Aktiviere „Aus dieser Quelle zulassen“ und versuche es erneut.</string>
 	<string name="updates_permission_open">Einstellungen öffnen</string>
+	<string name="menu_bookmark_add">Als Lesezeichen markieren</string>
+	<string name="menu_bookmark_remove">Lesezeichen entfernen</string>
+	<string name="bookmarks_title">Lesezeichen</string>
 	<string name="menu_preset_copy">Einstellungen kopieren</string>
 	<string name="menu_preset_paste">Einstellungen einfügen</string>
 	<string name="toolbar_undo">Rückgängig</string>

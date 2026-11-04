@@ -786,6 +786,9 @@ void cableParkSetTopInsetPx(float px) {
 float cableParkRightEdge() { return barLeft() + barWidth(); }
 
 
+float cableParkTopInset() { return barTop(); }
+
+
 void cableParkPublishBounds() {
 	// Render thread only: holeY() and pixelRatio both read the Rack context,
 	// which is thread-local. Java asks for this from the UI thread, so the

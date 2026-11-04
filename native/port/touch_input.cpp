@@ -522,8 +522,8 @@ int touchHandleEvent(AInputEvent* event) {
 				APP->event->handleHover(pos, rack::math::Vec());
 				if (pressBlockedByLock())
 					return 1;
-				if (hoveredModule())
-					menuExpectModuleMenu();
+				if (rack::app::ModuleWidget* mw = hoveredModule())
+					menuExpectModuleMenu(mw->module ? mw->module->id : -1);
 				else
 					menuClearModuleMenu();
 				APP->event->handleButton(pos, GLFW_MOUSE_BUTTON_RIGHT, GLFW_PRESS, 0);
@@ -968,8 +968,8 @@ void touchStep() {
 			// Tell the menu layer whether this menu belongs to a module, so a
 			// module's preset Copy/Paste can be labelled apart from the rack's
 			// and a text field's identically named rows.
-			if (hoveredModule())
-				menuExpectModuleMenu();
+			if (rack::app::ModuleWidget* mw = hoveredModule())
+				menuExpectModuleMenu(mw->module ? mw->module->id : -1);
 			else
 				menuClearModuleMenu();
 			// Release the left drag, then emit a right click at the position.

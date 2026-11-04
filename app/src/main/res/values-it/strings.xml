@@ -51,6 +51,9 @@
 	<string name="updates_permission_message">Android ha bisogno del tuo permesso perché RackDroid possa installare un aggiornamento. Attiva “Consenti da questa origine”, poi riprova.</string>
 	<string name="updates_permission_open">Apri impostazioni</string>
 	<!-- Modulo ▸ Preset: riguardano le impostazioni del modulo, non il modulo. -->
+	<string name="menu_bookmark_add">Segna come segnaposto</string>
+	<string name="menu_bookmark_remove">Rimuovi segnaposto</string>
+	<string name="bookmarks_title">Segnaposti</string>
 	<string name="menu_preset_copy">Copia impostazioni</string>
 	<string name="menu_preset_paste">Incolla impostazioni</string>
 	<string name="toolbar_undo">Annulla</string>

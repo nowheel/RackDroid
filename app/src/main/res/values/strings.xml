@@ -55,6 +55,9 @@
 	<string name="updates_permission_message">Android needs your permission to let RackDroid install an update. Enable “Allow from this source”, then try again.</string>
 	<string name="updates_permission_open">Open settings</string>
 	<!-- Module ▸ Preset: these carry the module's settings, not the module. -->
+	<string name="menu_bookmark_add">Add bookmark</string>
+	<string name="menu_bookmark_remove">Remove bookmark</string>
+	<string name="bookmarks_title">Bookmarks</string>
 	<string name="menu_preset_copy">Copy settings</string>
 	<string name="menu_preset_paste">Paste settings</string>
 	<string name="toolbar_undo">Undo</string>

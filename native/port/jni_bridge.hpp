@@ -44,6 +44,9 @@ void nativeBrowserShow();
 /** Hand a saved .vcv to Java for the system share sheet. */
 /** toDevice: offer the system "save to" picker instead of the share sheet. */
 void nativeSharePatch(const std::string& path, bool toDevice);
+/** The bookmarked modules changed: one "id\tnumber\tname\tbrand" line each,
+"" when there are none (bookmarks.cpp). */
+void nativeBookmarksChanged(const std::string& list);
 
 /** Open the Java help UI: 0 = guide sheet, 1 = step-by-step wizard. */
 void nativeShowHelp(int which);

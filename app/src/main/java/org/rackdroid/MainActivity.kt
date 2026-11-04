@@ -860,6 +860,7 @@ class MainActivity : NativeActivity() {
 		// rotation -- tell the render thread where its bottom edge ended up.
 		holder.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
 			publishToolbarBottomToNative()
+			placeBookmarkDot()
 		}
 		// The padding lives in applyToolbarDensity, which is also what a
 		// rotation calls; run it once here or the first layout has none.
@@ -1989,6 +1990,8 @@ class MainActivity : NativeActivity() {
 		buttonPopup = null
 		measuringPopup?.dismiss()
 		measuringPopup = null
+		bookmarkDot?.dismiss()
+		bookmarkDot = null
 		audioFocusRequest?.let {
 			(getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.abandonAudioFocusRequest(it)
 		}
@@ -2207,6 +2210,155 @@ class MainActivity : NativeActivity() {
 		popup.showAtLocation(window.decorView, Gravity.CENTER, 0, 0)
 		measuringPopup = popup
 		uiHandler.postDelayed({ if (measuringPopup === popup) runCatching { showMeasuring(false) } }, 15000L)
+	}
+
+	// ---- Module bookmarks (native/port/bookmarks.cpp) ----
+	private class Bookmark(val id: Long, val number: Int, val name: String, val brand: String)
+	private var bookmarks: List<Bookmark> = emptyList()
+	private var bookmarkDot: PopupWindow? = null
+
+	/** The bookmarked modules changed: a module marked or unmarked, deleted,
+	brought back by Undo, a patch loaded. One "id\tnumber\tname\tbrand" line
+	each, in number order; empty when there are none. */
+	fun bookmarksChangedFromNative(list: String) {
+		val parsed = list.lineSequence().mapNotNull { line ->
+			val f = line.split('\t')
+			val id = f.getOrNull(0)?.toLongOrNull() ?: return@mapNotNull null
+			Bookmark(id, f.getOrNull(1)?.toIntOrNull() ?: 0, f.getOrNull(2) ?: "", f.getOrNull(3) ?: "")
+		}.toList()
+		uiHandler.post { runCatching { bookmarks = parsed; showBookmarkDot() } }
+	}
+
+	/** A pin on the right edge while any module is bookmarked; a tap lists
+	them. It is there only while there is something to list. */
+	private fun showBookmarkDot() {
+		if (bookmarks.isEmpty() || isFinishing || isDestroyed) {
+			bookmarkDot?.dismiss()
+			bookmarkDot = null
+			bookmarkList?.dismiss()
+			return
+		}
+		if (bookmarkDot != null)
+			return
+		val decor = window.decorView
+		if (decor.windowToken == null) {
+			decor.post { runCatching { showBookmarkDot() } }
+			return
+		}
+		val dot = ImageView(this).apply {
+			setImageResource(R.drawable.ic_bookmark_pin)
+			setColorFilter(AppTheme.current.accent)
+			setPadding(dp(10), dp(10), dp(10), dp(10))
+			contentDescription = getString(R.string.bookmarks_title)
+			background = GradientDrawable().apply {
+				shape = GradientDrawable.OVAL
+				setColor(AppTheme.withAlpha(AppTheme.current.surface, 85))
+				setStroke(dp(2), AppTheme.current.accent)
+			}
+			setOnClickListener { showBookmarkList() }
+		}
+		val popup = PopupWindow(dot, dp(BOOKMARK_DOT_DP), dp(BOOKMARK_DOT_DP))
+		popup.isFocusable = false // never steal keys from the canvas
+		val (x, y) = bookmarkDotPosition()
+		popup.showAtLocation(decor, Gravity.TOP or Gravity.END, x, y)
+		dot.alpha = 0f
+		dot.scaleX = 0.5f
+		dot.scaleY = 0.5f
+		dot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220L).start()
+		bookmarkDot = popup
+	}
+
+	/** Close to the right edge, clear of a camera cutout there, and in the
+	middle of the screen -- moved down only where the toolbar card would cover
+	it. The back gesture is a swipe from the edge, so a tap this close is
+	still a tap. */
+	private fun bookmarkDotPosition(): Pair<Int, Int> {
+		val decor = window.decorView
+		val cutout = ViewCompat.getRootWindowInsets(decor)
+			?.getInsets(WindowInsetsCompat.Type.displayCutout())?.right ?: 0
+		var top = 0
+		toolbarHolder?.let { h ->
+			if (h.height > 0) {
+				val loc = IntArray(2)
+				h.getLocationOnScreen(loc)
+				top = loc[1] + h.height
+			}
+		}
+		val y = decor.height / 2 - dp(BOOKMARK_DOT_DP) / 2
+		return Pair(maxOf(cutout, dp(2)), maxOf(top + dp(4), y))
+	}
+
+	private fun placeBookmarkDot() {
+		val popup = bookmarkDot ?: return
+		val (x, y) = bookmarkDotPosition()
+		runCatching { popup.update(x, y, -1, -1) }
+	}
+
+	private var bookmarkList: Dialog? = null
+
+	/** The bookmarked modules by number; a tap scrolls the rack to one. */
+	private fun showBookmarkList() {
+		val col = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			setPadding(dp(20), dp(18), dp(20), dp(8))
+		}
+		col.addView(TextView(this).apply {
+			text = getString(R.string.bookmarks_title)
+			setTextColor(AppTheme.current.accent)
+			textSize = 17f
+			setTypeface(AppFont.get(this@MainActivity), Typeface.BOLD)
+			setPadding(0, 0, 0, dp(10))
+		})
+		lateinit var dlg: AlertDialog
+		for (b in bookmarks) {
+			col.addView(LinearLayout(this).apply {
+				orientation = LinearLayout.HORIZONTAL
+				gravity = Gravity.CENTER_VERTICAL
+				minimumHeight = dp(50)
+				setPadding(dp(6), dp(8), dp(6), dp(8))
+				background = amberRippleRounded()
+				addView(TextView(this@MainActivity).apply {
+					text = b.number.toString()
+					setTextColor(AppTheme.current.accent)
+					textSize = 16f
+					setTypeface(AppFont.get(this@MainActivity), Typeface.BOLD)
+					minWidth = dp(32)
+				})
+				addView(TextView(this@MainActivity).apply {
+					text = b.name
+					setTextColor(AppTheme.current.textPrimary)
+					textSize = 16f
+					typeface = AppFont.get(this@MainActivity)
+				})
+				addView(TextView(this@MainActivity).apply {
+					text = b.brand
+					setTextColor(AppTheme.current.textSecondary)
+					textSize = 13f
+					typeface = AppFont.get(this@MainActivity)
+					setPadding(dp(10), 0, 0, 0)
+				})
+				setOnClickListener {
+					nativeBookmarkJump(b.id)
+					dlg.dismiss()
+				}
+			})
+		}
+		// Same glass card as the Engine pickers; it scrolls, or in landscape a
+		// long list runs off the screen.
+		dlg = AlertDialog.Builder(this).create()
+		dlg.setView(ScrollView(this).apply { addView(col) })
+		trackTopWindow(dlg)
+		dlg.window?.apply {
+			setBackgroundDrawable(GradientDrawable().apply {
+				cornerRadius = dp(24).toFloat(); setColor(glassCardColor())
+				setStroke(dp(1), AppTheme.edge(18))
+			})
+			setDimAmount(0.4f)
+		}
+		glassify(dlg.window)
+		dlg.setOnDismissListener { if (bookmarkList === dlg) bookmarkList = null }
+		bookmarkList = dlg
+		dlg.show()
 	}
 
 	/** "Ignore" on the heavy-patch notice: quiet until the next launch. */
@@ -2457,6 +2609,7 @@ class MainActivity : NativeActivity() {
 	private val ROW_LATENCY = 16384
 	private val ROW_EXPORT = 32768
 	private val ROW_BLOCK = 65536
+	private val ROW_BOOKMARK = 131072
 	// Rack's own fixed, non-localized markers (ui/common.hpp) for a
 	// submenu's current-value display and a checkbox's checked state.
 	private val RIGHT_ARROW = "▸"
@@ -2791,6 +2944,9 @@ class MainActivity : NativeActivity() {
 				flags and ROW_EXPORT != 0 -> getString(R.string.menu_save_to_device)
 				flags and ROW_LATENCY != 0 -> getString(R.string.menu_response)
 				flags and ROW_BLOCK != 0 -> getString(R.string.menu_block)
+				// The right text is the module's number when it has one.
+				flags and ROW_BOOKMARK != 0 -> getString(
+					if (right.isEmpty()) R.string.menu_bookmark_add else R.string.menu_bookmark_remove)
 				flags and ROW_GUIDE != 0 -> getString(R.string.menu_guide)
 				flags and ROW_WIZARD != 0 -> getString(R.string.menu_wizard)
 					flags and ROW_TOUR != 0 -> getString(R.string.menu_tour)
@@ -2975,6 +3131,7 @@ class MainActivity : NativeActivity() {
 	private external fun nativeCableParkBounds(): IntArray?
 	private external fun nativeCableParkLeftInset(px: Int)
 	private external fun nativeCableParkTopInset(px: Int)
+	private external fun nativeBookmarkJump(moduleId: Long)
 	private external fun nativeTourDemo(what: Int)
 	private external fun nativeTourStage(x: Int, y: Int, w: Int, h: Int)
 	private external fun nativeRackModuleCount(): Int
@@ -3151,6 +3308,8 @@ class MainActivity : NativeActivity() {
 	companion object {
 		private const val LATENCY_PREFS = "audio"
 		private const val LATENCY_KEY = "latencyMode"
+		/** The bookmark dot: a fingertip, like the toolbar buttons. */
+		private const val BOOKMARK_DOT_DP = 44
 		private const val MAX_PATCH_IMPORT_BYTES = 256L * 1024 * 1024
 		private const val MAX_MODULE_PACK_BYTES = 256L * 1024 * 1024
 		@Volatile private var activeActivity: WeakReference<MainActivity>? = null

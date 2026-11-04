@@ -52,6 +52,7 @@ static jmethodID midMenuShow;
 static jmethodID midMenuDismiss;
 static jmethodID midBrowserShow;
 static jmethodID midSharePatch;
+static jmethodID midBookmarksChanged;
 static jmethodID midShowHelp;
 static jmethodID midShowLatencyPicker;
 static jmethodID midShowBlockPicker;
@@ -164,6 +165,7 @@ void jniInit(ANativeActivity* activity) {
 	midMenuDismiss = env->GetMethodID(activityCls, "dismissNativeMenu", "()V");
 	midBrowserShow = env->GetMethodID(activityCls, "showNativeBrowser", "()V");
 	midSharePatch = env->GetMethodID(activityCls, "sharePatchFromNative", "(Ljava/lang/String;Z)V");
+	midBookmarksChanged = env->GetMethodID(activityCls, "bookmarksChangedFromNative", "(Ljava/lang/String;)V");
 	midShowHelp = env->GetMethodID(activityCls, "showHelpFromNative", "(I)V");
 	midShowLatencyPicker = env->GetMethodID(activityCls, "showLatencyPickerFromNative", "()V");
 	midShowBlockPicker = env->GetMethodID(activityCls, "showBlockPickerFromNative", "()V");
@@ -331,6 +333,19 @@ void nativeSharePatch(const std::string& path, bool toDevice) {
 		return;
 	jstring js = env->NewStringUTF(path.c_str());
 	env->CallVoidMethod(activityObj, midSharePatch, js, (jboolean) toDevice);
+	if (js)
+		env->DeleteLocalRef(js);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
+}
+
+
+void nativeBookmarksChanged(const std::string& list) {
+	JNIEnv* env = getEnv();
+	if (!env || !midBookmarksChanged)
+		return;
+	jstring js = env->NewStringUTF(list.c_str());
+	env->CallVoidMethod(activityObj, midBookmarksChanged, js);
 	if (js)
 		env->DeleteLocalRef(js);
 	if (env->ExceptionCheck())

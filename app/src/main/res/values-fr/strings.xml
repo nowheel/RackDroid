@@ -51,6 +51,9 @@
 	<string name="updates_permission_title">Autorisation nécessaire</string>
 	<string name="updates_permission_message">Android a besoin de ton autorisation pour que RackDroid installe une mise à jour. Active « Autoriser depuis cette source », puis réessaie.</string>
 	<string name="updates_permission_open">Ouvrir les réglages</string>
+	<string name="menu_bookmark_add">Ajouter un signet</string>
+	<string name="menu_bookmark_remove">Retirer le signet</string>
+	<string name="bookmarks_title">Signets</string>
 	<string name="menu_preset_copy">Copier les réglages</string>
 	<string name="menu_preset_paste">Coller les réglages</string>
 	<string name="toolbar_undo">Annuler</string>

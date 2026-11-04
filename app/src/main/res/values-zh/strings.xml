@@ -51,6 +51,9 @@
 	<string name="updates_permission_title">需要授权</string>
 	<string name="updates_permission_message">Android 需要你的授权才能让 RackDroid 安装更新。请开启“允许来自此来源”，然后重试。</string>
 	<string name="updates_permission_open">打开设置</string>
+	<string name="menu_bookmark_add">添加书签</string>
+	<string name="menu_bookmark_remove">移除书签</string>
+	<string name="bookmarks_title">书签</string>
 	<string name="menu_preset_copy">复制设置</string>
 	<string name="menu_preset_paste">粘贴设置</string>
 	<string name="toolbar_undo">撤销</string>

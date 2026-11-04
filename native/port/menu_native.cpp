@@ -43,6 +43,7 @@
 #include <settings.hpp>
 
 #include "menu_native.hpp"
+#include "bookmarks.hpp"
 #include "jni_bridge.hpp"
 #include "touch_input.hpp"
 
@@ -99,6 +100,9 @@ enum RowFlag {
 	ROW_EXPORT = 32768,
 	// Synthetic Engine row: the audio block size, automatic or the user's.
 	ROW_BLOCK = 65536,
+	// Synthetic module row: mark or unmark the module as a bookmark
+	// (bookmarks.cpp). Its number, when it has one, is the right text.
+	ROW_BOOKMARK = 131072,
 };
 
 
@@ -135,6 +139,8 @@ struct NativeMenu {
 	// rows elsewhere. Set by the touch layer, cleared by anything else that
 	// opens a menu.
 	bool moduleMenuActive = false;
+	// The module that long press landed on, for the bookmark row.
+	int64_t moduleMenuId = -1;
 	// The next captured top-level menu is the File menu (toolbar tap 0):
 	// present() appends the synthetic Share row to it.
 	bool fileMenuPending = false;
@@ -311,6 +317,17 @@ static void present(ui::Menu* menu) {
 		// Other widget types (sliders, text fields) are skipped.
 	}
 
+	if (moduleMenu && g.moduleMenuId >= 0 && !menu->parentMenu) {
+		int n = bookmarkNumber(g.moduleMenuId);
+		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
+		labels.push_back("");
+		rights.push_back("");
+		flags.push_back(ROW_SEPARATOR);
+		g.rows.push_back(Row(NULL, ROW_BOOKMARK));
+		labels.push_back(n ? "Remove bookmark" : "Bookmark"); // localized in Java
+		rights.push_back(n ? std::to_string(n) : "");
+		flags.push_back(ROW_BOOKMARK);
+	}
 	if (g.fileMenuPending && !menu->parentMenu) {
 		g.rows.push_back(Row(NULL, ROW_SEPARATOR));
 		labels.push_back("");
@@ -451,6 +468,11 @@ static void handleSelect(int idx) {
 	if (row.flags & (ROW_SHARE | ROW_EXPORT)) {
 		g.sharePending = true;
 		g.exportPending = (row.flags & ROW_EXPORT) != 0;
+		closeAll();
+		return;
+	}
+	if (row.flags & ROW_BOOKMARK) {
+		bookmarkToggle(g.moduleMenuId);
 		closeAll();
 		return;
 	}
@@ -637,8 +659,9 @@ static void processShare() {
 }
 
 
-void menuExpectModuleMenu() {
+void menuExpectModuleMenu(int64_t moduleId) {
 	g.moduleMenuActive = true;
+	g.moduleMenuId = moduleId;
 }
 
 

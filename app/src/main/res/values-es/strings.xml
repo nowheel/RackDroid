@@ -51,6 +51,9 @@
 	<string name="updates_permission_title">Se necesita permiso</string>
 	<string name="updates_permission_message">Android necesita tu permiso para que RackDroid instale una actualización. Activa «Permitir desde esta fuente» y vuelve a intentarlo.</string>
 	<string name="updates_permission_open">Abrir ajustes</string>
+	<string name="menu_bookmark_add">Marcar como marcador</string>
+	<string name="menu_bookmark_remove">Quitar marcador</string>
+	<string name="bookmarks_title">Marcadores</string>
 	<string name="menu_preset_copy">Copiar ajustes</string>
 	<string name="menu_preset_paste">Pegar ajustes</string>
 	<string name="toolbar_undo">Deshacer</string>
