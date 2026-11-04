@@ -1,7 +1,7 @@
 <meta charset="utf-8">
-<title>RackDroid 0.1.3.8: correzioni dalle vostre segnalazioni</title>
+<title>RackDroid 0.1.3.9: i segnaposti</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="RackDroid 0.1.3.8: il microfono solo quando una patch lo usa, selezioni che si ricaricano, pacchetti di moduli che si aggiornano, prese disegnate giuste.">
+<meta name="description" content="RackDroid 0.1.3.9: segna i moduli di una patch grande e raggiungili con un tocco.">
 <style>
   @font-face {
     font-family: "Geomini";
@@ -481,53 +481,42 @@
       <a class="nav-link" href="index.it.html">Home</a>
       <a class="nav-link active" href="update.it.html">News</a>
       <a class="nav-lang" href="update.html">EN</a>
-      <a class="nav-cta" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.8/rackdroid-0.1.3.8-sideload-arm64-v8a.apk" target="_blank" rel="noopener">Scarica l'APK</a>
+      <a class="nav-cta" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.9/rackdroid-0.1.3.9-sideload-arm64-v8a.apk" target="_blank" rel="noopener">Scarica l'APK</a>
     </div>
   </div>
 </nav>
 <section class="ann">
   <div class="wrap">
     <div class="ann-head">
-      <span class="stamp">DISPONIBILE · 18 OTTOBRE 2026</span>
-      <h1>Corretto<br>da voi<span class="rd">.</span></h1>
+      <span class="stamp">DISPONIBILE · 4 NOVEMBRE 2026</span>
+      <h1>Dritto<br>al modulo<span class="rd">.</span></h1>
       <p class="ann-lede">
-        Un aggiornamento di correzioni, nato da quello che avete segnalato su GitHub e Reddit. Grazie: ognuna di queste viene da qualcuno che si è preso il tempo di scrivere.
+        In una patch grande il modulo che ti serve è sempre tre schermate più in là. Lo segni una volta, e da lì in poi è a un tocco dal segnaposto sul bordo destro.
       </p>
       <div class="ann-ctas">
-        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.8/rackdroid-0.1.3.8-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica la 0.1.3</a>
+        <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.9/rackdroid-0.1.3.9-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica la 0.1.3.9</a>
         <a class="btn btn-ghost" href="rackdroid-manuale.html">Leggi il manuale</a>
       </div>
     </div>
-    <p class="ann-lede" style="font-size:14.5px;margin-top:22px">Per avere la grafica corretta di Befaco e Bidoo, reinstalla i pacchetti di moduli dalla release: apri il file .rdmod con RackDroid e riavvia l'app.</p>
+    <p class="ann-lede" style="font-size:14.5px;margin-top:22px">I pacchetti di moduli sono gli stessi della 0.1.3.8: se li hai già installati non serve fare nulla.</p>
   </div>
 </section>
 <section id="changes" style="padding: 30px 0 10px">
   <div class="wrap">
     <div class="section-head">
       <p class="kicker">In breve</p>
-      <h2 class="section-title">Tutto quello che cambia nella 0.1.3.8</h2>
-      <p>Novità e correzioni, in elenco: così decidi tu se e quando aggiornare.</p>
+      <h2 class="section-title">Tutto quello che cambia nella 0.1.3.9</h2>
+      <p>Le novità, in elenco: così decidi tu se e quando aggiornare.</p>
     </div>
-    <div class="changes-grid">
+    <div class="changes-grid" style="grid-template-columns:1fr">
       <div class="why-card">
         <h3>Novità</h3>
         <ul class="changes-list">
-          <li>Il microfono viene usato solo quando una patch prende il suono dal telefono, e il permesso è chiesto in quel momento</li>
-          <li>I pacchetti di moduli si aggiornano: un .rdmod più nuovo sostituisce quello installato al riavvio dell'app</li>
-          <li>Un pacchetto di moduli aperto da un gestore di file viene installato</li>
-          <li>Tieni premuto un file in un elenco per condividerlo o salvarlo in una cartella: le selezioni arrivano al computer</li>
-          <li>Immagini dell'elenco moduli rifatte</li>
-        </ul>
-      </div>
-      <div class="why-card">
-        <h3>Correzioni</h3>
-        <ul class="changes-list">
-          <li>Il microfono restava acceso finché l'app suonava</li>
-          <li>Le selezioni salvate non si potevano ricaricare: la finestra dei file aggiungeva .vcv a ogni nome</li>
-          <li>Prese e pulsanti disegnati come manopole sui moduli Befaco, Bidoo, Core e Fundamental</li>
-          <li>Scritte doppie sui moduli con grafica propria</li>
-          <li>Le ultime voci di un menu lungo non erano raggiungibili</li>
-          <li>Un crash se un pacchetto di moduli arrivava mentre l'app si avviava</li>
+          <li>Segnaposti: tieni premuto un modulo e scegli Segna come segnaposto, riceve un numero (1, 2, 3...)</li>
+          <li>Finché c'è un modulo segnato, al centro del bordo destro compare un segnaposto: toccalo per l'elenco, tocca un modulo e il rack si sposta su di lui allo zoom che stai usando</li>
+          <li>Togliendone uno, gli altri tengono il loro numero: il 3 resta il mixer</li>
+          <li>Insieme al parcheggio cavi: parcheggia un capo del cavo, salta al modulo lontano dal segnaposto, tira fuori il cavo lì</li>
+          <li>I segnaposti si salvano nella patch; VCV Rack la apre come sempre</li>
         </ul>
       </div>
     </div>
@@ -536,10 +525,10 @@
 <section class="ann">
   <div class="wrap ann-head">
     <div class="ann-ctas">
-      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.8/rackdroid-0.1.3.8-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica la 0.1.3</a>
+      <a class="btn btn-primary" href="https://github.com/nowheel/RackDroid/releases/download/v0.1.3.9/rackdroid-0.1.3.9-sideload-arm64-v8a.apk" target="_blank" rel="noopener">↓ Scarica la 0.1.3.9</a>
       <a class="btn btn-ghost" href="index.it.html">Torna al sito</a>
     </div>
-    <p class="ann-lede" style="font-size:14.5px;margin-top:18px"><a href="update-0.1.3.it.html" style="color:var(--amber-soft)">L'aggiornamento precedente: il suono, prima di tutto</a></p>
+    <p class="ann-lede" style="font-size:14.5px;margin-top:18px"><a href="update-0.1.3.8.it.html" style="color:var(--amber-soft)">L'aggiornamento precedente: corretto da voi</a></p>
   </div>
 </section>
 <footer>
