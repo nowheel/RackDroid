@@ -1,15 +1,4 @@
 NOVITÀ DI QUESTA VERSIONE
-• Il microfono viene usato solo quando una patch prende il suono dal telefono
-• I pacchetti di moduli si aggiornano: un .rdmod più nuovo sostituisce quello installato al riavvio
-• Un pacchetto di moduli aperto da un gestore di file viene installato
-• Immagini dell'elenco moduli rifatte
-• Tieni premuto un file in un elenco per condividerlo o salvarlo in una cartella, selezioni comprese
-
-CORREZIONI
-• Il microfono restava acceso finché l'app suonava (Android lo mostrava in uso)
-• Le selezioni salvate non si potevano ricaricare
-• La finestra dei file aggiungeva .vcv a ogni nome (selezioni, preset dei moduli)
-• Prese e pulsanti disegnati come manopole sui moduli Befaco, Bidoo, Core e Fundamental
-• Scritte doppie sui moduli con grafica propria
-• Le ultime voci di un menu lungo non erano raggiungibili
-• Un crash se un pacchetto di moduli arrivava mentre l'app si avviava
+• Segnaposti: segna un modulo dal suo menu ("Segna come segnaposto") e riceve un numero
+• Finché c'è un modulo segnato, sul bordo destro compare un segnaposto: toccalo per l'elenco, tocca un modulo per portare il rack su di lui
+• I segnaposti si salvano nella patch; VCV Rack la apre come prima

@@ -1,15 +1,4 @@
 WHAT IS NEW IN THIS VERSION
-• The microphone is used only when a patch takes sound from the phone
-• Module packs update: a newer .rdmod replaces the installed one at the next start
-• A module pack opened from a file manager is installed
-• Module browser pictures redrawn
-• Hold a file in a file list to share it or save it to a folder, selections included
-
-FIXES
-• The microphone stayed on whenever the app played (Android showed it in use)
-• Saved selections could not be loaded again
-• A file chooser added .vcv to every name (selections, module presets)
-• Jacks and buttons drawn as knobs on Befaco, Bidoo, Core and Fundamental modules
-• Labels drawn twice on modules with their own artwork
-• The last items of a long menu could not be reached
-• A crash when a module pack arrived while the app was starting
+• Bookmarks: mark a module from its menu ("Add bookmark") and it gets a number
+• While any module is marked, a pin sits on the right edge: tap it for the list, tap a module to scroll the rack to it
+• Bookmarks are saved in the patch; VCV Rack opens the patch as before
