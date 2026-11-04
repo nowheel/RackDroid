@@ -259,6 +259,8 @@
 	<string name="guide_t3_s4_b">Visualizza ▸ Cable colors imposta la rotazione dei colori: comodo per distinguere a colpo d\'occhio pitch, gate e audio in una patch fitta.</string>
 	<string name="guide_t3_s5_t">Parcheggio cavi</string>
 	<string name="guide_t3_s5_b">Due moduli non stanno mai insieme sullo schermo? Usa la barra di parcheggio a sinistra (il pulsante parcheggio cavi nella barra dei tool la accende/spegne; è attiva all\'avvio). Lascia un capo del cavo in un buco, scorri fino al modulo lontano, poi tiralo fuori: le porte compatibili si illuminano per aiutarti a mirare. Parte con 3 buchi e cresce fino a 10 man mano che li riempi. Lascia un capo tirato fuori nel vuoto per eliminarlo; la freccetta in cima collassa la barra in una maniglia.</string>
+	<string name="guide_t3_s6_t">Segnaposti</string>
+	<string name="guide_t3_s6_b">In un patch grande, tieni premuto un modulo e scegli Segna come segnaposto: prende un numero. Sul bordo destro compare un pallino con l\'icona di un segnaposto; toccalo per la lista dei moduli segnati, tocca una riga e il rack scorre fino a quel modulo, allo zoom che hai. Se ne togli uno, gli altri tengono il loro numero. Con il parcheggio cavi: parcheggia un capo, salta al modulo lontano dal pallino, tira fuori il cavo lì. I segnaposti si salvano nel patch; VCV Rack lo apre come sempre e li perde solo se lo risalva.</string>
 
 	<string name="guide_t4_title">Oscillatori</string>
 	<string name="guide_t4_sub">VCO vs LFO, forme d\'onda, detune e FM</string>

@@ -237,6 +237,13 @@ Manual checks still required on at least one phone:
 - The plugin sources did not change between 0.1.2 and 0.1.2.1, but the arm64
   packs attached to 0.1.2.1 were rebuilt from this tree anyway rather than
   reused, and each archive's library was checked to be ARM aarch64.
+- 2026-11-04, module bookmarks (branch `segnaposti`, commit d615d94a): tried
+  on a phone by the owner, who reported it working. A patch carrying
+  `rackdroidBookmarks` (legata-x2, 90 modules, 172 cables) was opened by the
+  official VCV Rack Free 2.6.4 for Linux in headless mode: no warning in its
+  log, every module and cable loaded. Not seen: VCV saving that patch again
+  (headless does not save); by Rack's code it rebuilds the file and leaves
+  the bookmarks out.
 
 ## Pre-launch checklist
 

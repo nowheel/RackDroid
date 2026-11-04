@@ -264,6 +264,8 @@
 	<string name="guide_t3_s4_b">View ▸ Cable colors lets you set the rotation of colors — handy to tell pitch, gate and audio runs apart in a dense patch.</string>
 	<string name="guide_t3_s5_t">Cable parking</string>
 	<string name="guide_t3_s5_b">Two modules never fit on screen at once? Use the parking bar on the left (the cable-parking toolbar button toggles it; it is on at start). Drop a cable end into a hole, scroll to the far module, then drag it back out — compatible ports light up so you can aim. It starts with 3 holes and grows up to 10 as you fill them. Drop a pulled-out end in empty space to discard it; the chevron at the top collapses the bar to a handle.</string>
+	<string name="guide_t3_s6_t">Bookmarks</string>
+	<string name="guide_t3_s6_b">In a big patch, long-press a module and choose Add bookmark: it gets a number. A pin appears on the right edge; tap it for the list of marked modules, tap one and the rack scrolls straight to it, at the zoom you are on. Numbers stay put when you remove one. With cable parking: park a cable end, jump to the far module from the pin, pull the cable out there. Bookmarks are saved in the patch; VCV Rack opens it as usual and forgets them only if it saves it again.</string>
 
 	<string name="guide_t4_title">Oscillators</string>
 	<string name="guide_t4_sub">VCO vs LFO, waveforms, detune and FM</string>

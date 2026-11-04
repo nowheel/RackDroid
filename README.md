@@ -49,6 +49,7 @@ audio engine, made native for your phone.
 | ✅ **Select and edit** | turn on multi-select and a tap picks a module out (tap again to drop it); a hold moves the whole selection. Selected modules get a red halo instead of a wash over the panel, so the artwork stays readable. Delete asks first and says how many are going |
 | 🧲 **Module palette** | chips by category (VCO, LFO, VCF, VCA, ENV, SEQ, DRUM, MIX, FX, NOISE, QNT, MIDI, UTIL), draggable previews, ⓘ badge with name/description/tags |
 | 🧵 **Cable parking** | a left-edge bar where a cable end waits while you scroll to its destination: it grows from 3 up to 10 holes as you fill them, lights up compatible ports while you aim, collapses to a handle |
+| 📍 **Bookmarks** | mark a module from its menu and it gets a number; a pin on the right edge lists the marked modules and a tap takes the rack straight to one, at the zoom you are on. Saved in the patch: VCV Rack opens it as usual |
 | 🎹 **MIDI** | on-screen musical keyboard, USB and Bluetooth LE MIDI |
 | ⏺️ **Recording** | output to a WAV file in `Documents/RackDroid/` |
 | 🎓 **Guided learning** | a 20-step interface tour on first run that demonstrates itself: a step per menu that says what is inside and then opens it, plus framing your modules, opening the palette, moving a module, zooming and scrolling the rack, and drawing a cable with the compatible jacks lit, then putting everything back. Also 30 step-by-step tutorials across 5 levels, plus a topic-based guide |

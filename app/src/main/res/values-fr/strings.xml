@@ -254,6 +254,8 @@
 	<string name="guide_t3_s4_b">Affichage ▸ Couleurs des câbles règle la rotation des couleurs — pratique pour distinguer d\'un coup d\'œil hauteur, gate et audio dans un patch dense.</string>
 	<string name="guide_t3_s5_t">Parking à câbles</string>
 	<string name="guide_t3_s5_b">Deux modules ne tiennent jamais ensemble à l\'écran ? Utilise le parking de gauche (le bouton parking à câbles de la barre d\'outils l\'active ou le désactive ; il est actif au démarrage). Laisse un bout de câble dans un trou, va jusqu\'au module éloigné, puis ressors-le — les ports compatibles s\'allument pour t\'aider à viser. Il commence à 3 trous et monte jusqu\'à 10 à mesure que tu les remplis. Lâche un bout ressorti dans le vide pour l\'éliminer ; le chevron du haut replie la barre en une poignée.</string>
+	<string name="guide_t3_s6_t">Signets</string>
+	<string name="guide_t3_s6_b">Dans un grand patch, appuie longuement sur un module et choisis Ajouter un signet : il reçoit un numéro. Une épingle apparaît sur le bord droit ; touche-la pour la liste des modules marqués, touche-en un et le rack défile jusqu\'à lui, au zoom où tu es. Si tu en retires un, les autres gardent leur numéro. Avec le parking à câbles : gare un bout de câble, saute au module éloigné depuis l\'épingle, ressors le câble là-bas. Les signets sont enregistrés dans le patch ; VCV Rack l\'ouvre comme d\'habitude et ne les perd que s\'il le réenregistre.</string>
 	<string name="guide_t4_title">Oscillateurs</string>
 	<string name="guide_t4_sub">VCO et LFO, formes d\'onde, désaccord et FM</string>
 	<string name="guide_t4_s1_t">VCO et LFO</string>

@@ -254,6 +254,8 @@
 	<string name="guide_t3_s4_b">Ver ▸ Colores de los cables ajusta la rotación de colores — útil para distinguir de un vistazo el tono, el gate y el audio en un parche denso.</string>
 	<string name="guide_t3_s5_t">Aparcamiento de cables</string>
 	<string name="guide_t3_s5_b">¿Dos módulos nunca caben a la vez en pantalla? Usa la barra de aparcamiento de la izquierda (el botón de aparcamiento de cables la enciende y apaga; arranca encendida). Deja un extremo del cable en un hueco, desplázate hasta el módulo lejano y vuelve a sacarlo — los puertos compatibles se iluminan para que apuntes. Empieza con 3 huecos y crece hasta 10 según los llenas. Suelta un extremo sacado en el vacío para descartarlo; el galón de arriba repliega la barra hasta un tirador.</string>
+	<string name="guide_t3_s6_t">Marcadores</string>
+	<string name="guide_t3_s6_b">En un parche grande, mantén pulsado un módulo y elige Marcar como marcador: recibe un número. En el borde derecho aparece un alfiler; tócalo para ver la lista de módulos marcados, toca uno y el rack se desplaza directamente hasta él, con el zoom que tengas. Si quitas uno, los demás conservan su número. Con el aparcamiento de cables: aparca un extremo, salta al módulo lejano desde el alfiler y saca el cable allí. Los marcadores se guardan en el parche; VCV Rack lo abre como siempre y solo los pierde si lo vuelve a guardar.</string>
 	<string name="guide_t4_title">Osciladores</string>
 	<string name="guide_t4_sub">VCO y LFO, formas de onda, desafinado y FM</string>
 	<string name="guide_t4_s1_t">VCO y LFO</string>

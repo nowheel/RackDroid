@@ -254,6 +254,8 @@
 	<string name="guide_t3_s4_b">Unter Ansicht ▸ Kabelfarben stellst du die Farbfolge ein — praktisch, um Tonhöhe, Gate und Audio in einem dichten Patch auseinanderzuhalten.</string>
 	<string name="guide_t3_s5_t">Kabelparkplatz</string>
 	<string name="guide_t3_s5_b">Zwei Module passen nie gleichzeitig auf den Bildschirm? Nimm den Parkplatz links (die Werkzeugtaste dafür schaltet ihn um; beim Start ist er an). Leg ein Kabelende in ein Loch, scrolle zum entfernten Modul und zieh es dann wieder heraus — passende Buchsen leuchten auf, damit du zielen kannst. Er beginnt mit 3 Löchern und wächst auf 10, während du sie füllst. Lässt du ein herausgezogenes Ende im Leeren los, wird es verworfen; der Pfeil oben klappt den Parkplatz auf einen Griff zusammen.</string>
+	<string name="guide_t3_s6_t">Lesezeichen</string>
+	<string name="guide_t3_s6_b">In einem großen Patch hältst du ein Modul gedrückt und wählst Als Lesezeichen markieren: Es bekommt eine Nummer. Am rechten Rand erscheint eine Stecknadel; tippe darauf für die Liste der markierten Module, tippe auf eines und das Rack scrollt direkt dorthin, beim aktuellen Zoom. Entfernst du eins, behalten die anderen ihre Nummer. Mit dem Kabelparkplatz: Kabelende parken, über die Stecknadel zum entfernten Modul springen, Kabel dort herausziehen. Lesezeichen werden im Patch gespeichert; VCV Rack öffnet ihn wie immer und vergisst sie nur, wenn es ihn neu speichert.</string>
 	<string name="guide_t4_title">Oszillatoren</string>
 	<string name="guide_t4_sub">VCO und LFO, Wellenformen, Verstimmung und FM</string>
 	<string name="guide_t4_s1_t">VCO und LFO</string>
